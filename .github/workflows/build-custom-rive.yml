@@ -14,20 +14,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Rive Rider
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: '3.1.61'
-          actions-cache-folder: 'emsdk-cache'
-
-      - name: Verify emcc
-        run: emcc --version
 
       - name: Build patched Rive WASM
         run: bash tools/build-custom-rive.sh
@@ -36,7 +28,17 @@ jobs:
         run: |
           test -s vendor/rive-tools/canvas_advanced.mjs
           test -s vendor/rive-tools/rive.wasm
+          grep -q 'debugObjectCount' vendor/rive-tools/canvas_advanced.mjs
+          grep -q 'debugSetPathVertexXY' vendor/rive-tools/canvas_advanced.mjs
           cat vendor/rive-tools/build-info.json
+          ls -lh vendor/rive-tools
+
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rive-rider-custom-runtime
+          path: vendor/rive-tools/
+          if-no-files-found: error
 
       - name: Commit generated runtime
         run: |
@@ -47,6 +49,6 @@ jobs:
             echo 'Generated runtime is unchanged.'
             exit 0
           fi
-          git commit -m 'Build custom Rive geometry runtime'
+          git commit -m 'Build custom Rive geometry runtime [skip ci]'
           git pull --rebase origin main
           git push
