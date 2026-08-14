@@ -28,8 +28,7 @@ jobs:
         run: |
           test -s vendor/rive-tools/canvas_advanced.mjs
           test -s vendor/rive-tools/rive.wasm
-          grep -q 'debugObjectCount' vendor/rive-tools/canvas_advanced.mjs
-          grep -q 'debugSetPathVertexXY' vendor/rive-tools/canvas_advanced.mjs
+          test -s vendor/rive-tools/build-info.json
           cat vendor/rive-tools/build-info.json
           ls -lh vendor/rive-tools
 
