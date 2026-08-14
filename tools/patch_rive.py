@@ -80,7 +80,17 @@ insert = r'''#ifdef ENABLE_QUERY_FLAT_VERTICES
                       {
                           auto* path = object->as<rive::Path>();
                           auto* shape = path->shape();
-                          result.set("shapeName", shape == nullptr ? "" : shape->name());
+                          const std::string shapeName =
+                              shape == nullptr ? "" : shape->name();
+                          result.set("shapeName", shapeName);
+                          // Most authored Path objects themselves are unnamed.
+                          // Use the owning Shape's editor name as the practical
+                          // display name so the inspector says R_Eye/Face/etc.
+                          if (object->as<rive::Component>()->name().empty() &&
+                              !shapeName.empty())
+                          {
+                              result.set("name", shapeName);
+                          }
                           result.set("hidden", path->isHidden());
                           result.set("collapsed", path->isCollapsed());
                       }
