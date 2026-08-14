@@ -1,9 +1,9 @@
-name: Build custom Rive tools runtime
+name: Build custom Rive WASM for stock JS
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [stock-js-custom-wasm]
     paths:
       - 'tools/**'
       - '.github/workflows/build-custom-rive.yml'
@@ -24,30 +24,32 @@ jobs:
       - name: Build patched Rive WASM
         run: bash tools/build-custom-rive.sh
 
-      - name: Smoke-check generated runtime
+      - name: Smoke-check generated WASM
         run: |
-          test -s vendor/rive-tools/canvas_advanced.mjs
           test -s vendor/rive-tools/rive.wasm
           test -s vendor/rive-tools/build-info.json
+          test ! -e vendor/rive-tools/canvas_advanced.mjs
           cat vendor/rive-tools/build-info.json
           ls -lh vendor/rive-tools
 
-      - name: Upload runtime artifact
+      - name: Upload custom WASM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rive-rider-custom-runtime
-          path: vendor/rive-tools/
+          name: rive-rider-stock-js-custom-wasm
+          path: |
+            vendor/rive-tools/rive.wasm
+            vendor/rive-tools/build-info.json
           if-no-files-found: error
 
-      - name: Commit generated runtime
+      - name: Commit generated WASM
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add vendor/rive-tools/canvas_advanced.mjs vendor/rive-tools/rive.wasm vendor/rive-tools/build-info.json
+          git add -A vendor/rive-tools
           if git diff --cached --quiet; then
-            echo 'Generated runtime is unchanged.'
+            echo 'Generated WASM is unchanged.'
             exit 0
           fi
-          git commit -m 'Build custom Rive geometry runtime [skip ci]'
-          git pull --rebase origin main
-          git push
+          git commit -m 'Build custom Rive WASM for stock JS [skip ci]'
+          git pull --rebase origin stock-js-custom-wasm
+          git push origin HEAD:stock-js-custom-wasm
