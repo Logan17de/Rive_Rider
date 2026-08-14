@@ -26,20 +26,21 @@ const del = (o) => { try { o?.delete?.(); } catch {} };
 const fmt = (n) => typeof n === 'number' ? Number(n).toFixed(2) : '—';
 
 async function loadRuntime() {
-  let factory;
+  const STOCK_VERSION = '2.39.2';
+  const STOCK_MODULE = `https://unpkg.com/@rive-app/canvas-advanced@${STOCK_VERSION}`;
+  const STOCK_WASM = `https://unpkg.com/@rive-app/canvas-advanced@${STOCK_VERSION}/rive.wasm`;
+  const CUSTOM_WASM = './vendor/rive-tools/rive.wasm';
+
+  const mod = await import(STOCK_MODULE);
+  const factory = mod.default || mod.Rive || mod;
+
   try {
-    const mod = await import('./vendor/rive-tools/canvas_advanced.mjs');
-    factory = mod.default || mod.Rive || mod;
-    runtimeKind = 'CUSTOM geometry tools';
-    R = await factory({ locateFile: () => './vendor/rive-tools/rive.wasm' });
+    runtimeKind = `STOCK JS ${STOCK_VERSION} + CUSTOM WASM`;
+    R = await factory({ locateFile: () => CUSTOM_WASM });
   } catch (customError) {
-    console.warn('Custom runtime unavailable, falling back to public runtime:', customError);
-    const mod = await import('https://unpkg.com/@rive-app/canvas-advanced@2.39.1');
-    factory = mod.default || mod.Rive || mod;
-    runtimeKind = 'PUBLIC fallback (read-only/high-level)';
-    R = await factory({
-      locateFile: () => 'https://unpkg.com/@rive-app/canvas-advanced@2.39.1/rive.wasm',
-    });
+    console.warn('Custom WASM could not initialize with the stock JS wrapper:', customError);
+    runtimeKind = `STOCK JS ${STOCK_VERSION} + STOCK WASM fallback`;
+    R = await factory({ locateFile: () => STOCK_WASM });
   }
 
   renderer = R.makeRenderer(canvas);
@@ -154,8 +155,10 @@ function renderCapabilities() {
     ...Object.entries(caps).map(([name, ok]) => `${ok ? '✓' : '✗'} ${name}`),
     '',
     caps.debugObjectCount && caps.debugSetPathVertexXY
-      ? 'READY: this build can enumerate internal objects and mutate original path vertices.'
-      : 'NOT READY: custom geometry WASM has not been built/loaded yet.',
+      ? 'READY: stock JS successfully sees the custom WASM geometry bindings.'
+      : runtimeKind.includes('STOCK WASM fallback')
+        ? 'FALLBACK: custom WASM did not initialize; this is the normal stock runtime.'
+        : 'NOT READY: custom WASM loaded, but the expected geometry bindings are not visible.',
   ].join('\n');
   return caps;
 }
@@ -195,7 +198,9 @@ function renderPathList() {
   jsonEl.textContent = '—';
 
   if (!caps.debugObjectCount || !caps.debugObjectInfo) {
-    pathsEl.textContent = 'The custom geometry bridge is not loaded. Wait for the GitHub Actions build, pull again, then refresh.';
+    pathsEl.textContent = runtimeKind.includes('STOCK WASM fallback')
+      ? 'Custom WASM is unavailable or incompatible. Pull the generated vendor/rive-tools/rive.wasm and refresh.'
+      : 'The custom WASM loaded, but the geometry bridge methods are not exposed through the stock wrapper.';
     return;
   }
 
