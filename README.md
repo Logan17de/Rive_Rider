@@ -18,7 +18,13 @@ http://localhost:8000
 
 You can also use any static HTTP server, for example `npx serve .`.
 
-> Do not open `index.html` directly with `file://`; browsers may block loading the `.riv` file or WASM module.
+> Do not open `index.html` directly with `file://`; browsers may block the Rive WASM module.
+
+## Use your `.riv` file
+
+Click **Open .riv** and choose your local Rive file. The inspector reads it in the browser; you do not need to copy the file into the repository.
+
+The current UI still contains a **Load bundled test.riv** convenience button, but `test.riv` is intentionally not committed yet. For this first experiment, use **Open .riv**.
 
 ## What the inspector tests
 
@@ -30,14 +36,9 @@ You can also use any static HTTP server, for example `npx serve .`.
 - Highlights method/property names related to paths, shapes, vertices, fills, strokes, paint, meshes, bones, transforms, etc.
 - Lets you try `artboard.nodeByName(...)` when the runtime provides it.
 - Shows primitive writable properties on a found node and lets you change them live.
-- Accepts any local `.riv` file using the file picker.
 
 The goal is not to assume that Rive exposes raw vector geometry. The app tells us empirically what the current low-level runtime actually makes accessible.
 
-## Bundled sample
-
-`test.riv` is the sample file used during this experiment.
-
 ## Rive runtime
 
-The page currently pins `@rive-app/canvas-advanced` to `2.39.1` so the JavaScript module and `rive.wasm` always match.
+The page pins `@rive-app/canvas-advanced` to `2.39.1` so the JavaScript module and `rive.wasm` always match.
