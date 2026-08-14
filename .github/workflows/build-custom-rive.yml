@@ -1,0 +1,52 @@
+name: Build custom Rive tools runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/**'
+      - '.github/workflows/build-custom-rive.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Rive Rider
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.61'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Verify emcc
+        run: emcc --version
+
+      - name: Build patched Rive WASM
+        run: bash tools/build-custom-rive.sh
+
+      - name: Smoke-check generated runtime
+        run: |
+          test -s vendor/rive-tools/canvas_advanced.mjs
+          test -s vendor/rive-tools/rive.wasm
+          grep -q 'debugObjectCount' vendor/rive-tools/canvas_advanced.mjs || true
+          cat vendor/rive-tools/build-info.json
+
+      - name: Commit generated runtime
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add vendor/rive-tools/canvas_advanced.mjs vendor/rive-tools/rive.wasm vendor/rive-tools/build-info.json
+          if git diff --cached --quiet; then
+            echo 'Generated runtime is unchanged.'
+            exit 0
+          fi
+          git commit -m 'Build custom Rive geometry runtime'
+          git push
