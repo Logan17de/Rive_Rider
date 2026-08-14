@@ -19,15 +19,16 @@ python3 "$ROOT/tools/patch_rive.py"
 
 cd "$CHECKOUT/wasm"
 rm -rf build/rive-rider
-# The upstream `tools` target enables ENABLE_QUERY_FLAT_VERTICES. It emits a
-# ready-to-import ESM module (`canvas_advanced.mjs`) plus its WASM sidecar.
-# Do NOT run finalize_glue.py here: that helper is for the release packaging
-# path and rejects the tools/debug module because it intentionally contains
-# import.meta.
+# The upstream `tools` target enables ENABLE_QUERY_FLAT_VERTICES. It emits an
+# Emscripten ES-module-shaped wrapper plus its WASM sidecar. The tools output
+# defines `Rive`, but unlike Rive's release finalization path it does not add
+# an actual ES module export. We intentionally skip finalize_glue.py because
+# it rejects the tools/debug output; append the one export we need instead.
 OUT_DIR=build/rive-rider/bin/debug ./build_wasm.sh tools
 
 mkdir -p "$OUT"
 cp build/rive-rider/bin/debug/canvas_advanced.mjs "$OUT/canvas_advanced.mjs"
+printf '\nexport default Rive;\n' >> "$OUT/canvas_advanced.mjs"
 cp build/rive-rider/bin/debug/canvas_advanced.wasm "$OUT/rive.wasm"
 
 cat > "$OUT/build-info.json" <<EOF
