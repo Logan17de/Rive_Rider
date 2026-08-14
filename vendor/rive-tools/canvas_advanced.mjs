@@ -8731,3 +8731,5 @@ if (typeof exports === 'object' && typeof module === 'object') {
 } else if (typeof define === 'function' && define['amd'])
   define([], () => Rive);
 
+
+export default Rive;
