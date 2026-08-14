@@ -36,7 +36,6 @@ jobs:
         run: |
           test -s vendor/rive-tools/canvas_advanced.mjs
           test -s vendor/rive-tools/rive.wasm
-          grep -q 'debugObjectCount' vendor/rive-tools/canvas_advanced.mjs || true
           cat vendor/rive-tools/build-info.json
 
       - name: Commit generated runtime
@@ -49,4 +48,5 @@ jobs:
             exit 0
           fi
           git commit -m 'Build custom Rive geometry runtime'
+          git pull --rebase origin main
           git push
