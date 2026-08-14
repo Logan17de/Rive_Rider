@@ -259,29 +259,64 @@ function selectPath(objectIndex, button) {
     y.value = String(vertex.y);
 
     const apply = document.createElement('button');
-    apply.textContent = 'Apply';
+    apply.textContent = 'Apply & verify';
     apply.className = 'primary';
+
+    const result = document.createElement('div');
+    result.style.margin = '-2px 0 10px 65px';
+    result.style.font = '12px ui-monospace, monospace';
+    result.style.color = '#b9c5d3';
+    result.textContent = 'Not tested yet';
+
     apply.onclick = () => {
       try {
+        const before = artboard.debugPathVertexInfo(objectIndex, vertex.index);
+        const requestedX = Number(x.value);
+        const requestedY = Number(y.value);
+
+        if (!Number.isFinite(requestedX) || !Number.isFinite(requestedY)) {
+          result.textContent = '✗ Invalid X/Y';
+          status('Invalid vertex coordinates');
+          return;
+        }
+
         const ok = artboard.debugSetPathVertexXY(
           objectIndex,
           vertex.index,
-          Number(x.value),
-          Number(y.value),
+          requestedX,
+          requestedY,
         );
+
         artboard.advance(0);
-        status(ok
-          ? `Changed path #${objectIndex}, vertex #${vertex.index} → (${x.value}, ${y.value})`
-          : 'Rive rejected the vertex edit');
+        const after = artboard.debugPathVertexInfo(objectIndex, vertex.index);
+        const stored = Boolean(after)
+          && Math.abs(Number(after.x) - requestedX) < 0.001
+          && Math.abs(Number(after.y) - requestedY) < 0.001;
+
+        if (!ok) {
+          result.textContent = '✗ Rive rejected edit';
+          status(`Rive rejected path #${objectIndex}, vertex #${vertex.index}`);
+        } else if (!stored) {
+          result.textContent = `✗ setter returned true; read-back (${fmt(after?.x)}, ${fmt(after?.y)})`;
+          status(`Setter did not stick for path #${objectIndex}, vertex #${vertex.index}`);
+        } else {
+          result.textContent = `✓ stored ${fmt(before?.x)},${fmt(before?.y)} → ${fmt(after.x)},${fmt(after.y)}`;
+          status(`Verified path #${objectIndex}, vertex #${vertex.index}: (${fmt(before?.x)}, ${fmt(before?.y)}) → (${fmt(after.x)}, ${fmt(after.y)})`);
+          x.value = String(after.x);
+          y.value = String(after.y);
+        }
+
         jsonEl.textContent = JSON.stringify(readPath(objectIndex), null, 2);
       } catch (error) {
         console.error(error);
+        result.textContent = `✗ ${error?.message || error}`;
         status(`Edit failed: ${error?.message || error}`);
       }
     };
 
     row.append(label, x, y, apply);
     verticesEl.appendChild(row);
+    verticesEl.appendChild(result);
 
     if (vertex.isCubic) {
       const meta = document.createElement('div');
