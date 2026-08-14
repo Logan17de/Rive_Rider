@@ -4,12 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECKOUT="$ROOT/.rive-wasm"
 OUT="$ROOT/vendor/rive-tools"
-# Pin the exact upstream source we inspected when writing the patch.
+# Pin the exact upstream source used by the stock JS wrapper version tested in deep.js.
 RIVE_WASM_COMMIT="79c696a6cae99e936fc31b0e9778a01850ca8245"
 
 rm -rf "$CHECKOUT"
-# Rive's submodule URL is SSH. Rewrite GitHub SSH URLs to HTTPS so hosted CI
-# and ordinary users without GitHub SSH keys can clone it.
 git config --global url."https://github.com/".insteadOf git@github.com:
 git clone https://github.com/rive-app/rive-wasm.git "$CHECKOUT"
 git -C "$CHECKOUT" checkout "$RIVE_WASM_COMMIT"
@@ -19,20 +17,19 @@ python3 "$ROOT/tools/patch_rive.py"
 
 cd "$CHECKOUT/wasm"
 rm -rf build/rive-rider
-# The upstream `tools` target enables ENABLE_QUERY_FLAT_VERTICES. It emits a
-# ready-to-import ESM module (`canvas_advanced.mjs`) plus its WASM sidecar.
-# Do NOT run finalize_glue.py here: that helper is for the release packaging
-# path and rejects the tools/debug module because it intentionally contains
-# import.meta.
+# Build Rive's tools target so ENABLE_QUERY_FLAT_VERTICES is enabled. This
+# branch intentionally keeps only the WASM sidecar; deep.js uses the official
+# stock @rive-app/canvas-advanced JavaScript wrapper and locateFile().
 OUT_DIR=build/rive-rider/bin/debug ./build_wasm.sh tools
 
 mkdir -p "$OUT"
-cp build/rive-rider/bin/debug/canvas_advanced.mjs "$OUT/canvas_advanced.mjs"
+rm -f "$OUT/canvas_advanced.mjs"
 cp build/rive-rider/bin/debug/canvas_advanced.wasm "$OUT/rive.wasm"
 
 cat > "$OUT/build-info.json" <<EOF
 {
-  "kind": "rive-rider-custom-tools",
+  "kind": "stock-js-custom-wasm",
+  "stockJsVersion": "2.39.2",
   "riveWasmCommit": "$RIVE_WASM_COMMIT",
   "features": [
     "debugObjectCount",
@@ -45,5 +42,5 @@ cat > "$OUT/build-info.json" <<EOF
 }
 EOF
 
-echo "Custom Rive tools runtime written to $OUT"
+echo "Custom WASM written to $OUT (stock JS wrapper is not rebuilt)."
 ls -lh "$OUT"
