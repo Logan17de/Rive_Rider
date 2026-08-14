@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Rive Rider Deep Geometry</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color-scheme:dark;background:#0b0d10;color:#edf2f7}*{box-sizing:border-box}body{margin:0}header{padding:14px 18px;border-bottom:1px solid #252b34;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}h1{font-size:18px;margin:0}.muted{color:#9aa5b4;font-size:12px}.file{background:#eef2f7;color:#111820;padding:9px 12px;border-radius:9px;font-weight:700;cursor:pointer}.file input{display:none}main{display:grid;grid-template-columns:minmax(380px,1fr) minmax(480px,1fr);min-height:calc(100vh - 65px)}.left{border-right:1px solid #252b34;display:grid;grid-template-rows:minmax(420px,1fr) auto}.canvasWrap{position:relative;background:#11161d;min-height:420px}canvas{display:block;width:100%;height:100%}.status{position:absolute;left:12px;bottom:12px;background:#000c;padding:7px 9px;border-radius:7px;font:12px ui-monospace,monospace}.controls,.right{padding:14px}.right{overflow:auto}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}select,input,button{font:inherit;background:#151b23;color:#edf2f7;border:1px solid #35404d;border-radius:8px;padding:8px 9px}button{cursor:pointer}button.primary{background:#eef2f7;color:#111820;font-weight:700}.grow{flex:1;min-width:160px}.card{border:1px solid #28313b;border-radius:11px;padding:12px;margin-bottom:12px;background:#10151c}.card h2{font-size:14px;margin:0 0 10px}pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,monospace;margin:0}.paths{display:grid;gap:6px;max-height:260px;overflow:auto}.pathBtn{text-align:left}.pathBtn.active{background:#eef2f7;color:#111820}.vertex{display:grid;grid-template-columns:58px 1fr 1fr auto;gap:7px;align-items:center;margin:7px 0}.vertex span{font:12px ui-monospace,monospace}.vertex input{width:100%}@media(max-width:900px){main{grid-template-columns:1fr}.left{border-right:0;border-bottom:1px solid #252b34}.canvasWrap{height:50vh}}
+</style>
+</head>
+<body>
+<header><div><h1>Rive Rider — Deep Geometry</h1><div class="muted">Custom Rive WASM: enumerate actual Paths, read vertices/Bezier handles, mutate X/Y, redraw.</div></div><label class="file">Open .riv<input id="fileInput" type="file" accept=".riv,application/octet-stream"></label></header>
+<main>
+<section class="left"><div class="canvasWrap" id="canvasWrap"><canvas id="canvas"></canvas><div class="status" id="status">Loading custom runtime…</div></div><div class="controls"><div class="row"><label>Artboard</label><select id="artboard" class="grow" disabled></select><button id="pause" disabled>Pause</button></div><div class="muted">After loading a file, choose an artboard, then select a path on the right. Editing a vertex redraws the Rive immediately.</div></div></section>
+<section class="right">
+<div class="card"><h2>Runtime capability</h2><pre id="capability">Waiting…</pre></div>
+<div class="card"><h2>Paths in selected artboard</h2><div id="paths" class="paths muted">Load a .riv file.</div></div>
+<div class="card"><h2 id="vertexTitle">Vertices</h2><div id="vertices" class="muted">Select a path.</div></div>
+<div class="card"><h2>Selected path JSON</h2><pre id="json">—</pre></div>
+</section>
+</main>
+<script type="module" src="./deep.js"></script>
+</body>
+</html>
