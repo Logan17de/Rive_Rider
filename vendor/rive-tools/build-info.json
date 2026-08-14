@@ -1,0 +1,13 @@
+{
+  "kind": "stock-js-custom-wasm",
+  "stockJsVersion": "2.39.2",
+  "riveWasmCommit": "79c696a6cae99e936fc31b0e9778a01850ca8245",
+  "features": [
+    "debugObjectCount",
+    "debugObjectInfo",
+    "debugPathVertexCount",
+    "debugPathVertexInfo",
+    "debugSetPathVertexXY",
+    "flattenPath"
+  ]
+}
