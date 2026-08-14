@@ -11,34 +11,49 @@ const verticesEl = $('vertices');
 const vertexTitle = $('vertexTitle');
 const jsonEl = $('json');
 
-let R = null, renderer = null, file = null, artboard = null, raf = null;
-let paused = false, last = 0, selectedPath = null;
+let R = null;
+let renderer = null;
+let file = null;
+let artboard = null;
+let raf = null;
+let paused = false;
+let last = 0;
+let selectedPath = null;
+let runtimeKind = 'unknown';
 
-const status = (s) => statusEl.textContent = s;
+const status = (s) => { statusEl.textContent = s; };
 const del = (o) => { try { o?.delete?.(); } catch {} };
+const fmt = (n) => typeof n === 'number' ? Number(n).toFixed(2) : '—';
 
 async function loadRuntime() {
+  let factory;
   try {
-    const mod = await import('./runtime/canvas_advanced.mjs');
-    const factory = mod.default || mod.Rive || mod;
-    R = await factory({ locateFile: (name) => `./runtime/${name}` });
-    renderer = R.makeRenderer(canvas);
-    capability.textContent = [
-      'Custom runtime loaded.',
-      `queryPathIndices: ${typeof R.Artboard?.prototype?.queryPathIndices === 'function' ? 'prototype-visible' : 'checked after artboard load'}`,
-      'Expected custom methods: queryPathIndices, queryPathVertexCount, queryPathVertex, setPathVertexXY.'
-    ].join('\n');
-    status('Custom Rive runtime ready · open a .riv file');
-  } catch (e) {
-    console.error(e);
-    capability.textContent = `Custom runtime not found or failed to load.\n\n${e?.stack || e}\n\nBuild it first with:\n  bash scripts/build-custom-rive.sh`;
-    status('Custom runtime missing — build runtime/ first');
+    const mod = await import('./vendor/rive-tools/canvas_advanced.mjs');
+    factory = mod.default || mod.Rive || mod;
+    runtimeKind = 'CUSTOM geometry tools';
+    R = await factory({ locateFile: () => './vendor/rive-tools/rive.wasm' });
+  } catch (customError) {
+    console.warn('Custom runtime unavailable, falling back to public runtime:', customError);
+    const mod = await import('https://unpkg.com/@rive-app/canvas-advanced@2.39.1');
+    factory = mod.default || mod.Rive || mod;
+    runtimeKind = 'PUBLIC fallback (read-only/high-level)';
+    R = await factory({
+      locateFile: () => 'https://unpkg.com/@rive-app/canvas-advanced@2.39.1/rive.wasm',
+    });
   }
+
+  renderer = R.makeRenderer(canvas);
+  capability.textContent = `${runtimeKind}\nOpen a .riv file to test geometry access.`;
+  status(`${runtimeKind} ready · open a .riv file`);
 }
 
 function cleanupArtboard() {
-  if (raf != null && R) { try { R.cancelAnimationFrame(raf); } catch {} raf = null; }
-  del(artboard); artboard = null;
+  if (raf != null && R) {
+    try { R.cancelAnimationFrame(raf); } catch {}
+    raf = null;
+  }
+  del(artboard);
+  artboard = null;
   selectedPath = null;
   last = 0;
 }
@@ -46,148 +61,286 @@ function cleanupArtboard() {
 function cleanupFile() {
   cleanupArtboard();
   try { file?.unref?.(); } catch {}
-  del(file); file = null;
+  del(file);
+  file = null;
 }
 
 function resize() {
-  const r = canvasWrap.getBoundingClientRect();
+  const rect = canvasWrap.getBoundingClientRect();
   const dpr = Math.min(devicePixelRatio || 1, 2);
-  const w = Math.max(1, Math.round(r.width * dpr));
-  const h = Math.max(1, Math.round(r.height * dpr));
-  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const width = Math.max(1, Math.round(rect.width * dpr));
+  const height = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
 }
 
-function frame(t) {
+function frame(time) {
   raf = null;
   if (!R || !renderer || !artboard) return;
-  if (!last) last = t;
-  const dt = Math.min((t - last) / 1000, 0.1); last = t;
+  if (!last) last = time;
+  const dt = Math.min((time - last) / 1000, 0.1);
+  last = time;
   resize();
+
   try {
     renderer.clear();
     artboard.advance(paused ? 0 : dt);
     renderer.save();
-    renderer.align(R.Fit.contain, R.Alignment.center, { minX:0, minY:0, maxX:canvas.width, maxY:canvas.height }, artboard.bounds);
+    renderer.align(
+      R.Fit.contain,
+      R.Alignment.center,
+      { minX: 0, minY: 0, maxX: canvas.width, maxY: canvas.height },
+      artboard.bounds,
+    );
     artboard.draw(renderer);
     renderer.restore();
-  } catch (e) { console.error(e); status(`Render error: ${e?.message || e}`); }
+  } catch (error) {
+    console.error(error);
+    status(`Render error: ${error?.message || error}`);
+  }
+
   raf = R.requestAnimationFrame(frame);
 }
 
-function startLoop() { if (raf == null && artboard) raf = R.requestAnimationFrame(frame); }
+function startLoop() {
+  if (raf == null && artboard) raf = R.requestAnimationFrame(frame);
+}
 
-function artboardName(i) {
-  let a = null;
-  try { a = file.artboardByIndex(i); return a?.name || `Artboard ${i}`; }
-  catch { return `Artboard ${i}`; }
-  finally { del(a); }
+function artboardName(index) {
+  let candidate = null;
+  try {
+    candidate = file.artboardByIndex(index);
+    return candidate?.name || `Artboard ${index}`;
+  } catch {
+    return `Artboard ${index}`;
+  } finally {
+    del(candidate);
+  }
 }
 
 function populateArtboards() {
   artboardSelect.innerHTML = '';
-  const n = file.artboardCount();
-  for (let i=0;i<n;i++) {
-    const o = document.createElement('option');
-    o.value = String(i); o.textContent = `${i}: ${artboardName(i)}`; artboardSelect.appendChild(o);
+  const count = file.artboardCount();
+  for (let i = 0; i < count; i += 1) {
+    const option = document.createElement('option');
+    option.value = String(i);
+    option.textContent = `${i}: ${artboardName(i)}`;
+    artboardSelect.appendChild(option);
   }
-  artboardSelect.disabled = n === 0; pauseBtn.disabled = n === 0;
+  artboardSelect.disabled = count === 0;
+  pauseBtn.disabled = count === 0;
 }
 
-function getPathIndices() {
-  if (!artboard || typeof artboard.queryPathIndices !== 'function') return [];
-  try { return Array.from(artboard.queryPathIndices()); } catch (e) { console.error(e); return []; }
+function capabilities() {
+  const names = [
+    'debugObjectCount',
+    'debugObjectInfo',
+    'debugPathVertexCount',
+    'debugPathVertexInfo',
+    'debugSetPathVertexXY',
+    'flattenPath',
+  ];
+  return Object.fromEntries(names.map((name) => [name, typeof artboard?.[name] === 'function']));
 }
 
-function readPath(index) {
-  const count = artboard.queryPathVertexCount(index);
+function renderCapabilities() {
+  const caps = capabilities();
+  capability.textContent = [
+    `Runtime: ${runtimeKind}`,
+    `Artboard: ${artboard?.name ?? '—'}`,
+    '',
+    ...Object.entries(caps).map(([name, ok]) => `${ok ? '✓' : '✗'} ${name}`),
+    '',
+    caps.debugObjectCount && caps.debugSetPathVertexXY
+      ? 'READY: this build can enumerate internal objects and mutate original path vertices.'
+      : 'NOT READY: custom geometry WASM has not been built/loaded yet.',
+  ].join('\n');
+  return caps;
+}
+
+function listPathObjects() {
+  if (!artboard || typeof artboard.debugObjectCount !== 'function' || typeof artboard.debugObjectInfo !== 'function') return [];
+  const result = [];
+  const count = artboard.debugObjectCount();
+  for (let index = 0; index < count; index += 1) {
+    const info = artboard.debugObjectInfo(index);
+    if (info?.isPath) result.push(info);
+  }
+  return result;
+}
+
+function readPath(objectIndex) {
+  const count = artboard.debugPathVertexCount(objectIndex);
   const vertices = [];
-  for (let i=0;i<count;i++) {
-    const v = artboard.queryPathVertex(index, i);
-    vertices.push({ index:i, ...v });
+  for (let i = 0; i < count; i += 1) {
+    const vertex = artboard.debugPathVertexInfo(objectIndex, i);
+    if (vertex) vertices.push(vertex);
   }
-  return { objectIndex:index, vertexCount:count, vertices };
+  const info = artboard.debugObjectInfo(objectIndex);
+  return {
+    objectIndex,
+    name: info?.name || '',
+    typeKey: info?.typeKey,
+    vertexCount: count,
+    vertices,
+  };
 }
 
 function renderPathList() {
-  const methods = ['queryPathIndices','queryPathVertexCount','queryPathVertex','setPathVertexXY'];
-  const availability = Object.fromEntries(methods.map(m => [m, typeof artboard?.[m] === 'function']));
-  capability.textContent = `Artboard: ${artboard?.name}\n` + methods.map(m => `${m}: ${availability[m] ? 'YES' : 'NO'}`).join('\n');
-  if (!availability.queryPathIndices) {
-    pathsEl.textContent = 'This runtime is the stock/public build. The deep geometry bridge is not present.';
+  const caps = renderCapabilities();
+  pathsEl.innerHTML = '';
+  verticesEl.textContent = 'Select a path.';
+  jsonEl.textContent = '—';
+
+  if (!caps.debugObjectCount || !caps.debugObjectInfo) {
+    pathsEl.textContent = 'The custom geometry bridge is not loaded. Wait for the GitHub Actions build, pull again, then refresh.';
     return;
   }
-  const indices = getPathIndices();
-  pathsEl.innerHTML = '';
-  if (!indices.length) { pathsEl.textContent = 'No Path objects returned for this artboard.'; return; }
-  indices.forEach((idx) => {
-    const b = document.createElement('button'); b.className = 'pathBtn';
-    let count = '?'; try { count = artboard.queryPathVertexCount(idx); } catch {}
-    b.textContent = `Object #${idx} · Path · ${count} vertices`;
-    b.onclick = () => selectPath(idx, b);
-    pathsEl.appendChild(b);
-  });
+
+  let paths;
+  try {
+    paths = listPathObjects();
+  } catch (error) {
+    console.error(error);
+    pathsEl.textContent = `Object enumeration failed: ${error?.message || error}`;
+    return;
+  }
+
+  if (!paths.length) {
+    pathsEl.textContent = 'No Path objects were found in this artboard.';
+    return;
+  }
+
+  for (const info of paths) {
+    const button = document.createElement('button');
+    button.className = 'pathBtn';
+    let vertexCount = '?';
+    try { vertexCount = artboard.debugPathVertexCount(info.index); } catch {}
+    const displayName = info.name ? ` · ${info.name}` : '';
+    button.textContent = `#${info.index}${displayName} · ${vertexCount} vertices`;
+    button.onclick = () => selectPath(info.index, button);
+    pathsEl.appendChild(button);
+  }
 }
 
-function selectPath(index, button) {
-  selectedPath = index;
-  document.querySelectorAll('.pathBtn').forEach(b => b.classList.toggle('active', b === button));
-  const data = readPath(index);
+function selectPath(objectIndex, button) {
+  selectedPath = objectIndex;
+  document.querySelectorAll('.pathBtn').forEach((item) => item.classList.toggle('active', item === button));
+
+  let data;
+  try {
+    data = readPath(objectIndex);
+  } catch (error) {
+    status(`Could not read path: ${error?.message || error}`);
+    return;
+  }
+
   jsonEl.textContent = JSON.stringify(data, null, 2);
-  vertexTitle.textContent = `Vertices · Path object #${index}`;
+  vertexTitle.textContent = `Vertices · #${objectIndex}${data.name ? ` · ${data.name}` : ''}`;
   verticesEl.innerHTML = '';
-  data.vertices.forEach(v => {
-    const row = document.createElement('div'); row.className = 'vertex';
-    const label = document.createElement('span'); label.textContent = `#${v.index}`;
-    const x = document.createElement('input'); x.type='number'; x.step='any'; x.value=String(v.x);
-    const y = document.createElement('input'); y.type='number'; y.step='any'; y.value=String(v.y);
-    const apply = document.createElement('button'); apply.textContent='Apply';
-    const commit = () => {
+
+  for (const vertex of data.vertices) {
+    const row = document.createElement('div');
+    row.className = 'vertex';
+
+    const label = document.createElement('span');
+    label.textContent = `#${vertex.index}`;
+
+    const x = document.createElement('input');
+    x.type = 'number';
+    x.step = 'any';
+    x.value = String(vertex.x);
+
+    const y = document.createElement('input');
+    y.type = 'number';
+    y.step = 'any';
+    y.value = String(vertex.y);
+
+    const apply = document.createElement('button');
+    apply.textContent = 'Apply';
+    apply.className = 'primary';
+    apply.onclick = () => {
       try {
-        const ok = artboard.setPathVertexXY(index, v.index, Number(x.value), Number(y.value));
+        const ok = artboard.debugSetPathVertexXY(
+          objectIndex,
+          vertex.index,
+          Number(x.value),
+          Number(y.value),
+        );
         artboard.advance(0);
-        status(ok ? `Changed path #${index} vertex #${v.index}` : 'Vertex change rejected');
-        const fresh = readPath(index); jsonEl.textContent = JSON.stringify(fresh, null, 2);
-      } catch (e) { status(`Edit failed: ${e?.message || e}`); console.error(e); }
+        status(ok
+          ? `Changed path #${objectIndex}, vertex #${vertex.index} → (${x.value}, ${y.value})`
+          : 'Rive rejected the vertex edit');
+        jsonEl.textContent = JSON.stringify(readPath(objectIndex), null, 2);
+      } catch (error) {
+        console.error(error);
+        status(`Edit failed: ${error?.message || error}`);
+      }
     };
-    apply.onclick = commit;
-    row.append(label,x,y,apply);
+
+    row.append(label, x, y, apply);
     verticesEl.appendChild(row);
-    if (v.isCubic) {
-      const meta = document.createElement('div'); meta.className='muted'; meta.style.margin='-4px 0 8px 65px';
-      meta.textContent = `Bezier in(${fmt(v.inX)}, ${fmt(v.inY)}) out(${fmt(v.outX)}, ${fmt(v.outY)})`;
+
+    if (vertex.isCubic) {
+      const meta = document.createElement('div');
+      meta.className = 'muted';
+      meta.style.margin = '-4px 0 8px 65px';
+      meta.textContent = `Bezier handles: in(${fmt(vertex.inX)}, ${fmt(vertex.inY)}) · out(${fmt(vertex.outX)}, ${fmt(vertex.outY)})`;
       verticesEl.appendChild(meta);
     }
-  });
+  }
 }
 
-const fmt = (n) => typeof n === 'number' ? n.toFixed(2) : '—';
-
-function selectArtboard(i) {
+function selectArtboard(index) {
   cleanupArtboard();
-  artboard = file.artboardByIndex(i);
-  selectedPath = null;
-  verticesEl.textContent='Select a path.'; jsonEl.textContent='—';
-  renderPathList();
-  status(`Loaded ${artboard.name}`);
-  startLoop();
+  try {
+    artboard = file.artboardByIndex(index);
+    selectedPath = null;
+    renderPathList();
+    status(`Loaded ${artboard.name} · ${runtimeKind}`);
+    startLoop();
+  } catch (error) {
+    console.error(error);
+    status(`Could not load artboard ${index}: ${error?.message || error}`);
+  }
 }
 
 async function loadFile(bytes, name) {
-  if (!R) { status('Build/load the custom runtime first'); return; }
+  if (!R) {
+    status('Runtime is not ready yet');
+    return;
+  }
   cleanupFile();
   status(`Parsing ${name}…`);
+
   try {
     file = await R.load(new Uint8Array(bytes));
     populateArtboards();
-    if (!file.artboardCount()) throw new Error('No artboards');
-    artboardSelect.value='0'; selectArtboard(0);
-  } catch (e) { console.error(e); status(`Load failed: ${e?.message || e}`); }
+    if (!file.artboardCount()) throw new Error('No artboards found');
+    artboardSelect.value = '0';
+    selectArtboard(0);
+  } catch (error) {
+    console.error(error);
+    status(`Load failed: ${error?.message || error}`);
+  }
 }
 
-fileInput.onchange = async () => { const f=fileInput.files?.[0]; if (f) await loadFile(await f.arrayBuffer(), f.name); };
+fileInput.onchange = async () => {
+  const picked = fileInput.files?.[0];
+  if (picked) await loadFile(await picked.arrayBuffer(), picked.name);
+};
 artboardSelect.onchange = () => selectArtboard(Number(artboardSelect.value));
-pauseBtn.onclick = () => { paused=!paused; pauseBtn.textContent=paused?'Resume':'Pause'; };
+pauseBtn.onclick = () => {
+  paused = !paused;
+  pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+};
 new ResizeObserver(resize).observe(canvasWrap);
-window.addEventListener('beforeunload', () => { cleanupFile(); del(renderer); try { R?.cleanup?.(); } catch {} });
+window.addEventListener('beforeunload', () => {
+  cleanupFile();
+  del(renderer);
+  try { R?.cleanup?.(); } catch {}
+});
 
 await loadRuntime();
