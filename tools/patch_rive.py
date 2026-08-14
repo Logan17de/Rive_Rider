@@ -34,6 +34,14 @@ replace_once(
     """#if defined(TESTING) || defined(ENABLE_QUERY_FLAT_VERTICES)\n    // Rive Rider tools build only: expose original mutable vertices.\n    std::vector<PathVertex*>& vertices() { return m_Vertices; }\n    const std::vector<PathVertex*>& vertices() const { return m_Vertices; }\n#endif""",
 )
 
+# We want to report the owning Shape's editor name for otherwise-anonymous
+# Path objects (e.g. R_Eye, Face, Mouth).
+replace_once(
+    BINDINGS,
+    '#include "rive/shapes/path.hpp"\n',
+    '#include "rive/shapes/path.hpp"\n#include "rive/shapes/shape.hpp"\n',
+)
+
 # Extend the existing tools-only Artboard section. We deliberately operate by
 # object index because the public runtime does not expose full hierarchy
 # traversal. The object index is stable for the loaded Artboard instance.
@@ -68,6 +76,14 @@ insert = r'''#ifdef ENABLE_QUERY_FLAT_VERTICES
                       {
                           result.set("name", "");
                       }
+                      if (object->is<rive::Path>())
+                      {
+                          auto* path = object->as<rive::Path>();
+                          auto* shape = path->shape();
+                          result.set("shapeName", shape == nullptr ? "" : shape->name());
+                          result.set("hidden", path->isHidden());
+                          result.set("collapsed", path->isCollapsed());
+                      }
                       return result;
                   }))
         .function("debugPathVertexCount",
@@ -98,10 +114,14 @@ insert = r'''#ifdef ENABLE_QUERY_FLAT_VERTICES
                           return emscripten::val::null();
                       }
                       auto* vertex = vertices[vertexIndex];
+                      auto renderPoint = vertex->renderTranslation();
                       emscripten::val result = emscripten::val::object();
                       result.set("index", vertexIndex);
                       result.set("x", vertex->x());
                       result.set("y", vertex->y());
+                      result.set("renderX", renderPoint[0]);
+                      result.set("renderY", renderPoint[1]);
+                      result.set("hasWeight", vertex->hasWeight());
                       const bool cubic = vertex->is<rive::CubicVertex>();
                       result.set("isCubic", cubic);
                       if (cubic)
@@ -137,7 +157,14 @@ insert = r'''#ifdef ENABLE_QUERY_FLAT_VERTICES
                       auto* vertex = vertices[vertexIndex];
                       vertex->x(x);
                       vertex->y(y);
+
+                      // x()/y() already dirties the owning path through
+                      // Vertex::markGeometryDirty(). Explicitly mark once more
+                      // and immediately run Rive's dependency DAG so skinned
+                      // vertices, path composers, and render paths are rebuilt
+                      // before JavaScript reads/draws the result.
                       path->markPathDirty();
+                      self.updateComponents();
                       self.changed();
                       return true;
                   }))
