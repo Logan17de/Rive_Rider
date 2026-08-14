@@ -5,227 +5,111 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rive Rider — Low-level .riv Inspector</title>
   <style>
-    :root {
-      color-scheme: dark;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0b0d10;
-      color: #edf2f7;
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: #0b0d10; }
-    button, input, select { font: inherit; }
-    button, select, input[type="text"], input[type="number"] {
-      border: 1px solid #303640;
-      background: #151920;
-      color: #edf2f7;
-      border-radius: 9px;
-      padding: 8px 10px;
-    }
-    button { cursor: pointer; }
-    button:hover { border-color: #596273; }
-    button.primary { background: #edf2f7; color: #0b0d10; border-color: #edf2f7; font-weight: 700; }
-    .app { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
-    header {
-      padding: 14px 18px;
-      border-bottom: 1px solid #222731;
-      display: flex;
-      gap: 14px;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
-    header h1 { margin: 0; font-size: 18px; }
-    .sub { color: #9da7b5; font-size: 12px; }
-    .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .toolbar label.file {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border: 1px solid #303640;
-      background: #151920;
-      border-radius: 9px;
-      padding: 8px 10px;
-      cursor: pointer;
-    }
-    .toolbar input[type="file"] { display: none; }
-    main {
-      min-height: 0;
-      display: grid;
-      grid-template-columns: minmax(360px, 0.9fr) minmax(440px, 1.1fr);
-    }
-    .preview {
-      min-width: 0;
-      min-height: 0;
-      border-right: 1px solid #222731;
-      display: grid;
-      grid-template-rows: minmax(320px, 1fr) auto;
-    }
-    .canvas-wrap {
-      position: relative;
-      min-height: 320px;
-      background-image:
-        linear-gradient(45deg, #11151a 25%, transparent 25%),
-        linear-gradient(-45deg, #11151a 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #11151a 75%),
-        linear-gradient(-45deg, transparent 75%, #11151a 75%);
-      background-size: 24px 24px;
-      background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
-      overflow: hidden;
-    }
-    canvas { width: 100%; height: 100%; display: block; }
-    .status {
-      position: absolute;
-      left: 12px;
-      bottom: 12px;
-      padding: 6px 9px;
-      border-radius: 7px;
-      background: rgba(0,0,0,.72);
-      color: #c8d0db;
-      font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      pointer-events: none;
-    }
-    .controls {
-      padding: 14px;
-      border-top: 1px solid #222731;
-      background: #0f1217;
-      display: grid;
-      gap: 12px;
-    }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .row > label { color: #9da7b5; font-size: 12px; }
-    .grow { flex: 1; min-width: 180px; }
-    .inspector {
-      min-width: 0;
-      min-height: 0;
-      overflow: auto;
-      padding: 16px;
-    }
-    .tabs { display: flex; gap: 6px; position: sticky; top: 0; background: #0b0d10; padding-bottom: 10px; z-index: 2; }
-    .tabs button.active { background: #edf2f7; color: #0b0d10; border-color: #edf2f7; }
-    section.panel { display: none; }
-    section.panel.active { display: block; }
-    .card {
-      border: 1px solid #252b34;
-      background: #10141a;
-      border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 12px;
-    }
-    .card h2, .card h3 { margin: 0 0 8px; font-size: 14px; }
-    .muted { color: #909baa; }
-    pre {
-      margin: 0;
-      overflow: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #cbd5e1;
-    }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .tag {
-      display: inline-block;
-      padding: 2px 6px;
-      margin: 2px 3px 2px 0;
-      border-radius: 999px;
-      background: #202630;
-      color: #d6dde8;
-      font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
-    .interesting { background: #313727; color: #e7edcb; }
-    .warning { border-color: #5b4630; background: #17130f; }
-    .editable-grid { display: grid; grid-template-columns: minmax(130px, .65fr) minmax(120px, 1fr); gap: 8px; align-items: center; }
-    .editable-grid label { color: #aab3c0; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    @media (max-width: 900px) {
-      main { grid-template-columns: 1fr; }
-      .preview { border-right: 0; border-bottom: 1px solid #222731; }
-      .canvas-wrap { height: 52vh; }
-    }
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#0b0d10; color:#edf2f7; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:#0b0d10; }
+    button,input,select { font:inherit; }
+    button,select,input[type="text"],input[type="number"] { border:1px solid #303640; background:#151920; color:#edf2f7; border-radius:9px; padding:9px 11px; }
+    button { cursor:pointer; }
+    button:hover { border-color:#687386; }
+    button.primary { background:#edf2f7; color:#0b0d10; border-color:#edf2f7; font-weight:700; }
+    button:disabled { cursor:not-allowed; opacity:.45; }
+    .app { min-height:100vh; display:grid; grid-template-rows:auto 1fr; }
+    header { padding:14px 18px; border-bottom:1px solid #222731; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+    h1 { margin:0; font-size:18px; }
+    .sub,.muted { color:#98a3b2; }
+    .sub { font-size:12px; margin-top:3px; }
+    .file-button { display:inline-flex; align-items:center; gap:8px; border:1px solid #edf2f7; background:#edf2f7; color:#0b0d10; border-radius:9px; padding:9px 12px; cursor:pointer; font-weight:700; }
+    .file-button input { display:none; }
+    main { min-height:0; display:grid; grid-template-columns:minmax(360px,.9fr) minmax(460px,1.1fr); }
+    .preview { min-width:0; min-height:0; border-right:1px solid #222731; display:grid; grid-template-rows:minmax(360px,1fr) auto; }
+    .canvas-wrap { position:relative; min-height:360px; overflow:hidden; background-color:#0f1318; background-image:linear-gradient(45deg,#151a20 25%,transparent 25%),linear-gradient(-45deg,#151a20 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#151a20 75%),linear-gradient(-45deg,transparent 75%,#151a20 75%); background-size:24px 24px; background-position:0 0,0 12px,12px -12px,-12px 0; }
+    canvas { width:100%; height:100%; display:block; }
+    .status { position:absolute; left:12px; bottom:12px; max-width:calc(100% - 24px); padding:7px 9px; border-radius:7px; background:rgba(0,0,0,.76); color:#c8d0db; font:12px/1.35 ui-monospace,Consolas,monospace; pointer-events:none; }
+    .controls { padding:14px; border-top:1px solid #222731; background:#0f1217; display:grid; gap:9px; }
+    .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .row label { color:#a7b0bd; font-size:12px; }
+    .grow { flex:1; min-width:190px; }
+    .inspector { min-width:0; min-height:0; overflow:auto; padding:16px; }
+    .tabs { display:flex; gap:6px; position:sticky; top:0; z-index:2; padding-bottom:10px; background:#0b0d10; flex-wrap:wrap; }
+    .tabs button.active { background:#edf2f7; color:#0b0d10; border-color:#edf2f7; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    .card { border:1px solid #252b34; background:#10141a; border-radius:12px; padding:13px; margin-bottom:12px; }
+    .card h2,.card h3 { margin:0 0 9px; font-size:14px; }
+    .probe-box { display:grid; gap:9px; }
+    .probe-box .row input { min-width:220px; }
+    .hint { font-size:12px; line-height:1.45; color:#9aa5b4; }
+    pre { margin:0; overflow:auto; white-space:pre-wrap; word-break:break-word; font:12px/1.55 ui-monospace,Consolas,monospace; color:#cbd5e1; }
+    .tag { display:inline-block; padding:2px 6px; margin:2px 3px 2px 0; border-radius:999px; background:#29301f; color:#e5edc8; font:11px/1.4 ui-monospace,Consolas,monospace; }
+    .editable-grid { display:grid; grid-template-columns:minmax(140px,.65fr) minmax(130px,1fr); gap:8px; align-items:center; }
+    .editable-grid label { color:#aab3c0; font:12px ui-monospace,Consolas,monospace; }
+    @media (max-width:900px) { main { grid-template-columns:1fr; } .preview { border-right:0; border-bottom:1px solid #222731; } .canvas-wrap { height:50vh; } }
   </style>
 </head>
 <body>
-  <div class="app">
-    <header>
-      <div>
-        <h1>Rive Rider</h1>
-        <div class="sub">Low-level Rive WASM object inspector — no assumptions, just what the runtime actually exposes.</div>
-      </div>
-      <div class="toolbar">
-        <button id="loadBundled" class="primary">Load bundled test.riv</button>
-        <label class="file">Open .riv <input id="fileInput" type="file" accept=".riv,application/octet-stream" /></label>
-      </div>
-    </header>
+<div class="app">
+  <header>
+    <div>
+      <h1>Rive Rider</h1>
+      <div class="sub">Probe what Rive's low-level WASM runtime actually exposes and lets us modify.</div>
+    </div>
+    <label class="file-button">Open .riv <input id="fileInput" type="file" accept=".riv,application/octet-stream" /></label>
+  </header>
 
-    <main>
-      <div class="preview">
-        <div class="canvas-wrap" id="canvasWrap">
-          <canvas id="riveCanvas"></canvas>
-          <div class="status" id="status">Loading Rive WASM…</div>
+  <main>
+    <div class="preview">
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="riveCanvas"></canvas>
+        <div class="status" id="status">Loading Rive WASM…</div>
+      </div>
+      <div class="controls">
+        <div class="row">
+          <label for="artboardSelect">Artboard</label>
+          <select id="artboardSelect" class="grow" disabled></select>
+          <button id="pauseButton" disabled>Pause</button>
         </div>
-        <div class="controls">
+        <div class="muted" style="font-size:12px">Open <b>Node probe</b> on the right, type a hierarchy name such as <code>R_Eye</code>, then inspect/change the exposed properties.</div>
+      </div>
+    </div>
+
+    <div class="inspector">
+      <div class="tabs">
+        <button class="active" data-tab="summary">Summary</button>
+        <button data-tab="collections">Collections</button>
+        <button data-tab="api">API surface</button>
+        <button data-tab="node">Node probe</button>
+      </div>
+
+      <section id="summary" class="panel active">
+        <div class="card"><h2>File summary</h2><pre id="summaryOut">Open a .riv file to begin.</pre></div>
+        <div class="card"><h3>Goal</h3><div class="hint">We are testing whether external code can reach and mutate actual hierarchy objects — transforms first, then shapes/paths/fills/strokes/vertices if Rive exposes them.</div></div>
+      </section>
+
+      <section id="collections" class="panel">
+        <div class="card"><h2>Discovered collections</h2><pre id="collectionsOut">Nothing loaded.</pre></div>
+      </section>
+
+      <section id="api" class="panel">
+        <div class="card"><h2>Interesting API names</h2><div id="interestingOut" class="muted">Nothing loaded.</div></div>
+        <div class="card"><h2>Full reflected API surface</h2><pre id="apiOut">Nothing loaded.</pre></div>
+      </section>
+
+      <section id="node" class="panel">
+        <div class="card probe-box">
+          <h2>Find hierarchy object</h2>
           <div class="row">
-            <label for="artboardSelect">Artboard</label>
-            <select id="artboardSelect" class="grow" disabled></select>
-            <button id="pauseButton" disabled>Pause</button>
+            <input id="nodeName" class="grow" type="text" autocomplete="off" spellcheck="false" placeholder="R_Eye, L_Eye, Mouth, Head…" />
+            <button id="probeNode" class="primary" disabled>Find node</button>
           </div>
-          <div class="row">
-            <label for="nodeName">Probe node by name</label>
-            <input id="nodeName" class="grow" type="text" placeholder="e.g. Circle, Jaw, Head" />
-            <button id="probeNode" disabled>Find node</button>
-          </div>
+          <div class="hint">The probe tries the low-level methods actually exposed by this runtime: <code>artboard.node(name)</code>, <code>transformComponent(name)</code>, and <code>bone(name)</code>.</div>
         </div>
-      </div>
-
-      <div class="inspector">
-        <div class="tabs">
-          <button class="active" data-tab="summary">Summary</button>
-          <button data-tab="collections">Collections</button>
-          <button data-tab="api">API surface</button>
-          <button data-tab="node">Node probe</button>
-        </div>
-
-        <section id="summary" class="panel active">
-          <div class="card">
-            <h2>File summary</h2>
-            <pre id="summaryOut">Load a .riv file to begin.</pre>
-          </div>
-          <div class="card warning">
-            <h3>What we are testing</h3>
-            <pre>Can external code reach real Rive objects such as shapes, paths, fills, strokes, meshes, vertices and their writable properties — not merely state-machine inputs?</pre>
-          </div>
-        </section>
-
-        <section id="collections" class="panel">
-          <div class="card">
-            <h2>Discovered *Count() / *ByIndex() collections</h2>
-            <pre id="collectionsOut">Nothing loaded.</pre>
-          </div>
-        </section>
-
-        <section id="api" class="panel">
-          <div class="card">
-            <h2>Interesting low-level API names</h2>
-            <div id="interestingOut" class="muted">Nothing loaded.</div>
-          </div>
-          <div class="card">
-            <h2>Full reflected API surface</h2>
-            <pre id="apiOut">Nothing loaded.</pre>
-          </div>
-        </section>
-
-        <section id="node" class="panel">
-          <div class="card">
-            <h2>Named-node result</h2>
-            <pre id="nodeOut">Enter a node name and click “Find node”.</pre>
-          </div>
-          <div class="card">
-            <h2>Writable primitive properties</h2>
-            <div id="nodeEditors" class="muted">No node selected.</div>
-          </div>
-        </section>
-      </div>
-    </main>
-  </div>
-
-  <script type="module" src="./app.js"></script>
+        <div class="card"><h2>Probe result</h2><pre id="nodeOut">Type a name above and click “Find node”.</pre></div>
+        <div class="card"><h2>Writable primitive properties</h2><div id="nodeEditors" class="muted">No object selected.</div></div>
+      </section>
+    </div>
+  </main>
+</div>
+<script type="module" src="./app.js"></script>
 </body>
 </html>
