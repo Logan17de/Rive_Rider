@@ -1,41 +1,65 @@
 # Rive Rider
 
-Experimental Rive geometry inspector for answering one concrete question:
+Experimental Rive geometry inspector for one concrete question:
 
-> Can external code read the real vector geometry inside a `.riv` file, change it, and have Rive redraw the result?
+> Can external code read real vector geometry inside a `.riv` file, change it, and have Rive redraw the result?
 
-## Deep geometry test
+## Two implementations to compare
 
-The main experiment is `deep.html`.
+### `main`
 
-Run a local static server:
+Uses a **custom-built Rive JavaScript wrapper + custom `rive.wasm`**.
+
+### `stock-js-custom-wasm`
+
+Uses the official stock `@rive-app/canvas-advanced@2.39.2` JavaScript wrapper and overrides only the WASM path with:
+
+```js
+R = await factory({
+  locateFile: () => './vendor/rive-tools/rive.wasm',
+});
+```
+
+This branch intentionally builds and stores only:
+
+```text
+vendor/rive-tools/rive.wasm
+vendor/rive-tools/build-info.json
+```
+
+It does **not** rebuild or ship `canvas_advanced.mjs`.
+
+## Run the stock-JS/custom-WASM branch
 
 ```bash
+git switch stock-js-custom-wasm
+git pull
 python -m http.server 8000
 ```
 
-Then open:
+Open:
 
 ```text
-http://localhost:8000/deep.html
+http://localhost:8000
 ```
 
-Click **Open .riv** and choose any local `.riv` file.
+Then load a `.riv` file. In **Runtime capability**, the successful result should say:
 
-When the custom runtime is present, the page can:
+```text
+Runtime: STOCK JS 2.39.2 + CUSTOM WASM
+✓ debugObjectCount
+✓ debugObjectInfo
+✓ debugPathVertexCount
+✓ debugPathVertexInfo
+✓ debugSetPathVertexXY
+✓ flattenPath
+```
 
-- enumerate every internal object in the selected Artboard;
-- identify `Path` objects;
-- read the original path vertices (`x`, `y`);
-- read rendered cubic Bezier in/out handle positions;
-- change an original path vertex's `x/y` values;
-- mark the path dirty and let Rive redraw it immediately.
+If the custom WASM cannot initialize with the stock wrapper, the app deliberately falls back to the normal stock WASM and labels that clearly.
 
-The page shows **CUSTOM geometry tools** when the patched runtime loaded successfully. If it shows **PUBLIC fallback**, the generated WASM has not been built/pulled yet.
+## Geometry bridge
 
-## Custom Rive WASM
-
-Rive Rider pins the inspected upstream `rive-app/rive-wasm` revision and builds Rive's own `tools` target (`ENABLE_QUERY_FLAT_VERTICES`). A small patch adds these Artboard methods:
+The patched tools build exposes these Artboard methods:
 
 ```text
 debugObjectCount()
@@ -46,36 +70,24 @@ debugSetPathVertexXY(objectIndex, vertexIndex, x, y)
 flattenPath(index, transformToParent)
 ```
 
-The underlying Rive runtime already owns the actual vector data. The patch only exposes a narrow diagnostic bridge to JavaScript.
+The underlying Rive runtime already owns the vector data. The patch only exposes a narrow diagnostic bridge to JavaScript.
 
-### Automatic build
+## Test
 
-`.github/workflows/build-custom-rive.yml` builds the patched WASM on GitHub Actions and commits the generated runtime to:
+1. Load the same `.riv` file on `main`.
+2. Select an artboard and a path.
+3. Change one vertex X/Y and confirm the render changes.
+4. Switch to `stock-js-custom-wasm`.
+5. Repeat with the same file/path.
 
-```text
-vendor/rive-tools/canvas_advanced.mjs
-vendor/rive-tools/rive.wasm
-vendor/rive-tools/build-info.json
-```
+If both work, the stock-JS/custom-WASM branch is the cleaner architecture and we can drop the custom JS wrapper.
 
-The workflow runs when the tools/build files change and can also be started manually with **Run workflow**.
+## Build
 
-### Local build
-
-You need Emscripten available in your shell, then run:
+GitHub Actions builds the patched WASM automatically for this branch. Local build:
 
 ```bash
 bash tools/build-custom-rive.sh
 ```
 
-## Files
-
-- `deep.html` / `deep.js` — deep geometry viewer/editor.
-- `index.html` / `app.js` — original public-runtime API inspector.
-- `tools/patch_rive.py` — narrow patch applied to the pinned Rive source.
-- `tools/build-custom-rive.sh` — reproducible custom WASM build.
-- `.github/workflows/build-custom-rive.yml` — CI builder.
-
-## Current scope
-
-V1 intentionally edits only vertex position. Bezier handles are already readable. Once vertex mutation is proven on a real character, the next bridge can expose cubic handle setters, fill/stroke properties, meshes, and other geometry objects.
+The source is pinned to the exact Rive WASM revision used for this experiment to reduce JS/WASM compatibility ambiguity.
