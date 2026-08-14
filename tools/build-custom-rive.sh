@@ -19,8 +19,12 @@ python3 "$ROOT/tools/patch_rive.py"
 
 cd "$CHECKOUT/wasm"
 rm -rf build/rive-rider
+# The upstream `tools` target enables ENABLE_QUERY_FLAT_VERTICES. It emits a
+# ready-to-import ESM module (`canvas_advanced.mjs`) plus its WASM sidecar.
+# Do NOT run finalize_glue.py here: that helper is for the release packaging
+# path and rejects the tools/debug module because it intentionally contains
+# import.meta.
 OUT_DIR=build/rive-rider/bin/debug ./build_wasm.sh tools
-python3 ./finalize_glue.py build/rive-rider/bin/debug/canvas_advanced.mjs
 
 mkdir -p "$OUT"
 cp build/rive-rider/bin/debug/canvas_advanced.mjs "$OUT/canvas_advanced.mjs"
