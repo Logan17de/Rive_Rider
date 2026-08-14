@@ -1,10 +1,14 @@
 # Rive Rider
 
-Tiny low-level Rive `.riv` inspector for testing exactly what the Rive WebAssembly runtime exposes to external code.
+Experimental Rive geometry inspector for answering one concrete question:
 
-## Run
+> Can external code read the real vector geometry inside a `.riv` file, change it, and have Rive redraw the result?
 
-This is intentionally a zero-build app.
+## Deep geometry test
+
+The main experiment is `deep.html`.
+
+Run a local static server:
 
 ```bash
 python -m http.server 8000
@@ -13,32 +17,65 @@ python -m http.server 8000
 Then open:
 
 ```text
-http://localhost:8000
+http://localhost:8000/deep.html
 ```
 
-You can also use any static HTTP server, for example `npx serve .`.
+Click **Open .riv** and choose any local `.riv` file.
 
-> Do not open `index.html` directly with `file://`; browsers may block the Rive WASM module.
+When the custom runtime is present, the page can:
 
-## Use your `.riv` file
+- enumerate every internal object in the selected Artboard;
+- identify `Path` objects;
+- read the original path vertices (`x`, `y`);
+- read rendered cubic Bezier in/out handle positions;
+- change an original path vertex's `x/y` values;
+- mark the path dirty and let Rive redraw it immediately.
 
-Click **Open .riv** and choose your local Rive file. The inspector reads it in the browser; you do not need to copy the file into the repository.
+The page shows **CUSTOM geometry tools** when the patched runtime loaded successfully. If it shows **PUBLIC fallback**, the generated WASM has not been built/pulled yet.
 
-The current UI still contains a **Load bundled test.riv** convenience button, but `test.riv` is intentionally not committed yet. For this first experiment, use **Open .riv**.
+## Custom Rive WASM
 
-## What the inspector tests
+Rive Rider pins the inspected upstream `rive-app/rive-wasm` revision and builds Rive's own `tools` target (`ENABLE_QUERY_FLAT_VERTICES`). A small patch adds these Artboard methods:
 
-- Loads a `.riv` file with `@rive-app/canvas-advanced`.
-- Renders the selected artboard.
-- Lists artboards, animations, and state machines through the low-level runtime.
-- Reflects the JavaScript/WASM wrapper objects and shows their available properties and methods.
-- Automatically probes `*Count()` + `*ByIndex()` API pairs to discover collections exposed by the runtime.
-- Highlights method/property names related to paths, shapes, vertices, fills, strokes, paint, meshes, bones, transforms, etc.
-- Lets you try `artboard.nodeByName(...)` when the runtime provides it.
-- Shows primitive writable properties on a found node and lets you change them live.
+```text
+debugObjectCount()
+debugObjectInfo(index)
+debugPathVertexCount(objectIndex)
+debugPathVertexInfo(objectIndex, vertexIndex)
+debugSetPathVertexXY(objectIndex, vertexIndex, x, y)
+flattenPath(index, transformToParent)
+```
 
-The goal is not to assume that Rive exposes raw vector geometry. The app tells us empirically what the current low-level runtime actually makes accessible.
+The underlying Rive runtime already owns the actual vector data. The patch only exposes a narrow diagnostic bridge to JavaScript.
 
-## Rive runtime
+### Automatic build
 
-The page pins `@rive-app/canvas-advanced` to `2.39.1` so the JavaScript module and `rive.wasm` always match.
+`.github/workflows/build-custom-rive.yml` builds the patched WASM on GitHub Actions and commits the generated runtime to:
+
+```text
+vendor/rive-tools/canvas_advanced.mjs
+vendor/rive-tools/rive.wasm
+vendor/rive-tools/build-info.json
+```
+
+The workflow runs when the tools/build files change and can also be started manually with **Run workflow**.
+
+### Local build
+
+You need Emscripten available in your shell, then run:
+
+```bash
+bash tools/build-custom-rive.sh
+```
+
+## Files
+
+- `deep.html` / `deep.js` — deep geometry viewer/editor.
+- `index.html` / `app.js` — original public-runtime API inspector.
+- `tools/patch_rive.py` — narrow patch applied to the pinned Rive source.
+- `tools/build-custom-rive.sh` — reproducible custom WASM build.
+- `.github/workflows/build-custom-rive.yml` — CI builder.
+
+## Current scope
+
+V1 intentionally edits only vertex position. Bezier handles are already readable. Once vertex mutation is proven on a real character, the next bridge can expose cubic handle setters, fill/stroke properties, meshes, and other geometry objects.
