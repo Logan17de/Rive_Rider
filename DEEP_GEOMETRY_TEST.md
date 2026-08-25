@@ -1,62 +1,73 @@
 # Deep geometry test
 
-This test bypasses the normal published `@rive-app/canvas-advanced` API and builds Rive's official WASM source in its existing `tools` mode, then adds a very small bridge for reading and mutating original Path vertices.
+This page uses a pinned, tools-mode Rive WASM build with a narrow diagnostic
+bridge. It exists to prove that Rive Rider can inspect and mutate authoritative
+vector geometry without recreating the loaded Artboard instance.
 
 ## What the bridge exposes
 
 On an Artboard instance:
 
-- `queryPathIndices()` -> object indices whose internal object is a `rive::Path`
-- `queryPathVertexCount(pathObjectIndex)`
-- `queryPathVertex(pathObjectIndex, vertexIndex)` -> `{x,y,coreType,isCubic,inX,inY,outX,outY}`
-- `setPathVertexXY(pathObjectIndex, vertexIndex, x, y)` -> mutates the original Rive vertex and marks the Path dirty
+- `debugObjectCount()`
+- `debugObjectInfo(index)` — names, path kind, and visibility/collapse state
+- `debugPathVertexCount(pathObjectIndex)`
+- `debugPathVertexInfo(pathObjectIndex, vertexIndex)` — source/rendered position,
+  skin weight state, and source/rendered cubic handles
+- `debugSetPathVertexXY(pathObjectIndex, vertexIndex, x, y)` — accepts only a
+  real `PointsPath`, marks its geometry dirty, and runs the update pass
+- `debugParametricInfo(pathObjectIndex)` — reports only source properties
+  supported by the concrete Rectangle, Ellipse, Polygon, Star, Triangle, or
+  base ParametricPath class
+- `debugSetParametricProperty(pathObjectIndex, propertyName, value)` — validates
+  the concrete class/property pair, invokes the generated setter, and advances
+  the existing Artboard instance
+- `flattenPath(index, transformToParent)`
 
-The first experiment intentionally changes only vertex X/Y. Cubic handle values are read for inspection but are not writable yet.
+Generated `ParametricPath` vertices remain read-only. Rectangles, ellipses,
+polygons, stars, and triangles are edited through their authoritative source
+properties instead.
 
-## Build the custom runtime
+## One-time local setup
 
-The build is easiest in WSL/Ubuntu or Linux because Rive's own WASM build scripts are shell-based.
+On Windows, install native emsdk `4.0.23` at a path without spaces (recommended:
+`C:\emsdk`) and activate it permanently. The rebuild script downloads pinned
+native Windows Premake and Ninja executables when needed.
 
-From the repository root:
-
-```bash
-bash scripts/build-custom-rive.sh
+```powershell
+git clone https://github.com/rive-app/rive-wasm.git .rive-wasm
+git -C .rive-wasm checkout 79c696a6cae99e936fc31b0e9778a01850ca8245
+git -C .rive-wasm config url."https://github.com/".insteadOf git@github.com:
+git -C .rive-wasm submodule update --init --recursive
+python tools\patch_rive.py
 ```
 
-The script:
+## Native Windows development loop
 
-1. clones `rive-app/rive-wasm` recursively into `.rive-src`
-2. pins the tested upstream commit
-3. patches only the tools/query surface
-4. runs Rive's `build_wasm.sh tools`
-5. copies `canvas_advanced.mjs` and `canvas_advanced.wasm` into `runtime/`
-
-If Rive's upstream build dependencies fail on your machine, keep the terminal output; that is the next thing to fix rather than changing the inspector.
-
-## Run Rive Rider
-
-```bash
-python3 -m http.server 8000
+```powershell
+.\tools\rebuild-local-windows.ps1
+python -m http.server 8000
 ```
 
-Open:
+Open `http://localhost:8000/deep.html`. The command reuses the existing checkout
+and build directory, so GitHub Actions is not part of the local edit/test loop.
 
-```text
-http://localhost:8000/deep.html
-```
+Linux developers can continue to use `bash tools/rebuild-local.sh`; the clean
+GitHub Actions build continues to use `bash tools/build-custom-rive.sh`.
 
-Then:
+## Manual proof
 
-1. Click **Open .riv**.
-2. Select the artboard.
-3. The right panel should say all four custom methods are `YES`.
-4. Select a Path object.
-5. Its original vertices and cubic handle coordinates are listed.
-6. Change one X or Y number and click **Apply**.
-7. The rendered Rive should redraw with that vertex changed.
+1. Open the existing test `.riv` file.
+2. Select the actual character Artboard.
+3. Use the geometry summary and owning-Shape groups to find a visible character
+   feature such as Face, R_Eye, L_Eye, Mouth, Nose, Hair, or Ear. Only names
+   stored in the `.riv` hierarchy are shown.
+4. For `PointsPath`, change one X or Y value and select **Apply & verify**.
+5. For Rectangle/Ellipse/Polygon/Star/Triangle, change a displayed source
+   property and select **Apply source properties & verify**.
+6. Confirm that read-back source values match the request and the same canvas
+   Artboard visibly deforms.
 
-If that final step works, we have proven the key architecture: `.riv -> our engine -> original vector coordinates -> modify -> Rive renderer`.
-
-## Why this is separate from `index.html`
-
-`index.html` remains the stock/public-runtime inspector. `deep.html` is the experimental custom-runtime path. Keeping both makes it easy to compare what Rive officially exposes versus what exists in the underlying open-source runtime.
+For a weighted vertex, the verification panel separately reports source and
+rendered positions so skin-deformation behavior is explicit. Procedural paths
+keep generated vertices read-only and expose only properties supported by their
+concrete runtime class.
