@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#130d17">
+  <meta name="description" content="Veyra — an AI-readable vector and character editor.">
+  <title>Veyra</title>
+  <link rel="stylesheet" href="./veyra.css">
+</head>
+<body>
+  <svg class="iconSprite" aria-hidden="true">
+    <symbol id="i-new" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17z"/><path d="m3.5 10 3-3"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4M8 20v-6h8v6"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 14v6h14v-6"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="m9 7-5 5 5 5"/><path d="M5 12h9a5 5 0 0 1 5 5"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 7 5 5-5 5"/><path d="M19 12h-9a5 5 0 0 0-5 5"/></symbol>
+    <symbol id="i-select" viewBox="0 0 24 24"><path d="m5 3 13 9-7 2-3 7z"/></symbol>
+    <symbol id="i-rectangle" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/></symbol>
+    <symbol id="i-ellipse" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></symbol>
+    <symbol id="i-path" viewBox="0 0 24 24"><path d="M5 18 11 6l8 12z"/><circle cx="5" cy="18" r="1.5"/><circle cx="11" cy="6" r="1.5"/><circle cx="19" cy="18" r="1.5"/></symbol>
+    <symbol id="i-polygon" viewBox="0 0 24 24"><path d="m12 3 8 6-3 10H7L4 9z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.7 6.3.8-4.6 4.4 1.2 6.1-5.6-3-5.6 3 1.2-6.1L3 9.5l6.3-.8z"/></symbol>
+    <symbol id="i-group" viewBox="0 0 24 24"><rect x="4" y="4" width="9" height="9" rx="1"/><rect x="11" y="11" width="9" height="9" rx="1"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M3 12s3-5 9-5 9 5 9 5-3 5-9 5-9-5-9-5z"/><circle cx="12" cy="12" r="2"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="m4 4 16 16M10 7.3A10.4 10.4 0 0 1 12 7c6 0 9 5 9 5a13 13 0 0 1-2.1 2.7M6.4 8.4A14 14 0 0 0 3 12s3 5 9 5c.9 0 1.8-.1 2.5-.4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 7-2.6"/></symbol>
+    <symbol id="i-delete" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></symbol>
+    <symbol id="i-inspector" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></symbol>
+    <symbol id="i-bone" viewBox="0 0 24 24"><circle cx="5" cy="12" r="3"/><circle cx="19" cy="12" r="3"/><path d="M8 10h8l3 2-3 2H8l-3-2z"/></symbol>
+    <symbol id="i-mesh" viewBox="0 0 24 24"><path d="m4 5 8-2 8 4-2 12-11 2zM4 5l7 8m9-6-9 6m7 6-7-6m-4 8 4-8"/><circle cx="11" cy="13" r="1.5"/></symbol>
+    <symbol id="i-control" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-2 3m2-3 2 3m7 6-3-2m3 2-3 2m-6 7-2-3m2 3 2-3m-11-6 3-2m-3 2 3 2"/></symbol>
+    <symbol id="i-constraint" viewBox="0 0 24 24"><circle cx="6" cy="17" r="3"/><circle cx="18" cy="7" r="3"/><path d="m8.5 15.5 7-7M10 5H5v5M14 19h5v-5"/></symbol>
+    <symbol id="i-normalize" viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7M3 19h18"/></symbol>
+    <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M9 6 4 9v8l5 2zm6 0 5 3v8l-5 2z"/></symbol>
+    <symbol id="i-hand" viewBox="0 0 24 24"><path d="M7 11V6a2 2 0 0 1 4 0v4-6a2 2 0 0 1 4 0v6-4a2 2 0 0 1 4 0v8c0 4-2.7 7-7 7h-1c-2.3 0-4.2-1-5.5-2.8L3 14.8a2 2 0 0 1 3-2.6L7 13z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5v14l11-7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5h3v14H8zM13 5h3v14h-3z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+    <symbol id="i-to-start" viewBox="0 0 24 24"><path d="M7 5v14M19 5 9 12l10 7z"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><path d="m12 4 8 8-8 8-8-8z"/></symbol>
+    <symbol id="i-timeline" viewBox="0 0 24 24"><path d="M3 12h18M7 8v8M12 6v12M17 9v6"/></symbol>
+  </svg>
+
+  <div class="appShell">
+    <header class="topbar">
+      <div class="brandArea">
+        <a class="brand" href="./veyra.html" aria-label="Veyra home">
+          <svg class="brandMark" viewBox="0 0 32 32" aria-hidden="true"><path d="M5 6h6l5 14L21 6h6L18.8 27h-5.6z"/><path class="brandSpark" d="m24 19 1.4 3.2L29 24l-3.6 1.8L24 29l-1.4-3.2L19 24l3.6-1.8z"/></svg>
+          <span>Veyra</span>
+          <span class="versionBadge">alpha 2</span>
+        </a>
+        <a class="labLink" href="./deep.html" title="Open the existing Rive geometry research lab">Rive Lab</a>
+      </div>
+
+      <div class="documentTitle">
+        <label class="srOnly" for="documentName">Document name</label>
+        <input id="documentName" maxlength="100" value="Veyra Bloom Rig">
+        <span id="saveState" class="saveState">Ready</span>
+      </div>
+
+      <nav class="topActions" aria-label="Document actions">
+        <button class="iconButton" id="newDocument" title="New document" aria-label="New document"><svg><use href="#i-new"/></svg></button>
+        <button class="iconButton" id="openDocument" title="Open .veyra" aria-label="Open Veyra document"><svg><use href="#i-open"/></svg></button>
+        <input id="openFile" type="file" accept=".veyra,application/vnd.veyra+json,application/json" hidden>
+        <button class="actionButton" id="saveDocument" aria-label="Save .veyra"><svg><use href="#i-save"/></svg><span>Save .veyra</span></button>
+        <button class="iconButton" id="exportSvg" title="Export SVG" aria-label="Export SVG"><svg><use href="#i-export"/></svg></button>
+        <span class="toolbarDivider"></span>
+        <button class="iconButton" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg><use href="#i-undo"/></svg></button>
+        <button class="iconButton" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><svg><use href="#i-redo"/></svg></button>
+        <button class="iconButton mobileInspector" id="toggleInspector" title="Toggle inspector" aria-label="Toggle inspector" aria-expanded="true" aria-controls="inspectorPanel"><svg><use href="#i-inspector"/></svg></button>
+      </nav>
+    </header>
+
+    <div class="workspace">
+      <aside class="panel hierarchyPanel" aria-label="Scene hierarchy">
+        <div class="panelHeader">
+          <div><span class="eyebrow">Scene</span><h2>Hierarchy</h2></div>
+          <span id="nodeCount" class="countBadge">0</span>
+        </div>
+        <div class="addStrip" aria-label="Add object">
+          <button data-add="group" title="Add group" aria-label="Add group"><svg><use href="#i-group"/></svg></button>
+          <button data-add="rectangle" title="Add rectangle" aria-label="Add rectangle"><svg><use href="#i-rectangle"/></svg></button>
+          <button data-add="ellipse" title="Add ellipse" aria-label="Add ellipse"><svg><use href="#i-ellipse"/></svg></button>
+          <button data-add="path" title="Add path" aria-label="Add path"><svg><use href="#i-path"/></svg></button>
+          <button data-add="polygon" title="Add polygon" aria-label="Add polygon"><svg><use href="#i-polygon"/></svg></button>
+          <button data-add="star" title="Add star" aria-label="Add star"><svg><use href="#i-star"/></svg></button>
+        </div>
+        <div class="rigAddStrip" aria-label="Add rig object">
+          <div class="rigAddHeader"><span>Rig components</span><small>Create</small></div>
+          <div class="rigComponentGrid">
+            <button data-add-rig="bone" title="Add bone" aria-label="Add bone"><svg><use href="#i-bone"/></svg><span>Bone</span></button>
+            <button data-add-rig="mesh" title="Add weighted mesh" aria-label="Add weighted mesh"><svg><use href="#i-mesh"/></svg><span>Mesh</span></button>
+            <button data-add-rig="control" title="Add position control" aria-label="Add position control"><svg><use href="#i-control"/></svg><span>Control</span></button>
+          </div>
+          <div class="constraintCreator">
+            <select id="constraintType" aria-label="Constraint type" title="Constraint type">
+              <option value="ik">IK</option>
+              <option value="distance">Distance</option>
+              <option value="rotation">Rotation</option>
+              <option value="scale">Scale</option>
+              <option value="transform">Transform</option>
+              <option value="path">Path</option>
+            </select>
+            <button data-add-rig="constraint" title="Add selected constraint" aria-label="Add selected constraint"><svg><use href="#i-constraint"/></svg><span>Add constraint</span></button>
+          </div>
+        </div>
+        <div id="hierarchy" class="hierarchy" role="tree" aria-label="Veyra objects"></div>
+        <div class="panelFooter">
+          <button id="deleteNode" class="textButton danger" disabled><svg><use href="#i-delete"/></svg>Delete selected</button>
+        </div>
+      </aside>
+
+      <main class="stagePanel">
+        <div class="stageToolbar" aria-label="Canvas tools">
+          <div class="canvasToolCluster">
+            <div class="toolGroup" role="toolbar" aria-label="Editor tools">
+              <button class="toolButton isActive" data-tool="select" aria-label="Select" aria-pressed="true" title="Select and move artwork (V)"><svg><use href="#i-select"/></svg><span>Select</span></button>
+              <button class="toolButton" data-tool="bone" aria-label="Bones" aria-pressed="false" title="Pose bones (B)"><svg><use href="#i-bone"/></svg><span>Bones</span></button>
+              <button class="toolButton" data-tool="mesh" aria-label="Weights" aria-pressed="false" title="Edit mesh weights (M)"><svg><use href="#i-mesh"/></svg><span>Weights</span></button>
+              <button class="toolButton" data-tool="control" aria-label="Controls" aria-pressed="false" title="Move rig controls (C)"><svg><use href="#i-control"/></svg><span>Controls</span></button>
+              <button class="toolButton" data-tool="constraint" aria-label="Constraints" aria-pressed="false" title="Inspect constraints (K)"><svg><use href="#i-constraint"/></svg><span>Constraints</span></button>
+              <button class="toolButton" data-tool="pan" aria-label="Pan" aria-pressed="false" title="Pan canvas (H or Alt+drag)"><svg><use href="#i-hand"/></svg><span>Pan</span></button>
+            </div>
+            <span class="selectionHint" id="toolHint">Select artwork, vertices, bones, meshes, or controls.</span>
+          </div>
+          <div class="zoomControls">
+            <button id="zoomOut" aria-label="Zoom canvas out" title="Zoom canvas out (Ctrl+-)"><svg><use href="#i-minus"/></svg></button>
+            <output id="zoomValue" aria-live="polite">100%</output>
+            <button id="zoomIn" aria-label="Zoom canvas in" title="Zoom canvas in (Ctrl++)"><svg><use href="#i-plus"/></svg></button>
+            <button id="zoomFit" aria-label="Fit canvas" title="Fit canvas (Ctrl+0)"><svg><use href="#i-fit"/></svg></button>
+          </div>
+        </div>
+        <div class="canvasShortcutBar" aria-label="Canvas navigation shortcuts">
+          <span><kbd>Ctrl</kbd> + wheel zoom</span>
+          <span><kbd>Shift</kbd> + wheel pan horizontally</span>
+          <span><kbd>Alt</kbd> + drag pan</span>
+          <span><kbd>Shift</kbd> + bone drag snap</span>
+        </div>
+        <div class="stageViewport" id="stageViewport">
+          <div class="artboardFrame" id="artboardFrame">
+            <svg id="veyraCanvas" xmlns="http://www.w3.org/2000/svg" role="application" aria-label="Veyra artboard"></svg>
+          </div>
+        </div>
+        <div class="statusbar">
+          <span><span class="statusDot"></span><span id="statusText">Veyra document ready</span></span>
+          <span id="selectionStatus">No selection</span>
+        </div>
+
+        <section class="timelinePanel" id="timelinePanel" aria-label="Animation timeline" data-collapsed="false">
+          <div class="timelineBar">
+            <div class="timelineCluster timelineTitleCluster">
+              <button class="iconButton timelineToggle" id="timelineToggle" title="Collapse timeline" aria-label="Collapse timeline" aria-expanded="true"><svg><use href="#i-timeline"/></svg></button>
+              <span class="eyebrow">Animation</span>
+              <select id="timelineSelect" aria-label="Active timeline" title="Active timeline"></select>
+              <button class="iconButton" id="timelineAdd" title="New timeline" aria-label="New timeline"><svg><use href="#i-new"/></svg></button>
+              <button class="iconButton" id="timelineDelete" title="Delete timeline" aria-label="Delete timeline"><svg><use href="#i-delete"/></svg></button>
+            </div>
+            <div class="timelineCluster timelineTransport" role="group" aria-label="Playback transport">
+              <button class="iconButton" id="playToStart" title="Jump to start" aria-label="Jump to start"><svg><use href="#i-to-start"/></svg></button>
+              <button class="iconButton" id="playToggle" title="Play (Space)" aria-label="Play"><svg><use href="#i-play"/></svg></button>
+              <button class="iconButton" id="playStop" title="Stop" aria-label="Stop"><svg><use href="#i-stop"/></svg></button>
+              <output id="frameReadout" class="frameReadout" aria-live="off">0 / 60</output>
+            </div>
+            <div class="timelineCluster timelineSettings">
+              <button class="iconButton keyButton" id="keyframeSelected" title="Keyframe selected property at playhead" aria-label="Keyframe selected property"><svg><use href="#i-key"/></svg></button>
+              <label class="timelineToggleField"><input type="checkbox" id="autoKeyToggle"><span>Auto-key</span></label>
+              <label class="timelineField"><span>Loop</span>
+                <select id="loopMode" aria-label="Loop mode" title="Loop mode">
+                  <option value="none">None</option>
+                  <option value="loop">Loop</option>
+                  <option value="pingpong">Ping-pong</option>
+                </select>
+              </label>
+              <label class="timelineField"><span>FPS</span><input type="number" id="fpsInput" min="1" max="240" step="1" value="30"></label>
+              <label class="timelineField"><span>Frames</span><input type="number" id="durationInput" min="1" max="100000" step="1" value="60"></label>
+            </div>
+          </div>
+          <div class="timelineBody" id="timelineBody">
+            <div class="timelineTracks" id="timelineTracks" role="list" aria-label="Animation tracks"></div>
+            <div class="timelineGridWrap">
+              <div class="timelineRuler" id="timelineRuler" role="slider" aria-label="Playhead" tabindex="0" aria-valuemin="0" aria-valuemax="60" aria-valuenow="0"></div>
+              <div class="timelineGrid" id="timelineGrid"></div>
+              <div class="playhead" id="playhead" aria-hidden="true"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="panel inspectorPanel" id="inspectorPanel" aria-label="Property inspector">
+        <div class="panelHeader inspectorHeader">
+          <div><span class="eyebrow">Properties</span><h2 id="inspectorTitle">Document</h2></div>
+          <span id="selectedType" class="typeBadge">ARTBOARD</span>
+        </div>
+        <div id="inspector" class="inspector"></div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./veyra.js"></script>
+</body>
+</html>

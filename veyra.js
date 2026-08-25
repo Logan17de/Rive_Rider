@@ -1,0 +1,1606 @@
+import {
+  cloneValue,
+  boneById,
+  constraintById,
+  controlById,
+  createBone,
+  createConstraint,
+  createControl,
+  createDocument,
+  createMesh,
+  createNode,
+  createStarterDocument,
+  createTimeline,
+  descendantIds,
+  meshById,
+  nodeById,
+  semanticFor,
+  timelineById,
+  trackByAddress,
+} from './src/veyra/model.js';
+import {
+  IDENTITY_MATRIX,
+  degreesToRadians,
+  invertMatrix,
+  matrixRotation,
+  radiansToDegrees,
+  transformMatrix,
+  transformPoint,
+} from './src/veyra/contracts.js';
+import { evaluateDocument } from './src/veyra/evaluation.js';
+import { AnimationPlayback } from './src/veyra/animation.js';
+import { parseVeyra, downloadSvg, downloadVeyra, serializeVeyra } from './src/veyra/io.js';
+import { nodePropertyAddress, readProperty, rigPropertyAddress, writeProperty } from './src/veyra/properties.js';
+import { createBoneRef, createControlRef, createMeshVertexRef, createNodeRef, referenceId } from './src/veyra/references.js';
+import { VeyraRenderer } from './src/veyra/renderer.js';
+import { mirrorMeshWeights, normalizeMeshWeights } from './src/veyra/rigging.js';
+import { VeyraStore } from './src/veyra/store.js';
+import { createSceneSummary } from './src/veyra/summary.js';
+
+const $ = (id) => document.getElementById(id);
+const AUTOSAVE_KEY = 'veyra.autosave.v1';
+
+const documentName = $('documentName');
+const saveState = $('saveState');
+const hierarchy = $('hierarchy');
+const inspector = $('inspector');
+const inspectorTitle = $('inspectorTitle');
+const selectedType = $('selectedType');
+const nodeCount = $('nodeCount');
+const deleteNodeButton = $('deleteNode');
+const statusText = $('statusText');
+const selectionStatus = $('selectionStatus');
+const undoButton = $('undo');
+const redoButton = $('redo');
+const zoomValue = $('zoomValue');
+const artboardFrame = $('artboardFrame');
+const stagePanel = document.querySelector('.stagePanel');
+const stageViewport = $('stageViewport');
+const canvas = $('veyraCanvas');
+const toolHint = $('toolHint');
+const openFile = $('openFile');
+const toast = $('toast');
+const inspectorPanel = $('inspectorPanel');
+const timelinePanel = $('timelinePanel');
+const timelineToggle = $('timelineToggle');
+const timelineSelect = $('timelineSelect');
+const timelineAdd = $('timelineAdd');
+const timelineDelete = $('timelineDelete');
+const playToggle = $('playToggle');
+const playStop = $('playStop');
+const playToStart = $('playToStart');
+const frameReadout = $('frameReadout');
+const keyframeSelected = $('keyframeSelected');
+const autoKeyToggle = $('autoKeyToggle');
+const loopMode = $('loopMode');
+const fpsInput = $('fpsInput');
+const durationInput = $('durationInput');
+const timelineTracks = $('timelineTracks');
+const timelineGrid = $('timelineGrid');
+const timelineRuler = $('timelineRuler');
+const playhead = $('playhead');
+
+let toastTimer = null;
+let autosaveTimer = null;
+let playbackTimer = null;
+let zoom = 1;
+let currentTool = 'select';
+let savedRevision = 0;
+let evaluatedScene = null;
+let animationPlayback = null;
+let activeTimelineId = null;
+let currentFrame = 0;
+let selectedTrackAddress = null;
+const selectedMeshVertices = new Map();
+
+function restoredDocument() {
+  if (new URLSearchParams(location.search).has('fresh')) return null;
+  try {
+    const text = localStorage.getItem(AUTOSAVE_KEY);
+    return text ? parseVeyra(text) : null;
+  } catch (error) {
+    console.warn('Veyra autosave could not be restored:', error);
+    return null;
+  }
+}
+
+const restored = restoredDocument();
+const store = new VeyraStore(restored || createStarterDocument());
+if (restored) savedRevision = -1;
+const renderer = new VeyraRenderer($('veyraCanvas'), {
+  select: (reference) => store.select(reference),
+  begin: (label) => store.begin(label),
+  moveNode: (nodeId, next) => store.mutate((documentModel) => {
+    writeProperty(documentModel, nodePropertyAddress(nodeId, 'transform.x'), next.x);
+    writeProperty(documentModel, nodePropertyAddress(nodeId, 'transform.y'), next.y);
+  }, 'drag'),
+  moveVertex: (nodeId, vertexIndex, next) => store.mutate((documentModel) => {
+    const vertexId = nodeById(documentModel, nodeId).geometry.vertices[vertexIndex].id;
+    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, 'x']), next.x);
+    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, 'y']), next.y);
+  }, 'drag'),
+  moveControl: (controlId, next) => store.mutate((documentModel) => {
+    writeProperty(documentModel, rigPropertyAddress('control', controlId, 'position.x'), next.x);
+    writeProperty(documentModel, rigPropertyAddress('control', controlId, 'position.y'), next.y);
+  }, 'drag'),
+  moveBoneEnd: (boneId, point, modifiers) => store.mutate((documentModel) => {
+    const bone = boneById(documentModel, boneId);
+    const boneState = evaluatedScene?.bones.find((candidate) => candidate.id === boneId);
+    if (!bone || !boneState) return;
+    const ik = documentModel.constraints.find((constraint) => constraint.enabled
+      && constraint.type === 'ik'
+      && constraint.bones.some((reference) => referenceId(reference, 'bone') === boneId));
+    const pivot = ik
+      ? evaluatedScene.bones.find((candidate) => candidate.id === referenceId(ik.bones[0], 'bone'))?.start || boneState.start
+      : boneState.start;
+    let target = point;
+    if (modifiers.shift) {
+      const distance = Math.hypot(point.x - pivot.x, point.y - pivot.y);
+      const angle = Math.round(Math.atan2(point.y - pivot.y, point.x - pivot.x) / (Math.PI / 12)) * (Math.PI / 12);
+      target = { x: pivot.x + Math.cos(angle) * distance, y: pivot.y + Math.sin(angle) * distance };
+    }
+    if (ik) {
+      const control = controlById(documentModel, referenceId(ik.target, 'control'));
+      control.position.x = target.x;
+      control.position.y = target.y;
+      return;
+    }
+    const parentId = referenceId(bone.parent, 'bone');
+    const parentState = parentId ? evaluatedScene.bones.find((candidate) => candidate.id === parentId) : null;
+    const desiredWorldRotation = Math.atan2(target.y - boneState.start.y, target.x - boneState.start.x);
+    bone.pose.rotation = desiredWorldRotation - matrixRotation(parentState?.worldMatrix || IDENTITY_MATRIX) - bone.rest.rotation;
+  }, 'drag'),
+  moveBoneStart: (boneId, point, modifiers) => store.mutate((documentModel) => {
+    const bone = boneById(documentModel, boneId);
+    const boneState = evaluatedScene?.bones.find((candidate) => candidate.id === boneId);
+    if (!bone || !boneState) return;
+    let target = point;
+    if (modifiers.shift) {
+      const dx = point.x - boneState.start.x;
+      const dy = point.y - boneState.start.y;
+      target = Math.abs(dx) >= Math.abs(dy)
+        ? { x: point.x, y: boneState.start.y }
+        : { x: boneState.start.x, y: point.y };
+    }
+    const parentId = referenceId(bone.parent, 'bone');
+    const parentWorld = parentId
+      ? evaluatedScene.bones.find((candidate) => candidate.id === parentId)?.worldMatrix || IDENTITY_MATRIX
+      : IDENTITY_MATRIX;
+    const pointInParent = transformPoint(invertMatrix(parentWorld), target);
+    const pointInRest = transformPoint(invertMatrix(transformMatrix({
+      ...bone.rest,
+      skewX: 0,
+      skewY: 0,
+      pivotX: 0,
+      pivotY: 0,
+    })), pointInParent);
+    bone.pose.x = pointInRest.x;
+    bone.pose.y = pointInRest.y;
+  }, 'drag'),
+  commit: () => store.commit(),
+  cancel: () => store.cancel(),
+});
+
+function showToast(message, error = false) {
+  toast.textContent = message;
+  toast.classList.toggle('isError', error);
+  toast.classList.add('isVisible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('isVisible'), 2600);
+}
+
+function setStatus(message) {
+  statusText.textContent = message;
+}
+
+function commit(label, mutation) {
+  try {
+    store.execute(label, mutation);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || String(error), true);
+    renderAll('validation-error');
+  }
+}
+
+function icon(name, className = '') {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  if (className) svg.setAttribute('class', className);
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#i-${name}`);
+  svg.appendChild(use);
+  return svg;
+}
+
+function nodeIcon(type) {
+  return type === 'group' ? 'group' : type;
+}
+
+const TOOL_HINTS = Object.freeze({
+  select: 'Select and drag artwork or authored path vertices.',
+  bone: 'Drag a bone end to pose it; drag its joint to translate. IK bones move their target.',
+  mesh: 'Select a mesh, choose a vertex, and edit each bone influence in Properties.',
+  control: 'Drag yellow controls to solve IK and other control-driven constraints.',
+  constraint: 'Select a constraint to edit targets, strength, order, and solver settings.',
+  pan: 'Drag anywhere to pan the canvas. Alt+drag works from every tool.',
+});
+
+function setTool(tool, selectComponent = true) {
+  currentTool = tool;
+  renderer.setTool(tool);
+  stagePanel.dataset.tool = tool;
+  toolHint.textContent = TOOL_HINTS[tool];
+  document.querySelectorAll('[data-tool]').forEach((button) => {
+    const active = button.dataset.tool === tool;
+    button.classList.toggle('isActive', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  if (!selectComponent) return;
+  const candidate = {
+    bone: store.document.bones[0],
+    mesh: store.document.meshes[0],
+    control: store.document.controls[0],
+    constraint: store.document.constraints[0],
+  }[tool];
+  if (candidate) store.select({ kind: tool, id: candidate.id });
+  setStatus(`${tool[0].toUpperCase()}${tool.slice(1)} tool`);
+}
+
+function renderHierarchy() {
+  hierarchy.replaceChildren();
+  const children = new Map();
+  for (const node of store.document.nodes) {
+    const key = referenceId(node.parent, 'node') || '__root__';
+    if (!children.has(key)) children.set(key, []);
+    children.get(key).push(node);
+  }
+
+  const appendNode = (node, depth) => {
+    const row = document.createElement('div');
+    row.className = 'treeRow';
+    row.classList.toggle('isSelected', store.selectedKind === 'node' && node.id === store.selectedId);
+    row.classList.toggle('isHidden', !node.visible);
+
+    const select = document.createElement('button');
+    select.className = 'treeSelect';
+    select.style.paddingLeft = `${8 + depth * 15}px`;
+    select.setAttribute('role', 'treeitem');
+    select.setAttribute('aria-selected', String(store.selectedKind === 'node' && node.id === store.selectedId));
+    select.title = `${node.name} · ${node.type}`;
+    select.append(icon(nodeIcon(node.type), 'treeIcon'));
+    const name = document.createElement('span');
+    name.className = 'treeName';
+    name.textContent = node.name;
+    select.appendChild(name);
+    select.onclick = () => store.select({ kind: 'node', id: node.id });
+
+    const visible = document.createElement('button');
+    visible.className = 'treeUtility';
+    visible.title = node.visible ? 'Hide object' : 'Show object';
+    visible.setAttribute('aria-label', visible.title);
+    visible.append(icon(node.visible ? 'eye' : 'eye-off'));
+    visible.onclick = () => nodePropertyMutation(
+      node,
+      'visible',
+      `${node.visible ? 'Hide' : 'Show'} ${node.name}`,
+      !node.visible,
+    );
+
+    const locked = document.createElement('button');
+    locked.className = 'treeUtility';
+    locked.title = node.locked ? 'Unlock object' : 'Lock object';
+    locked.setAttribute('aria-label', locked.title);
+    locked.append(icon(node.locked ? 'lock' : 'unlock'));
+    locked.onclick = () => nodePropertyMutation(
+      node,
+      'locked',
+      `${node.locked ? 'Unlock' : 'Lock'} ${node.name}`,
+      !node.locked,
+    );
+
+    row.append(select, visible, locked);
+    hierarchy.appendChild(row);
+    for (const child of children.get(node.id) || []) appendNode(child, depth + 1);
+  };
+
+  const sectionLabel = (text) => {
+    const label = document.createElement('div');
+    label.className = 'treeSectionLabel';
+    label.textContent = text;
+    hierarchy.appendChild(label);
+  };
+
+  const rigCategoryLabel = (text, count) => {
+    const label = document.createElement('div');
+    label.className = 'rigCategoryLabel';
+    const name = document.createElement('span');
+    name.textContent = text;
+    const badge = document.createElement('span');
+    badge.textContent = String(count);
+    label.append(name, badge);
+    hierarchy.appendChild(label);
+  };
+
+  sectionLabel('Artwork');
+  for (const root of children.get('__root__') || []) appendNode(root, 0);
+  if (!store.document.nodes.length) {
+    const empty = document.createElement('p');
+    empty.className = 'geometryNote';
+    empty.textContent = 'No objects yet. Add a shape above.';
+    hierarchy.appendChild(empty);
+  }
+
+  sectionLabel('Rig components');
+  const appendRigItem = (kind, object, depth = 0) => {
+    const row = document.createElement('div');
+    row.className = `treeRow rigTreeRow${kind === 'constraint' ? ' constraintRow' : ''}`;
+    row.classList.toggle('isSelected', store.selectedKind === kind && store.selectedId === object.id);
+    row.classList.toggle('isHidden', 'visible' in object && !object.visible);
+    const select = document.createElement('button');
+    select.className = 'treeSelect';
+    select.style.paddingLeft = `${8 + depth * 15}px`;
+    select.setAttribute('role', 'treeitem');
+    select.setAttribute('aria-selected', String(store.selectedKind === kind && store.selectedId === object.id));
+    select.title = `${object.name} · ${kind}${kind === 'constraint' ? `:${object.type}` : ''}`;
+    select.append(icon(kind === 'control' ? 'control' : kind, 'treeIcon'));
+    const name = document.createElement('span');
+    name.className = 'treeName';
+    name.textContent = object.name;
+    select.appendChild(name);
+    select.onclick = () => store.select({ kind, id: object.id });
+    row.appendChild(select);
+    hierarchy.appendChild(row);
+  };
+
+  const boneChildren = new Map();
+  for (const bone of store.document.bones) {
+    const key = referenceId(bone.parent, 'bone') || '__root__';
+    if (!boneChildren.has(key)) boneChildren.set(key, []);
+    boneChildren.get(key).push(bone);
+  }
+  const appendBone = (bone, depth) => {
+    appendRigItem('bone', bone, depth);
+    for (const child of boneChildren.get(bone.id) || []) appendBone(child, depth + 1);
+  };
+  rigCategoryLabel('Bones', store.document.bones.length);
+  for (const bone of boneChildren.get('__root__') || []) appendBone(bone, 0);
+  rigCategoryLabel('Meshes & weights', store.document.meshes.length);
+  for (const mesh of store.document.meshes) appendRigItem('mesh', mesh);
+  rigCategoryLabel('Controls', store.document.controls.length);
+  for (const control of store.document.controls) appendRigItem('control', control);
+  rigCategoryLabel('Constraints', store.document.constraints.length);
+  for (const constraint of store.document.constraints) appendRigItem('constraint', constraint);
+
+  if (!store.document.bones.length && !store.document.meshes.length && !store.document.controls.length && !store.document.constraints.length) {
+    const empty = document.createElement('p');
+    empty.className = 'geometryNote';
+    empty.textContent = 'No rig yet. Add a bone or control above.';
+    hierarchy.appendChild(empty);
+  }
+}
+
+function section(title) {
+  const fieldset = document.createElement('fieldset');
+  fieldset.className = 'inspectorSection';
+  const legend = document.createElement('legend');
+  legend.textContent = title;
+  const grid = document.createElement('div');
+  grid.className = 'fieldGrid';
+  fieldset.append(legend, grid);
+  return { fieldset, grid };
+}
+
+function field(labelText, value, onCommit, options = {}) {
+  const label = document.createElement('label');
+  label.className = `field${options.full ? ' fullField' : ''}`;
+  const text = document.createElement('span');
+  text.textContent = labelText;
+  let input;
+  if (options.textarea) {
+    input = document.createElement('textarea');
+    input.value = value ?? '';
+  } else if (options.select) {
+    input = document.createElement('select');
+    for (const optionValue of options.select) {
+      const option = document.createElement('option');
+      option.value = optionValue.value;
+      option.textContent = optionValue.label;
+      option.selected = optionValue.value === value;
+      input.appendChild(option);
+    }
+  } else {
+    input = document.createElement('input');
+    input.type = options.type || 'text';
+    input.value = value ?? '';
+    if (options.step != null) input.step = String(options.step);
+    if (options.min != null) input.min = String(options.min);
+    if (options.max != null) input.max = String(options.max);
+    if (options.placeholder) input.placeholder = options.placeholder;
+  }
+  let lastCommittedValue = input.value;
+  const commitInput = () => {
+    if (input.value === lastCommittedValue) return;
+    lastCommittedValue = input.value;
+    const next = options.number ? Number(input.value) : input.value;
+    onCommit(next, input);
+  };
+  input.addEventListener('change', commitInput);
+  input.addEventListener('blur', commitInput);
+  if (!options.textarea) {
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') input.blur();
+    });
+  }
+  label.append(text, input);
+  return label;
+}
+
+function checkbox(labelText, value, onCommit) {
+  const label = document.createElement('label');
+  label.className = 'field checkboxField';
+  const text = document.createElement('span');
+  text.textContent = labelText;
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = Boolean(value);
+  input.addEventListener('change', () => onCommit(input.checked));
+  label.append(text, input);
+  return label;
+}
+
+function appendNote(fieldset, text, className = 'geometryNote') {
+  const note = document.createElement('p');
+  note.className = className;
+  note.textContent = text;
+  fieldset.appendChild(note);
+}
+
+function nodePropertyMutation(node, path, label, value) {
+  const address = nodePropertyAddress(node.id, path);
+  commit(
+    { source: 'user', label, propertyAddresses: [address] },
+    (documentModel) => writeProperty(documentModel, address, value),
+  );
+}
+
+function rigPropertyMutation(kind, object, path, label, value) {
+  const address = rigPropertyAddress(kind, object.id, path);
+  commit(
+    { source: 'user', label, propertyAddresses: [address] },
+    (documentModel) => writeProperty(documentModel, address, value),
+  );
+}
+
+function inspectorAction(label, iconName, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.append(icon(iconName));
+  const text = document.createElement('span');
+  text.textContent = label;
+  button.appendChild(text);
+  button.onclick = onClick;
+  return button;
+}
+
+function renderDocumentInspector() {
+  inspectorTitle.textContent = 'Document';
+  selectedType.textContent = 'ARTBOARD';
+  const artboard = section('Artboard');
+  artboard.grid.append(
+    field('Width', store.document.artboard.width, (value) => commit('Resize artboard', (documentModel) => {
+      documentModel.artboard.width = value;
+    }), { type: 'number', number: true, min: 1, step: 1 }),
+    field('Height', store.document.artboard.height, (value) => commit('Resize artboard', (documentModel) => {
+      documentModel.artboard.height = value;
+    }), { type: 'number', number: true, min: 1, step: 1 }),
+    field('Background', store.document.artboard.background, (value) => commit('Change artboard background', (documentModel) => {
+      documentModel.artboard.background = value;
+    }), { placeholder: '#fff7fc' }),
+  );
+  appendNote(artboard.fieldset, 'The artboard and authored objects are saved in the .veyra file. Selection, solved poses, and deformation overlays are never serialized.');
+  inspector.appendChild(artboard.fieldset);
+
+  const rig = section('Rig overview');
+  const counts = document.createElement('div');
+  counts.className = 'vertexSummary';
+  counts.innerHTML = `<span>${store.document.bones.length} bones · ${store.document.meshes.length} meshes</span><strong>${store.document.controls.length} controls · ${store.document.constraints.length} constraints</strong>`;
+  rig.fieldset.appendChild(counts);
+  const diagnostics = evaluatedScene?.diagnostics;
+  appendNote(rig.fieldset, `${diagnostics?.unweightedVertices || 0} unweighted vertices · ${diagnostics?.nonNormalizedVertices || 0} non-normalized · ${diagnostics?.constraints.filter((item) => item.status === 'solved').length || 0}/${store.document.constraints.length} constraints solved.`);
+  inspector.appendChild(rig.fieldset);
+}
+
+function renderNodeInspector(node) {
+  inspectorTitle.textContent = node.name;
+  selectedType.textContent = node.type.toUpperCase();
+
+  const identity = section('Identity');
+  identity.grid.classList.add('oneColumn');
+  const descendants = new Set(descendantIds(store.document, node.id));
+  const parentOptions = [
+    { value: '', label: 'Artboard root' },
+    ...store.document.nodes
+      .filter((candidate) => candidate.type === 'group' && candidate.id !== node.id && !descendants.has(candidate.id))
+      .map((candidate) => ({ value: candidate.id, label: candidate.name })),
+  ];
+  identity.grid.append(
+    field('Name', node.name, (value) => nodePropertyMutation(node, 'name', `Rename ${node.name}`, value)),
+    field('Parent', referenceId(node.parent, 'node') || '', (value) => nodePropertyMutation(
+      node,
+      'parent',
+      `Reparent ${node.name}`,
+      value ? createNodeRef(value) : null,
+    ), { select: parentOptions }),
+  );
+  appendNote(identity.fieldset, `Stable ID: ${node.id}`);
+  inspector.appendChild(identity.fieldset);
+
+  const transform = section('Transform');
+  const transformField = (label, key, step = 1, angle = false) => field(
+    label,
+    angle ? Number(radiansToDegrees(node.transform[key]).toFixed(3)) : node.transform[key],
+    (value) => nodePropertyMutation(
+      node,
+      `transform.${key}`,
+      `Set ${node.name} ${key}`,
+      angle ? degreesToRadians(value) : value,
+    ),
+    { type: 'number', number: true, step },
+  );
+  transform.grid.append(
+    transformField('X', 'x'),
+    transformField('Y', 'y'),
+    transformField('Rotation °', 'rotation', 0.5, true),
+    transformField('Skew X °', 'skewX', 0.5, true),
+    transformField('Skew Y °', 'skewY', 0.5, true),
+    transformField('Scale X', 'scaleX', 0.05),
+    transformField('Scale Y', 'scaleY', 0.05),
+    transformField('Pivot X', 'pivotX'),
+    transformField('Pivot Y', 'pivotY'),
+  );
+  appendNote(transform.fieldset, 'Angles display in degrees. Veyra stores radians and evaluates translate → rotate → skew X → skew Y → scale → pivot.');
+  inspector.appendChild(transform.fieldset);
+
+  const appearance = section('Appearance');
+  if (node.type !== 'group') appearance.grid.append(
+    field('Fill', node.paint.fill, (value) => nodePropertyMutation(node, 'paint.fill', `Set ${node.name} fill`, value), { placeholder: '#ec4899 or none' }),
+    field('Stroke', node.paint.stroke, (value) => nodePropertyMutation(node, 'paint.stroke', `Set ${node.name} stroke`, value), { placeholder: '#2c1830 or none' }),
+    field('Stroke width', node.paint.strokeWidth, (value) => nodePropertyMutation(node, 'paint.strokeWidth', `Set ${node.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5 }),
+  );
+  appearance.grid.append(
+    field('Opacity', node.opacity, (value) => nodePropertyMutation(node, 'opacity', `Set ${node.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05 }),
+    checkbox('Visible', node.visible, (value) => nodePropertyMutation(node, 'visible', `${value ? 'Show' : 'Hide'} ${node.name}`, value)),
+    checkbox('Locked', node.locked, (value) => nodePropertyMutation(node, 'locked', `${value ? 'Lock' : 'Unlock'} ${node.name}`, value)),
+  );
+  inspector.appendChild(appearance.fieldset);
+
+  if (node.geometry) {
+    const geometry = section('Geometry');
+    const property = (label, key, options = {}) => field(
+      label,
+      node.geometry[key],
+      (value) => nodePropertyMutation(node, `geometry.${key}`, `Set ${node.name} ${key}`, value),
+      { type: 'number', number: true, step: options.step ?? 1, min: options.min, max: options.max },
+    );
+    if (node.type === 'rectangle') {
+      geometry.grid.append(property('Width', 'width', { min: 0.01 }), property('Height', 'height', { min: 0.01 }), property('Corner radius', 'cornerRadius', { min: 0 }));
+    } else if (node.type === 'ellipse') {
+      geometry.grid.append(property('Width', 'width', { min: 0.01 }), property('Height', 'height', { min: 0.01 }));
+    } else if (node.type === 'polygon') {
+      geometry.grid.append(property('Radius', 'radius', { min: 0.01 }), property('Sides', 'sides', { min: 3, max: 256 }));
+    } else if (node.type === 'star') {
+      geometry.grid.append(property('Outer radius', 'outerRadius', { min: 0.01 }), property('Inner radius', 'innerRadius', { min: 0 }), property('Points', 'points', { min: 2, max: 256 }));
+    } else if (node.type === 'path') {
+      geometry.grid.append(checkbox('Closed path', node.geometry.closed, (value) => nodePropertyMutation(node, 'geometry.closed', `Set ${node.name} closed`, value)));
+      const summary = document.createElement('div');
+      summary.className = 'vertexSummary';
+      summary.innerHTML = `<span>Authored vertices</span><strong>${node.geometry.vertices.length}</strong>`;
+      geometry.fieldset.appendChild(summary);
+      appendNote(geometry.fieldset, 'Cyan points are authoritative vertices. Pale circles show Bezier handles; handle editing is planned for the next geometry pass.');
+    }
+    inspector.appendChild(geometry.fieldset);
+  }
+
+  const semantic = semanticFor(store.document, node.id) || { role: '', description: '', tags: [] };
+  const semantics = section('AI semantics');
+  semantics.grid.classList.add('oneColumn');
+  semantics.grid.append(
+    field('Role', semantic.role, (value) => nodePropertyMutation(node, 'semantic.role', `Set ${node.name} semantic role`, value), { placeholder: 'eye, hand, character…' }),
+    field('Tags', semantic.tags.join(', '), (value) => nodePropertyMutation(node, 'semantic.tags', `Set ${node.name} semantic tags`, value), { placeholder: 'face, eye, right_eye' }),
+    field('Description', semantic.description, (value) => nodePropertyMutation(node, 'semantic.description', `Describe ${node.name}`, value), { textarea: true, placeholder: 'Explain this object’s purpose for future tools and agents.' }),
+  );
+  appendNote(semantics.fieldset, 'Semantics describe intent without changing geometry or relying on object names.', 'semanticNote');
+  inspector.appendChild(semantics.fieldset);
+}
+
+function renderBoneInspector(bone) {
+  inspectorTitle.textContent = bone.name;
+  selectedType.textContent = 'BONE';
+  const identity = section('Bone');
+  const descendants = new Set();
+  const visit = (parentId) => {
+    for (const candidate of store.document.bones.filter((item) => referenceId(item.parent, 'bone') === parentId)) {
+      descendants.add(candidate.id);
+      visit(candidate.id);
+    }
+  };
+  visit(bone.id);
+  const parents = [
+    { value: '', label: 'Skeleton root' },
+    ...store.document.bones
+      .filter((candidate) => candidate.id !== bone.id && !descendants.has(candidate.id))
+      .map((candidate) => ({ value: candidate.id, label: candidate.name })),
+  ];
+  identity.grid.append(
+    field('Name', bone.name, (value) => rigPropertyMutation('bone', bone, 'name', `Rename ${bone.name}`, value)),
+    field('Parent', referenceId(bone.parent, 'bone') || '', (value) => rigPropertyMutation('bone', bone, 'parent', `Reparent ${bone.name}`, value ? createBoneRef(value) : null), { select: parents }),
+    field('Length', bone.length, (value) => rigPropertyMutation('bone', bone, 'length', `Set ${bone.name} length`, value), { type: 'number', number: true, min: 0.01, step: 1 }),
+    field('Color', bone.color, (value) => rigPropertyMutation('bone', bone, 'color', `Set ${bone.name} color`, value)),
+    checkbox('Visible', bone.visible, (value) => rigPropertyMutation('bone', bone, 'visible', `${value ? 'Show' : 'Hide'} ${bone.name}`, value)),
+    checkbox('Locked', bone.locked, (value) => rigPropertyMutation('bone', bone, 'locked', `${value ? 'Lock' : 'Unlock'} ${bone.name}`, value)),
+  );
+  appendNote(identity.fieldset, `Typed ref: bone:${bone.id}`);
+  const drivers = store.document.constraints.filter((constraint) => constraint.enabled && (
+    referenceId(constraint.bone, 'bone') === bone.id
+    || (constraint.bones || []).some((reference) => referenceId(reference, 'bone') === bone.id)
+  ));
+  if (drivers.length) {
+    const ikDriver = drivers.find((constraint) => constraint.type === 'ik');
+    appendNote(
+      identity.fieldset,
+      ikDriver
+        ? `Driven by ${ikDriver.name}. Dragging this bone moves its IK target; disable the constraint to edit its pose rotation directly.`
+        : `Driven by ${drivers.map((constraint) => constraint.name).join(', ')}. Constraint results override authored pose channels.`,
+      'semanticNote',
+    );
+  }
+  inspector.appendChild(identity.fieldset);
+
+  const transformSection = (title, key, description) => {
+    const transform = section(title);
+    const property = (label, propertyKey, step = 1, angle = false) => field(
+      label,
+      angle ? Number(radiansToDegrees(bone[key][propertyKey]).toFixed(3)) : bone[key][propertyKey],
+      (value) => rigPropertyMutation('bone', bone, `${key}.${propertyKey}`, `Set ${bone.name} ${key} ${propertyKey}`, angle ? degreesToRadians(value) : value),
+      { type: 'number', number: true, step },
+    );
+    transform.grid.append(
+      property('X', 'x'),
+      property('Y', 'y'),
+      property('Rotation °', 'rotation', 0.5, true),
+      property('Scale X', 'scaleX', 0.05),
+      property('Scale Y', 'scaleY', 0.05),
+    );
+    appendNote(transform.fieldset, description);
+    inspector.appendChild(transform.fieldset);
+  };
+  transformSection('Rest transform', 'rest', 'Bind/rest values define the skeleton and skinning inverse matrices.');
+  transformSection('Pose transform', 'pose', 'Pose values are animatable. Constraint-solved values remain evaluated-only.');
+
+  const evaluated = evaluatedScene?.bones.find((candidate) => candidate.id === bone.id);
+  if (evaluated) {
+    const diagnostics = section('Evaluated pose');
+    diagnostics.grid.append(
+      field('Start X', Number(evaluated.start.x.toFixed(2)), () => {}, { type: 'number', number: true }),
+      field('Start Y', Number(evaluated.start.y.toFixed(2)), () => {}, { type: 'number', number: true }),
+      field('End X', Number(evaluated.end.x.toFixed(2)), () => {}, { type: 'number', number: true }),
+      field('End Y', Number(evaluated.end.y.toFixed(2)), () => {}, { type: 'number', number: true }),
+    );
+    diagnostics.grid.querySelectorAll('input').forEach((input) => { input.disabled = true; });
+    appendNote(diagnostics.fieldset, 'Read-only solved coordinates; these are never serialized.');
+    inspector.appendChild(diagnostics.fieldset);
+  }
+}
+
+function renderMeshInspector(mesh) {
+  inspectorTitle.textContent = mesh.name;
+  selectedType.textContent = 'MESH';
+  const identity = section('Mesh');
+  identity.grid.append(
+    field('Name', mesh.name, (value) => rigPropertyMutation('mesh', mesh, 'name', `Rename ${mesh.name}`, value)),
+    field('Opacity', mesh.opacity, (value) => rigPropertyMutation('mesh', mesh, 'opacity', `Set ${mesh.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05 }),
+    field('Fill', mesh.paint.fill, (value) => rigPropertyMutation('mesh', mesh, 'paint.fill', `Set ${mesh.name} fill`, value)),
+    field('Stroke', mesh.paint.stroke, (value) => rigPropertyMutation('mesh', mesh, 'paint.stroke', `Set ${mesh.name} stroke`, value)),
+    field('Stroke width', mesh.paint.strokeWidth, (value) => rigPropertyMutation('mesh', mesh, 'paint.strokeWidth', `Set ${mesh.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5 }),
+    checkbox('Visible', mesh.visible, (value) => rigPropertyMutation('mesh', mesh, 'visible', `${value ? 'Show' : 'Hide'} ${mesh.name}`, value)),
+    checkbox('Locked', mesh.locked, (value) => rigPropertyMutation('mesh', mesh, 'locked', `${value ? 'Lock' : 'Unlock'} ${mesh.name}`, value)),
+  );
+  inspector.appendChild(identity.fieldset);
+
+  const evaluated = evaluatedScene?.meshes.find((candidate) => candidate.id === mesh.id);
+  const weights = section('Weights & diagnostics');
+  const weightSums = mesh.vertices.map((vertex) => vertex.weights.reduce((sum, weight) => sum + weight.value, 0));
+  const unweighted = weightSums.filter((sum) => sum <= 0).length;
+  const nonNormalized = weightSums.filter((sum) => sum > 0 && Math.abs(sum - 1) > 1e-6).length;
+  const stats = document.createElement('div');
+  stats.className = 'vertexSummary';
+  stats.innerHTML = `<span>${mesh.vertices.length} vertices · ${mesh.triangles.length} triangles</span><strong class="${unweighted || nonNormalized ? 'diagnosticWarn' : 'diagnosticGood'}">${unweighted} unweighted / ${nonNormalized} off-sum</strong>`;
+  weights.fieldset.appendChild(stats);
+  const actions = document.createElement('div');
+  actions.className = 'inlineActions';
+  actions.append(
+    inspectorAction('Normalize', 'normalize', () => {
+      let changed = 0;
+      commit({ source: 'user', label: `Normalize ${mesh.name} weights` }, (documentModel) => {
+        changed = normalizeMeshWeights(documentModel, mesh.id);
+      });
+      showToast(`${changed} vertex weight sets normalized`);
+    }),
+    inspectorAction('Mirror L → R', 'mirror', () => {
+      const pairs = [];
+      const rightNameFor = (name) => {
+        if (/left/i.test(name)) return name.replace(/left/ig, 'Right');
+        if (/\.l\b/i.test(name)) return name.replace(/\.l\b/i, '.R');
+        if (/_l\b/i.test(name)) return name.replace(/_l\b/i, '_R');
+        if (/-l\b/i.test(name)) return name.replace(/-l\b/i, '-R');
+        return null;
+      };
+      for (const left of store.document.bones) {
+        const rightName = rightNameFor(left.name);
+        if (!rightName) continue;
+        const right = store.document.bones.find((candidate) => candidate.name.toLowerCase() === rightName.toLowerCase());
+        if (right) pairs.push([left.id, right.id]);
+      }
+      let mirrored = 0;
+      commit({ source: 'user', label: `Mirror ${mesh.name} weights` }, (documentModel) => {
+        mirrored = mirrorMeshWeights(documentModel, mesh.id, pairs, store.document.artboard.width / 2, 0.75);
+      });
+      showToast(`${mirrored} vertex weight sets mirrored`);
+    }),
+  );
+  weights.fieldset.appendChild(actions);
+  appendNote(weights.fieldset, `Maximum active influences: ${evaluated?.deformedVertices.reduce((max, vertex) => Math.max(max, vertex.influences), 0) || 0}. Red mesh points are unweighted.`);
+  inspector.appendChild(weights.fieldset);
+
+  const vertexWeights = section('Vertex weights');
+  const rememberedVertexId = selectedMeshVertices.get(mesh.id);
+  const vertex = mesh.vertices.find((candidate) => candidate.id === rememberedVertexId) || mesh.vertices[0];
+  selectedMeshVertices.set(mesh.id, vertex.id);
+  const vertexOptions = mesh.vertices.map((candidate, index) => ({
+    value: candidate.id,
+    label: `#${index} · ${candidate.id}`,
+  }));
+  vertexWeights.grid.append(field('Vertex', vertex.id, (value) => {
+    selectedMeshVertices.set(mesh.id, value);
+    renderInspector();
+  }, { select: vertexOptions, full: true }));
+  for (const bone of store.document.bones) {
+    const influence = vertex.weights.find((weight) => referenceId(weight.bone, 'bone') === bone.id);
+    vertexWeights.grid.append(field(bone.name, influence?.value || 0, (value) => {
+      commit({ source: 'user', label: `Set ${mesh.name} vertex weight for ${bone.name}` }, (documentModel) => {
+        const documentMesh = meshById(documentModel, mesh.id);
+        const documentVertex = documentMesh.vertices.find((candidate) => candidate.id === vertex.id);
+        documentVertex.weights = documentVertex.weights.filter((weight) => referenceId(weight.bone, 'bone') !== bone.id);
+        if (value > 0) documentVertex.weights.push({ bone: createBoneRef(bone.id), value });
+      });
+    }, { type: 'number', number: true, min: 0, max: 1, step: 0.05 }));
+  }
+  appendNote(vertexWeights.fieldset, 'Weights are authored values from 0 to 1. Use Normalize after editing; up to eight positive bone influences are allowed per vertex.');
+  inspector.appendChild(vertexWeights.fieldset);
+}
+
+function renderControlInspector(control) {
+  inspectorTitle.textContent = control.name;
+  selectedType.textContent = 'CONTROL';
+  const identity = section('Pose control');
+  identity.grid.append(
+    field('Name', control.name, (value) => rigPropertyMutation('control', control, 'name', `Rename ${control.name}`, value)),
+    field('X', control.position.x, (value) => rigPropertyMutation('control', control, 'position.x', `Set ${control.name} X`, value), { type: 'number', number: true, step: 1 }),
+    field('Y', control.position.y, (value) => rigPropertyMutation('control', control, 'position.y', `Set ${control.name} Y`, value), { type: 'number', number: true, step: 1 }),
+    field('Color', control.color, (value) => rigPropertyMutation('control', control, 'color', `Set ${control.name} color`, value)),
+    checkbox('Visible', control.visible, (value) => rigPropertyMutation('control', control, 'visible', `${value ? 'Show' : 'Hide'} ${control.name}`, value)),
+    checkbox('Locked', control.locked, (value) => rigPropertyMutation('control', control, 'locked', `${value ? 'Lock' : 'Unlock'} ${control.name}`, value)),
+  );
+  if (control.kind === 'scalar') identity.grid.append(
+    field('Value', control.value, (value) => rigPropertyMutation('control', control, 'value', `Set ${control.name} value`, value), { type: 'number', number: true, min: control.min, max: control.max, step: 0.01 }),
+    field('Minimum', control.min, (value) => rigPropertyMutation('control', control, 'min', `Set ${control.name} minimum`, value), { type: 'number', number: true, step: 0.01 }),
+    field('Maximum', control.max, (value) => rigPropertyMutation('control', control, 'max', `Set ${control.name} maximum`, value), { type: 'number', number: true, step: 0.01 }),
+  );
+  appendNote(identity.fieldset, 'Drag the yellow diamond on the artboard. IK and other constraints solve in the evaluated scene.');
+  inspector.appendChild(identity.fieldset);
+}
+
+function renderConstraintInspector(constraint) {
+  inspectorTitle.textContent = constraint.name;
+  selectedType.textContent = constraint.type.toUpperCase();
+  const settings = section('Constraint');
+  const boneOptions = store.document.bones.map((bone) => ({ value: bone.id, label: bone.name }));
+  const controlOptions = store.document.controls.map((control) => ({ value: control.id, label: control.name }));
+  const pathOptions = store.document.nodes.filter((node) => node.type === 'path').map((node) => ({ value: node.id, label: node.name }));
+  settings.grid.append(
+    field('Name', constraint.name, (value) => rigPropertyMutation('constraint', constraint, 'name', `Rename ${constraint.name}`, value)),
+    field('Strength', constraint.strength, (value) => rigPropertyMutation('constraint', constraint, 'strength', `Set ${constraint.name} strength`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05 }),
+    field('Order', constraint.order, (value) => rigPropertyMutation('constraint', constraint, 'order', `Set ${constraint.name} order`, value), { type: 'number', number: true, step: 1 }),
+    checkbox('Enabled', constraint.enabled, (value) => rigPropertyMutation('constraint', constraint, 'enabled', `${value ? 'Enable' : 'Disable'} ${constraint.name}`, value)),
+  );
+  if (constraint.type === 'ik') {
+    const endBoneId = referenceId(constraint.bones.at(-1), 'bone');
+    settings.grid.append(
+      field('End bone', endBoneId, (value) => {
+        const end = boneById(store.document, value);
+        const parent = end?.parent ? boneById(store.document, referenceId(end.parent, 'bone')) : null;
+        const chain = parent ? [parent, end] : [end];
+        rigPropertyMutation('constraint', constraint, 'bones', `Retarget ${constraint.name} chain`, chain.map((bone) => createBoneRef(bone.id)));
+      }, { select: boneOptions }),
+      field('Target control', referenceId(constraint.target, 'control'), (value) => rigPropertyMutation('constraint', constraint, 'target', `Retarget ${constraint.name}`, createControlRef(value)), { select: controlOptions }),
+    );
+  } else {
+    settings.grid.append(field('Driven bone', referenceId(constraint.bone, 'bone'), (value) => rigPropertyMutation('constraint', constraint, 'bone', `Set ${constraint.name} driven bone`, createBoneRef(value)), { select: boneOptions }));
+    if (constraint.type === 'distance') {
+      settings.grid.append(field('Target control', referenceId(constraint.target, 'control'), (value) => rigPropertyMutation('constraint', constraint, 'target', `Retarget ${constraint.name}`, createControlRef(value)), { select: controlOptions }));
+    } else if (constraint.type === 'path') {
+      settings.grid.append(field('Path', referenceId(constraint.path, 'node'), (value) => rigPropertyMutation('constraint', constraint, 'path', `Retarget ${constraint.name}`, createNodeRef(value)), { select: pathOptions }));
+    } else {
+      settings.grid.append(field('Target bone', referenceId(constraint.target, 'bone'), (value) => rigPropertyMutation('constraint', constraint, 'target', `Retarget ${constraint.name}`, createBoneRef(value)), { select: boneOptions.filter((option) => option.value !== referenceId(constraint.bone, 'bone')) }));
+    }
+  }
+  if (constraint.type === 'ik') settings.grid.append(
+    field('Bend', constraint.bendDirection, (value) => rigPropertyMutation('constraint', constraint, 'bendDirection', `Set ${constraint.name} bend direction`, value), {
+      select: [{ value: 1, label: 'Clockwise' }, { value: -1, label: 'Counter-clockwise' }],
+    }),
+  );
+  if (constraint.type === 'distance') settings.grid.append(
+    field('Distance', constraint.distance, (value) => rigPropertyMutation('constraint', constraint, 'distance', `Set ${constraint.name} distance`, value), { type: 'number', number: true, min: 0, step: 1 }),
+  );
+  if (constraint.type === 'path') settings.grid.append(
+    field('Position', constraint.position, (value) => rigPropertyMutation('constraint', constraint, 'position', `Set ${constraint.name} position`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.01 }),
+    checkbox('Follow tangent', constraint.rotate, (value) => rigPropertyMutation('constraint', constraint, 'rotate', `Set ${constraint.name} tangent follow`, value)),
+  );
+  if (['rotation', 'transform'].includes(constraint.type)) settings.grid.append(
+    field('Offset °', Number(radiansToDegrees(constraint.offset).toFixed(3)), (value) => rigPropertyMutation('constraint', constraint, 'offset', `Set ${constraint.name} offset`, degreesToRadians(value)), { type: 'number', number: true, step: 0.5 }),
+  );
+  const diagnostic = evaluatedScene?.diagnostics.constraints.find((candidate) => candidate.id === constraint.id);
+  appendNote(settings.fieldset, `Solver: ${diagnostic?.status || 'not evaluated'}${Number.isFinite(diagnostic?.error) ? ` · endpoint error ${diagnostic.error.toFixed(2)} px` : ''}. Solved values are not authored.`);
+  inspector.appendChild(settings.fieldset);
+}
+
+function renderInspector() {
+  inspector.replaceChildren();
+  if (store.selectedNode) renderNodeInspector(store.selectedNode);
+  else if (store.selectedBone) renderBoneInspector(store.selectedBone);
+  else if (store.selectedMesh) renderMeshInspector(store.selectedMesh);
+  else if (store.selectedControl) renderControlInspector(store.selectedControl);
+  else if (store.selectedConstraint) renderConstraintInspector(store.selectedConstraint);
+  else renderDocumentInspector();
+}
+
+function initializeTimeline() {
+  if (store.document.timelines.length === 0) {
+    const firstTimeline = createTimeline({ name: 'Main Timeline', duration: 60, fps: 30 });
+    commit('Create default timeline', (doc) => doc.timelines.push(firstTimeline));
+    activeTimelineId = firstTimeline.id;
+  } else {
+    activeTimelineId = store.document.timelines[0].id;
+  }
+  animationPlayback = new AnimationPlayback(store.document);
+  renderTimeline();
+}
+
+function renderTimelineSelect() {
+  timelineSelect.replaceChildren();
+  for (const timeline of store.document.timelines) {
+    const option = document.createElement('option');
+    option.value = timeline.id;
+    option.textContent = timeline.name;
+    option.selected = timeline.id === activeTimelineId;
+    timelineSelect.appendChild(option);
+  }
+  timelineDelete.disabled = store.document.timelines.length === 0;
+}
+
+function renderTimelineSettings() {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return;
+
+  loopMode.value = timeline.loop;
+  fpsInput.value = timeline.fps;
+  durationInput.value = timeline.duration;
+  frameReadout.textContent = `${Math.round(currentFrame)} / ${timeline.duration}`;
+  timelineRuler.setAttribute('aria-valuemax', String(timeline.duration));
+  timelineRuler.setAttribute('aria-valuenow', String(Math.round(currentFrame)));
+}
+
+function renderTimelineTracks() {
+  timelineTracks.replaceChildren();
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline || timeline.tracks.length === 0) {
+    const emptyMsg = document.createElement('div');
+    emptyMsg.style.padding = '20px 12px';
+    emptyMsg.style.color = 'var(--quiet)';
+    emptyMsg.style.fontSize = '10px';
+    emptyMsg.textContent = 'No animated properties. Select a property and click the keyframe button.';
+    timelineTracks.appendChild(emptyMsg);
+    return;
+  }
+
+  for (const track of timeline.tracks) {
+    const trackEl = document.createElement('div');
+    trackEl.className = 'timelineTrack';
+    if (track.address === selectedTrackAddress) trackEl.classList.add('isSelected');
+    trackEl.textContent = track.address.replace(/^(node|bone|control|mesh|constraint):([^/]+)\//, '$1/');
+    trackEl.addEventListener('click', () => {
+      selectedTrackAddress = track.address;
+      renderTimeline();
+    });
+    timelineTracks.appendChild(trackEl);
+  }
+}
+
+function renderTimelineKeyframes() {
+  timelineGrid.replaceChildren();
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return;
+
+  const trackHeight = 32;
+  timelineGrid.style.height = `${Math.max(trackHeight * timeline.tracks.length, trackHeight)}px`;
+
+  for (let i = 0; i < timeline.tracks.length; i++) {
+    const track = timeline.tracks[i];
+    for (const keyframe of track.keyframes) {
+      const kfEl = document.createElement('div');
+      kfEl.className = 'timelineKeyframe';
+      if (track.address === selectedTrackAddress) kfEl.classList.add('isSelected');
+      const x = (keyframe.frame / timeline.duration) * (timeline.duration * 20);
+      const y = i * trackHeight + trackHeight / 2;
+      kfEl.style.left = `${x}px`;
+      kfEl.style.top = `${y}px`;
+      kfEl.title = `Frame ${keyframe.frame}, ${keyframe.easing}`;
+      kfEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedTrackAddress = track.address;
+        currentFrame = keyframe.frame;
+        renderTimeline();
+      });
+      timelineGrid.appendChild(kfEl);
+    }
+  }
+
+  const rulerWidth = timeline.duration * 20;
+  timelineRuler.style.width = `${rulerWidth}px`;
+  timelineGrid.style.width = `${rulerWidth}px`;
+}
+
+function updatePlayhead() {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return;
+  const x = (currentFrame / timeline.duration) * (timeline.duration * 20);
+  playhead.style.transform = `translateX(${x}px)`;
+}
+
+function renderTimeline() {
+  renderTimelineSelect();
+  renderTimelineSettings();
+  renderTimelineTracks();
+  renderTimelineKeyframes();
+  updatePlayhead();
+}
+
+function setCurrentFrame(frame) {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return;
+  currentFrame = Math.max(0, Math.min(frame, timeline.duration));
+  updatePlayhead();
+  renderTimelineSettings();
+  evaluatedScene = evaluateDocument(store.document, {}, animationPlayback);
+  renderer.render(evaluatedScene, store.selectedRef);
+}
+
+function playAnimation() {
+  if (!activeTimelineId || !animationPlayback) return;
+  const timeline = timelineById(store.document, activeTimelineId);
+  if (!timeline) return;
+
+  if (animationPlayback.isPlaying) {
+    animationPlayback.pause();
+    playToggle.innerHTML = '';
+    playToggle.appendChild(icon('play'));
+    playToggle.title = 'Play (Space)';
+    clearInterval(playbackTimer);
+    return;
+  }
+
+  if (currentFrame >= timeline.duration && timeline.loop === 'none') {
+    currentFrame = 0;
+  }
+
+  animationPlayback.play(activeTimelineId);
+  playToggle.innerHTML = '';
+  playToggle.appendChild(icon('pause'));
+  playToggle.title = 'Pause (Space)';
+
+  playbackTimer = setInterval(() => {
+    if (!animationPlayback.isPlaying) {
+      clearInterval(playbackTimer);
+      return;
+    }
+
+    const states = animationPlayback.getActiveStates();
+    if (states.length > 0) {
+      currentFrame = states[0].time * timeline.fps;
+      setCurrentFrame(currentFrame);
+    }
+
+    if (timeline.loop === 'none' && currentFrame >= timeline.duration) {
+      stopAnimation();
+    }
+  }, 1000 / timeline.fps);
+}
+
+function stopAnimation() {
+  if (animationPlayback) animationPlayback.stop();
+  clearInterval(playbackTimer);
+  playToggle.innerHTML = '';
+  playToggle.appendChild(icon('play'));
+  playToggle.title = 'Play (Space)';
+  currentFrame = 0;
+  setCurrentFrame(0);
+}
+
+function recordKeyframe() {
+  if (!activeTimelineId) return;
+  const selected = store.selectedRef;
+  if (!selected) {
+    showToast('Select an object first', true);
+    return;
+  }
+
+  // Determine animatable property from selection
+  let address = null;
+  if (selected.kind === 'node') {
+    const node = nodeById(store.document, selected.id);
+    if (node.type === 'rectangle') address = nodePropertyAddress(selected.id, 'geometry/width');
+    else if (node.type === 'ellipse') address = nodePropertyAddress(selected.id, 'geometry/width');
+    else address = nodePropertyAddress(selected.id, 'transform/x');
+  } else if (selected.kind === 'bone') {
+    address = rigPropertyAddress('bone', selected.id, 'pose.rotation');
+  } else if (selected.kind === 'control') {
+    address = rigPropertyAddress('control', selected.id, 'position.x');
+  }
+
+  if (!address) {
+    showToast('Cannot keyframe this property', true);
+    return;
+  }
+
+  try {
+    store.setKeyframe({
+      timelineId: activeTimelineId,
+      address,
+      frame: Math.round(currentFrame),
+      easing: 'ease-in-out',
+    }, `Keyframe at frame ${Math.round(currentFrame)}`);
+    selectedTrackAddress = address;
+    renderTimeline();
+    showToast(`Keyframe recorded at frame ${Math.round(currentFrame)}`);
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+}
+
+function renderAll(reason = 'change') {
+  documentName.value = store.document.name;
+  const itemCount = store.document.nodes.length
+    + store.document.bones.length
+    + store.document.meshes.length
+    + store.document.controls.length
+    + store.document.constraints.length;
+  nodeCount.textContent = String(itemCount);
+  deleteNodeButton.disabled = !store.selectedObject;
+  undoButton.disabled = !store.canUndo;
+  redoButton.disabled = !store.canRedo;
+  saveState.textContent = store.revision === savedRevision ? 'Saved' : 'Modified';
+  artboardFrame.style.aspectRatio = `${store.document.artboard.width} / ${store.document.artboard.height}`;
+
+  // Re-create playback if document changed
+  if (!animationPlayback || animationPlayback.document !== store.document) {
+    const wasPlaying = animationPlayback?.isPlaying;
+    if (wasPlaying) stopAnimation();
+    animationPlayback = new AnimationPlayback(store.document);
+  }
+
+  evaluatedScene = evaluateDocument(store.document, {}, animationPlayback);
+  renderer.render(evaluatedScene, store.selectedRef);
+  renderHierarchy();
+  renderInspector();
+  renderTimeline();
+
+  const selected = store.selectedObject;
+  const selectedLabel = store.selectedKind === 'constraint' ? selected?.type : store.selectedKind;
+  selectionStatus.textContent = selected ? `${selected.name} · ${selectedLabel}` : 'Artboard selected';
+  if (!['selection', 'drag', 'validation-error'].includes(reason)) setStatus(reason.replace(/^./, (letter) => letter.toUpperCase()));
+}
+
+function scheduleAutosave(reason) {
+  if (['selection', 'drag', 'validation-error'].includes(reason)) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, serializeVeyra(store.document));
+      saveState.textContent = store.revision === savedRevision ? 'Saved' : 'Autosaved';
+    } catch (error) {
+      console.warn('Veyra autosave failed:', error);
+    }
+  }, 350);
+}
+
+store.subscribe((_current, reason) => {
+  renderAll(reason);
+  scheduleAutosave(reason);
+});
+
+function addNode(type) {
+  const selected = store.selectedNode;
+  const parent = selected?.type === 'group' ? selected : null;
+  const center = parent
+    ? { x: 0, y: 0 }
+    : { x: store.document.artboard.width / 2, y: store.document.artboard.height / 2 };
+  const palette = {
+    rectangle: { fill: '#f472b6', stroke: '#831843', strokeWidth: 3 },
+    ellipse: { fill: '#22d3ee', stroke: '#155e75', strokeWidth: 3 },
+    path: { fill: '#fce7f3', stroke: '#ec4899', strokeWidth: 4 },
+    polygon: { fill: '#c4b5fd', stroke: '#5b21b6', strokeWidth: 3 },
+    star: { fill: '#facc15', stroke: '#854d0e', strokeWidth: 3 },
+    group: { fill: 'none', stroke: 'none', strokeWidth: 0 },
+  };
+  const node = createNode(type, {
+    name: `New ${type[0].toUpperCase()}${type.slice(1)}`,
+    parent: parent ? createNodeRef(parent.id) : null,
+    transform: center,
+    paint: palette[type],
+  });
+  store.execute(`Add ${type}`, (documentModel) => documentModel.nodes.push(node));
+  store.select(createNodeRef(node.id));
+  showToast(`${node.name} added`);
+}
+
+document.querySelectorAll('[data-add]').forEach((button) => {
+  button.addEventListener('click', () => addNode(button.dataset.add));
+});
+
+function addRig(kind) {
+  const center = {
+    x: store.document.artboard.width / 2,
+    y: store.document.artboard.height / 2,
+  };
+  if (kind === 'bone') {
+    const parent = store.selectedBone;
+    const bone = createBone({
+      name: parent ? `${parent.name} Child` : 'New Bone',
+      parent: parent ? createBoneRef(parent.id) : null,
+      rest: parent ? { x: parent.length, y: 0 } : center,
+      length: parent ? Math.max(40, parent.length * 0.72) : 120,
+    });
+    store.execute('Add bone', (documentModel) => documentModel.bones.push(bone));
+    store.select(createBoneRef(bone.id));
+    setTool('bone', false);
+    showToast(`${bone.name} added`);
+    return;
+  }
+
+  if (kind === 'control') {
+    const selectedBoneState = evaluatedScene?.bones.find((bone) => bone.id === store.selectedBone?.id);
+    const control = createControl({
+      name: 'New Position Control',
+      position: selectedBoneState?.end || center,
+    });
+    store.execute('Add control', (documentModel) => documentModel.controls.push(control));
+    store.select(createControlRef(control.id));
+    setTool('control', false);
+    showToast(`${control.name} added`);
+    return;
+  }
+
+  if (kind === 'mesh') {
+    const sourceBone = store.selectedBone || store.document.bones[0] || null;
+    const weights = sourceBone ? [{ bone: createBoneRef(sourceBone.id), value: 1 }] : [];
+    const vertices = [
+      { id: `meshVertex_${crypto.randomUUID()}`, x: center.x - 80, y: center.y - 45, weights: cloneValue(weights) },
+      { id: `meshVertex_${crypto.randomUUID()}`, x: center.x + 80, y: center.y - 45, weights: cloneValue(weights) },
+      { id: `meshVertex_${crypto.randomUUID()}`, x: center.x + 80, y: center.y + 45, weights: cloneValue(weights) },
+      { id: `meshVertex_${crypto.randomUUID()}`, x: center.x - 80, y: center.y + 45, weights: cloneValue(weights) },
+    ];
+    const mesh = createMesh({
+      name: 'New Weighted Mesh',
+      vertices,
+      triangles: [
+        [vertices[0], vertices[1], vertices[2]].map((vertex) => createMeshVertexRef(vertex.id)),
+        [vertices[0], vertices[2], vertices[3]].map((vertex) => createMeshVertexRef(vertex.id)),
+      ],
+    });
+    store.execute('Add mesh', (documentModel) => documentModel.meshes.push(mesh));
+    store.select({ kind: 'mesh', id: mesh.id });
+    setTool('mesh', false);
+    showToast(sourceBone ? `${mesh.name} added and weighted to ${sourceBone.name}` : `${mesh.name} added without weights`);
+    return;
+  }
+
+  if (kind === 'constraint') {
+    const type = $('constraintType').value;
+    const bone = store.selectedBone || store.document.bones.at(-1);
+    const control = store.document.controls[0];
+    const targetBone = store.document.bones.find((candidate) => candidate.id !== bone?.id);
+    const path = store.document.nodes.find((node) => node.type === 'path');
+    if (!bone) {
+      showToast('Add and select a bone before creating a constraint.', true);
+      return;
+    }
+    let overrides;
+    if (type === 'ik') {
+      if (!control) {
+        showToast('IK requires a position control.', true);
+        return;
+      }
+      const parent = bone.parent ? boneById(store.document, referenceId(bone.parent, 'bone')) : null;
+      const chain = parent ? [parent, bone] : [bone];
+      overrides = {
+        bones: chain.map((item) => createBoneRef(item.id)),
+        target: createControlRef(control.id),
+      };
+    } else if (type === 'distance') {
+      if (!control) {
+        showToast('A distance constraint requires a position control.', true);
+        return;
+      }
+      overrides = { bone: createBoneRef(bone.id), target: createControlRef(control.id), distance: bone.length };
+    } else if (type === 'path') {
+      if (!path) {
+        showToast('A path constraint requires an authored path object.', true);
+        return;
+      }
+      overrides = { bone: createBoneRef(bone.id), path: createNodeRef(path.id), position: 0.5 };
+    } else {
+      if (!targetBone) {
+        showToast(`${type[0].toUpperCase()}${type.slice(1)} requires a second bone as its target.`, true);
+        return;
+      }
+      overrides = { bone: createBoneRef(bone.id), target: createBoneRef(targetBone.id) };
+    }
+    const constraint = createConstraint(type, {
+      name: `${bone.name} ${type[0].toUpperCase()}${type.slice(1)}`,
+      ...overrides,
+      order: store.document.constraints.length,
+    });
+    store.execute(`Add ${type} constraint`, (documentModel) => documentModel.constraints.push(constraint));
+    store.select({ kind: 'constraint', id: constraint.id });
+    setTool('constraint', false);
+    showToast(`${constraint.name} added`);
+  }
+}
+
+document.querySelectorAll('[data-add-rig]').forEach((button) => {
+  button.addEventListener('click', () => addRig(button.dataset.addRig));
+});
+
+document.querySelectorAll('[data-tool]').forEach((button) => {
+  button.addEventListener('click', () => setTool(button.dataset.tool));
+});
+
+documentName.addEventListener('change', () => {
+  const next = documentName.value.trim() || 'Untitled Veyra';
+  commit('Rename document', (documentModel) => { documentModel.name = next; });
+});
+
+$('newDocument').onclick = () => {
+  if (store.revision !== savedRevision && !confirm('Create a new Veyra document? Your current work is autosaved but not downloaded.')) return;
+  store.replaceDocument(createDocument({ name: 'Untitled Veyra' }), 'new document');
+  savedRevision = store.revision;
+  fitCanvas();
+  localStorage.removeItem(AUTOSAVE_KEY);
+  showToast('New Veyra document created');
+};
+
+$('openDocument').onclick = () => openFile.click();
+openFile.onchange = async () => {
+  const picked = openFile.files?.[0];
+  if (!picked) return;
+  try {
+    const documentModel = parseVeyra(await picked.text());
+    store.replaceDocument(documentModel, `opened ${picked.name}`);
+    savedRevision = store.revision;
+    fitCanvas();
+    showToast(`${picked.name} opened`);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || String(error), true);
+  } finally {
+    openFile.value = '';
+  }
+};
+
+function save() {
+  try {
+    downloadVeyra(store.document);
+    savedRevision = store.revision;
+    renderAll('saved .veyra');
+    showToast(`${store.document.name}.veyra downloaded`);
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+}
+
+$('saveDocument').onclick = save;
+$('exportSvg').onclick = () => {
+  try {
+    downloadSvg(store.document);
+    showToast('SVG render exported');
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+};
+
+undoButton.onclick = () => store.undo();
+redoButton.onclick = () => store.redo();
+deleteNodeButton.onclick = () => store.removeSelection();
+
+// Timeline event handlers
+timelineToggle.onclick = () => {
+  const collapsed = timelinePanel.dataset.collapsed === 'true';
+  timelinePanel.dataset.collapsed = collapsed ? 'false' : 'true';
+  timelineToggle.setAttribute('aria-expanded', String(!collapsed));
+  timelineToggle.title = collapsed ? 'Collapse timeline' : 'Expand timeline';
+};
+
+timelineSelect.onchange = () => {
+  activeTimelineId = timelineSelect.value;
+  if (animationPlayback?.isPlaying) stopAnimation();
+  renderTimeline();
+};
+
+timelineAdd.onclick = () => {
+  const name = prompt('Timeline name:', `Timeline ${store.document.timelines.length + 1}`);
+  if (!name) return;
+  try {
+    const id = store.addTimeline({ name, duration: 60, fps: 30 }, `Create timeline ${name}`);
+    activeTimelineId = id;
+    renderTimeline();
+    showToast(`Timeline "${name}" created`);
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+};
+
+timelineDelete.onclick = () => {
+  if (!activeTimelineId) return;
+  const timeline = timelineById(store.document, activeTimelineId);
+  if (!confirm(`Delete timeline "${timeline.name}"?`)) return;
+  try {
+    store.removeTimeline(activeTimelineId, `Delete timeline ${timeline.name}`);
+    activeTimelineId = store.document.timelines[0]?.id || null;
+    if (animationPlayback?.isPlaying) stopAnimation();
+    renderTimeline();
+    showToast('Timeline deleted');
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+};
+
+playToggle.onclick = () => playAnimation();
+playStop.onclick = () => stopAnimation();
+playToStart.onclick = () => {
+  currentFrame = 0;
+  setCurrentFrame(0);
+};
+
+keyframeSelected.onclick = () => recordKeyframe();
+
+loopMode.onchange = () => {
+  if (!activeTimelineId) return;
+  try {
+    store.updateTimeline(activeTimelineId, { loop: loopMode.value }, 'Change loop mode');
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+};
+
+fpsInput.onchange = () => {
+  if (!activeTimelineId) return;
+  const fps = parseInt(fpsInput.value, 10);
+  if (!fps || fps < 1 || fps > 240) {
+    showToast('FPS must be between 1 and 240', true);
+    return;
+  }
+  try {
+    store.updateTimeline(activeTimelineId, { fps }, 'Change FPS');
+    renderTimeline();
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+};
+
+durationInput.onchange = () => {
+  if (!activeTimelineId) return;
+  const duration = parseInt(durationInput.value, 10);
+  if (!duration || duration < 1 || duration > 100000) {
+    showToast('Duration must be between 1 and 100000 frames', true);
+    return;
+  }
+  try {
+    store.updateTimeline(activeTimelineId, { duration }, 'Change duration');
+    renderTimeline();
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+};
+
+timelineRuler.addEventListener('click', (e) => {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return;
+  const rect = timelineRuler.getBoundingClientRect();
+  const x = e.clientX - rect.left + timelineRuler.parentElement.scrollLeft;
+  const frame = (x / (timeline.duration * 20)) * timeline.duration;
+  setCurrentFrame(frame);
+});
+
+function updateZoomLabel() {
+  zoomValue.value = `${Math.round(zoom * 100)}%`;
+  zoomValue.textContent = zoomValue.value;
+}
+
+function setZoom(next, anchor = null) {
+  zoom = renderer.setZoom(next, anchor);
+  evaluatedScene = evaluateDocument(store.document);
+  renderer.render(evaluatedScene, store.selectedRef);
+  updateZoomLabel();
+}
+
+function fitCanvas() {
+  zoom = renderer.resetView();
+  evaluatedScene = evaluateDocument(store.document);
+  renderer.render(evaluatedScene, store.selectedRef);
+  updateZoomLabel();
+  setStatus('Canvas fitted');
+}
+
+$('zoomOut').onclick = () => setZoom(zoom / 1.2);
+$('zoomIn').onclick = () => setZoom(zoom * 1.2);
+$('zoomFit').onclick = fitCanvas;
+
+stageViewport.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  if (event.ctrlKey || event.metaKey || event.altKey) {
+    const anchor = renderer.clientPoint(event.clientX, event.clientY);
+    const factor = Math.exp(-event.deltaY * 0.002);
+    setZoom(zoom * factor, anchor);
+    setStatus(`Canvas zoom ${Math.round(zoom * 100)}%`);
+    return;
+  }
+  const horizontal = event.shiftKey ? event.deltaY + event.deltaX : event.deltaX;
+  const vertical = event.shiftKey ? 0 : event.deltaY;
+  const worldPerPixel = store.document.artboard.width / Math.max(1, zoom * canvas.clientWidth);
+  renderer.panBy(horizontal * worldPerPixel, vertical * worldPerPixel);
+  setStatus(event.shiftKey ? 'Canvas panned horizontally' : 'Canvas panned');
+}, { passive: false });
+
+let panGesture = null;
+stageViewport.addEventListener('pointerdown', (event) => {
+  const shouldPan = currentTool === 'pan' || event.altKey || event.button === 1;
+  if (!shouldPan) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  panGesture = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY };
+  stageViewport.setPointerCapture?.(event.pointerId);
+  stageViewport.classList.add('isPanning');
+}, true);
+
+stageViewport.addEventListener('pointermove', (event) => {
+  if (!panGesture || event.pointerId !== panGesture.pointerId) return;
+  const before = renderer.clientPoint(panGesture.clientX, panGesture.clientY);
+  const after = renderer.clientPoint(event.clientX, event.clientY);
+  renderer.panBy(before.x - after.x, before.y - after.y);
+  panGesture.clientX = event.clientX;
+  panGesture.clientY = event.clientY;
+});
+
+const finishPan = (event) => {
+  if (!panGesture || event.pointerId !== panGesture.pointerId) return;
+  stageViewport.releasePointerCapture?.(event.pointerId);
+  panGesture = null;
+  stageViewport.classList.remove('isPanning');
+  setStatus('Canvas panned');
+};
+stageViewport.addEventListener('pointerup', finishPan);
+stageViewport.addEventListener('pointercancel', finishPan);
+const toggleInspectorButton = $('toggleInspector');
+toggleInspectorButton.onclick = () => {
+  const expanded = inspectorPanel.classList.toggle('isCollapsed') === false;
+  toggleInspectorButton.setAttribute('aria-expanded', String(expanded));
+};
+
+window.addEventListener('keydown', (event) => {
+  const target = event.target;
+  const editing = target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target?.isContentEditable;
+  const commandKey = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  if (commandKey && (['+', '='].includes(event.key) || event.code === 'NumpadAdd')) {
+    event.preventDefault();
+    setZoom(zoom * 1.2);
+    setStatus(`Canvas zoom ${Math.round(zoom * 100)}%`);
+  } else if (commandKey && (event.key === '-' || event.code === 'NumpadSubtract')) {
+    event.preventDefault();
+    setZoom(zoom / 1.2);
+    setStatus(`Canvas zoom ${Math.round(zoom * 100)}%`);
+  } else if (commandKey && (event.key === '0' || event.code === 'Numpad0')) {
+    event.preventDefault();
+    fitCanvas();
+  } else if (commandKey && key === 's') {
+    event.preventDefault();
+    save();
+  } else if (!editing && commandKey && key === 'z') {
+    event.preventDefault();
+    if (event.shiftKey) store.redo();
+    else store.undo();
+  } else if (!editing && commandKey && key === 'y') {
+    event.preventDefault();
+    store.redo();
+  } else if (!editing && !commandKey && !event.altKey && ['v', 'b', 'm', 'c', 'k', 'h'].includes(key)) {
+    event.preventDefault();
+    setTool({ v: 'select', b: 'bone', m: 'mesh', c: 'control', k: 'constraint', h: 'pan' }[key]);
+  } else if (!editing && event.key === ' ') {
+    event.preventDefault();
+    playAnimation();
+  } else if (!editing && (event.key === 'Delete' || event.key === 'Backspace') && store.selectedId) {
+    event.preventDefault();
+    store.removeSelection();
+  } else if (!editing && event.key === 'Escape') {
+    store.select(null);
+  }
+});
+
+window.addEventListener('beforeunload', () => {
+  try { localStorage.setItem(AUTOSAVE_KEY, serializeVeyra(store.document)); } catch {}
+});
+
+globalThis.veyra = Object.freeze({
+  getSceneSummary: (options = {}) => createSceneSummary(store.document, options),
+  getDocument: () => cloneValue(store.document),
+  getEvaluatedScene: () => cloneValue(evaluateDocument(store.document)),
+  readProperty: (address) => readProperty(store.document, address),
+  applyCommand: ({ label, address, value, source = 'script' }) => {
+    store.setProperty({ label, source, propertyAddresses: [address] }, address, value);
+    return readProperty(store.document, address);
+  },
+  setMeshVertexWeights: ({ meshId, vertexId, weights, label = 'Set mesh vertex weights', source = 'script' }) => {
+    store.execute({ label, source }, (documentModel) => {
+      const mesh = meshById(documentModel, meshId);
+      const vertex = mesh?.vertices.find((candidate) => candidate.id === vertexId);
+      if (!vertex) throw new TypeError(`Mesh vertex ${vertexId} does not exist on ${meshId}.`);
+      vertex.weights = weights.map((weight) => ({
+        bone: createBoneRef(referenceId(weight.bone ?? weight.boneId, 'bone')),
+        value: Number(weight.value),
+      }));
+    });
+    return cloneValue(meshById(store.document, meshId).vertices.find((vertex) => vertex.id === vertexId).weights);
+  },
+  createTimeline: ({ name = 'Timeline', duration = 60, fps = 30, loop = 'none' } = {}) => {
+    return store.addTimeline({ name, duration, fps, loop }, { label: `Create timeline ${name}`, source: 'script' });
+  },
+  setKeyframe: ({ timelineId, address, frame, value, easing = 'ease-in-out', easingParams }) => {
+    store.setKeyframe({ timelineId, address, frame, value, easing, easingParams }, { label: 'Set keyframe', source: 'script' });
+    return true;
+  },
+  removeKeyframe: ({ timelineId, address, frame }) => {
+    return store.removeKeyframe({ timelineId, address, frame }, { label: 'Remove keyframe', source: 'script' });
+  },
+  getTimelines: () => cloneValue(store.document.timelines),
+  playTimeline: (timelineId, { loop, speed } = {}) => {
+    if (!animationPlayback) return false;
+    activeTimelineId = timelineId;
+    animationPlayback.play(timelineId, { loop, speed });
+    renderTimeline();
+    return true;
+  },
+  stopPlayback: () => {
+    stopAnimation();
+    return true;
+  },
+  getCommandHistory: () => store.commandHistory,
+});
+
+setTool('select', false);
+setZoom(1);
+initializeTimeline();
+renderAll(restored ? 'autosave restored' : 'Veyra document ready');
+if (restored) showToast('Autosaved Veyra document restored');
