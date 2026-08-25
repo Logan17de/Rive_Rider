@@ -1,0 +1,208 @@
+{
+  "artboard": {
+    "background": "#fff7fc",
+    "height": 260,
+    "width": 360
+  },
+  "assets": [],
+  "bones": [
+    {
+      "color": "#22d3ee",
+      "id": "bone_upper",
+      "length": 100,
+      "locked": false,
+      "name": "Upper Arm",
+      "parent": null,
+      "pose": {
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "x": 0,
+        "y": 0
+      },
+      "rest": {
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "x": 100,
+        "y": 100
+      },
+      "visible": true
+    },
+    {
+      "color": "#22d3ee",
+      "id": "bone_forearm",
+      "length": 80,
+      "locked": false,
+      "name": "Forearm",
+      "parent": {
+        "id": "bone_upper",
+        "kind": "bone"
+      },
+      "pose": {
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "x": 0,
+        "y": 0
+      },
+      "rest": {
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "x": 100,
+        "y": 0
+      },
+      "visible": true
+    }
+  ],
+  "constraints": [
+    {
+      "bendDirection": 1,
+      "bones": [
+        {
+          "id": "bone_upper",
+          "kind": "bone"
+        },
+        {
+          "id": "bone_forearm",
+          "kind": "bone"
+        }
+      ],
+      "enabled": true,
+      "id": "constraint_hand_ik",
+      "name": "Hand IK",
+      "order": 0,
+      "strength": 1,
+      "target": {
+        "id": "control_hand",
+        "kind": "control"
+      },
+      "type": "ik"
+    }
+  ],
+  "controls": [
+    {
+      "color": "#facc15",
+      "id": "control_hand",
+      "kind": "position",
+      "locked": false,
+      "max": 1,
+      "min": 0,
+      "name": "Hand Target",
+      "position": {
+        "x": 240,
+        "y": 170
+      },
+      "value": 0,
+      "visible": true
+    }
+  ],
+  "conventions": {
+    "angleUnit": "radians",
+    "coordinateSystem": "screen-2d",
+    "lengthUnit": "pixels",
+    "origin": "artboard-top-left",
+    "positiveAngle": "clockwise",
+    "transformOrder": [
+      "translate",
+      "rotate",
+      "skewX",
+      "skewY",
+      "scale",
+      "pivot"
+    ],
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "createdAt": "2026-08-15T00:00:00.000Z",
+  "format": "veyra",
+  "id": "document_ik_arm",
+  "meshes": [
+    {
+      "id": "mesh_arm",
+      "locked": false,
+      "name": "Weighted Arm",
+      "opacity": 0.72,
+      "paint": {
+        "fill": "#f472b6",
+        "stroke": "#831843",
+        "strokeWidth": 2
+      },
+      "triangles": [
+        [
+          {
+            "id": "meshVertex_shoulder",
+            "kind": "meshVertex"
+          },
+          {
+            "id": "meshVertex_elbow",
+            "kind": "meshVertex"
+          },
+          {
+            "id": "meshVertex_hand",
+            "kind": "meshVertex"
+          }
+        ]
+      ],
+      "vertices": [
+        {
+          "id": "meshVertex_shoulder",
+          "weights": [
+            {
+              "bone": {
+                "id": "bone_upper",
+                "kind": "bone"
+              },
+              "value": 1
+            }
+          ],
+          "x": 100,
+          "y": 96
+        },
+        {
+          "id": "meshVertex_elbow",
+          "weights": [
+            {
+              "bone": {
+                "id": "bone_upper",
+                "kind": "bone"
+              },
+              "value": 0.5
+            },
+            {
+              "bone": {
+                "id": "bone_forearm",
+                "kind": "bone"
+              },
+              "value": 0.5
+            }
+          ],
+          "x": 200,
+          "y": 96
+        },
+        {
+          "id": "meshVertex_hand",
+          "weights": [
+            {
+              "bone": {
+                "id": "bone_forearm",
+                "kind": "bone"
+              },
+              "value": 1
+            }
+          ],
+          "x": 280,
+          "y": 104
+        }
+      ],
+      "visible": true
+    }
+  ],
+  "name": "Golden IK Arm",
+  "nodes": [],
+  "semantics": [],
+  "timelines": [],
+  "updatedAt": "2026-08-15T00:00:00.000Z",
+  "version": 2
+}

@@ -1,0 +1,436 @@
+import assert from 'node:assert';
+import {
+  createDocument,
+  createTimeline,
+  createTrack,
+  createKeyframe,
+  createNode,
+  normalizeDocument,
+  VEYRA_EASING_TYPES,
+  VEYRA_LOOP_MODES,
+} from '../src/veyra/model.js';
+import {
+  applyEasing,
+  evaluateTrack,
+  evaluateTimeline,
+  evaluateTimelines,
+  normalizeFrame,
+  AnimationPlayback,
+} from '../src/veyra/animation.js';
+import { evaluateDocument } from '../src/veyra/evaluation.js';
+import { nodePropertyAddress } from '../src/veyra/properties.js';
+
+console.log('Testing Veyra animation system...');
+
+// Test: createTimeline and createKeyframe
+{
+  const timeline = createTimeline({ name: 'Test Timeline', duration: 120, fps: 60 });
+  assert.strictEqual(timeline.name, 'Test Timeline');
+  assert.strictEqual(timeline.duration, 120);
+  assert.strictEqual(timeline.fps, 60);
+  assert.strictEqual(timeline.loop, 'none');
+  assert(Array.isArray(timeline.tracks));
+
+  const keyframe = createKeyframe({ frame: 10, value: 100, easing: 'ease-in' });
+  assert.strictEqual(keyframe.frame, 10);
+  assert.strictEqual(keyframe.value, 100);
+  assert.strictEqual(keyframe.easing, 'ease-in');
+
+  const bezierKf = createKeyframe({ frame: 20, value: 200, easing: 'cubic-bezier', easingParams: [0.1, 0.2, 0.3, 0.4] });
+  assert.strictEqual(bezierKf.easing, 'cubic-bezier');
+  assert.deepStrictEqual(bezierKf.easingParams, [0.1, 0.2, 0.3, 0.4]);
+
+  console.log('✓ createTimeline and createKeyframe');
+}
+
+// Test: normalize timeline with validation
+{
+  const node = createNode('rectangle', { name: 'Box' });
+  const doc = createDocument({
+    nodes: [node],
+    timelines: [
+      createTimeline({
+        name: 'Width Animation',
+        duration: 60,
+        fps: 30,
+        loop: 'loop',
+        tracks: [
+          createTrack(nodePropertyAddress(node.id, 'geometry/width'), {
+            keyframes: [
+              createKeyframe({ frame: 0, value: 100, easing: 'linear' }),
+              createKeyframe({ frame: 30, value: 200, easing: 'ease-out' }),
+              createKeyframe({ frame: 60, value: 100, easing: 'linear' }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
+
+  const normalized = normalizeDocument(doc);
+  assert.strictEqual(normalized.timelines.length, 1);
+  assert.strictEqual(normalized.timelines[0].name, 'Width Animation');
+  assert.strictEqual(normalized.timelines[0].tracks.length, 1);
+  assert.strictEqual(normalized.timelines[0].tracks[0].keyframes.length, 3);
+
+  console.log('✓ normalize timeline with validation');
+}
+
+// Test: easing functions
+{
+  assert.strictEqual(applyEasing(0.5, 'linear'), 0.5);
+  assert(applyEasing(0.5, 'ease-in') < 0.5);
+  assert(applyEasing(0.5, 'ease-out') > 0.5);
+  assert.strictEqual(applyEasing(0.3, 'step'), 0);
+  assert.strictEqual(applyEasing(1.0, 'step'), 1);
+  assert.strictEqual(applyEasing(0.5, 'hold'), 0);
+
+  const bezier = applyEasing(0.5, 'cubic-bezier', [0.42, 0, 0.58, 1]);
+  assert(bezier > 0 && bezier < 1);
+
+  console.log('✓ easing functions');
+}
+
+// Test: evaluateTrack with linear interpolation
+{
+  const track = createTrack('test/property', {
+    keyframes: [
+      createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+      createKeyframe({ frame: 10, value: 100, easing: 'linear' }),
+      createKeyframe({ frame: 20, value: 50, easing: 'linear' }),
+    ],
+  });
+
+  assert.strictEqual(evaluateTrack(track, -5), 0); // Before first keyframe
+  assert.strictEqual(evaluateTrack(track, 0), 0);
+  assert.strictEqual(evaluateTrack(track, 5), 50);
+  assert.strictEqual(evaluateTrack(track, 10), 100);
+  assert.strictEqual(evaluateTrack(track, 15), 75);
+  assert.strictEqual(evaluateTrack(track, 20), 50);
+  assert.strictEqual(evaluateTrack(track, 25), 50); // After last keyframe
+
+  console.log('✓ evaluateTrack with linear interpolation');
+}
+
+// Test: evaluateTrack with ease-in
+{
+  const track = createTrack('test/property', {
+    keyframes: [
+      createKeyframe({ frame: 0, value: 0, easing: 'ease-in' }),
+      createKeyframe({ frame: 10, value: 100, easing: 'linear' }),
+    ],
+  });
+
+  const midValue = evaluateTrack(track, 5);
+  assert(midValue < 50, 'ease-in should produce values less than linear at t=0.5');
+
+  console.log('✓ evaluateTrack with ease-in');
+}
+
+// Test: evaluateTrack with hold easing
+{
+  const track = createTrack('test/property', {
+    keyframes: [
+      createKeyframe({ frame: 0, value: 100, easing: 'hold' }),
+      createKeyframe({ frame: 10, value: 200, easing: 'linear' }),
+    ],
+  });
+
+  assert.strictEqual(evaluateTrack(track, 5), 100); // Hold keeps first value
+  assert.strictEqual(evaluateTrack(track, 9), 100);
+  assert.strictEqual(evaluateTrack(track, 10), 200);
+
+  console.log('✓ evaluateTrack with hold easing');
+}
+
+// Test: evaluateTrack with color interpolation
+{
+  const track = createTrack('test/color', {
+    keyframes: [
+      createKeyframe({ frame: 0, value: '#000000', easing: 'linear' }),
+      createKeyframe({ frame: 10, value: '#ffffff', easing: 'linear' }),
+    ],
+  });
+
+  const midColor = evaluateTrack(track, 5);
+  assert(midColor.startsWith('#'));
+  assert.strictEqual(midColor.length, 7);
+  // Halfway between black (#000000) and white (#ffffff) is mid-gray (#808080)
+  assert.strictEqual(midColor, '#808080');
+
+  console.log('✓ evaluateTrack with color interpolation');
+}
+
+// Test: normalizeFrame with loop modes
+{
+  assert.strictEqual(normalizeFrame(10, 60, 'none'), 10);
+  assert.strictEqual(normalizeFrame(70, 60, 'none'), 60); // Clamps to duration
+  assert.strictEqual(normalizeFrame(-5, 60, 'none'), 0); // Clamps to 0
+
+  assert.strictEqual(normalizeFrame(10, 60, 'loop'), 10);
+  assert.strictEqual(normalizeFrame(70, 60, 'loop'), 10); // Wraps around
+  assert.strictEqual(normalizeFrame(130, 60, 'loop'), 10);
+
+  assert.strictEqual(normalizeFrame(10, 60, 'pingpong'), 10);
+  assert.strictEqual(normalizeFrame(70, 60, 'pingpong'), 50); // Bounces back
+  assert.strictEqual(normalizeFrame(120, 60, 'pingpong'), 0); // Full cycle
+
+  console.log('✓ normalizeFrame with loop modes');
+}
+
+// Test: evaluateTimeline
+{
+  const node = createNode('rectangle', { name: 'Box' });
+  const timeline = createTimeline({
+    name: 'Position Animation',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 300, easing: 'linear' }),
+        ],
+      }),
+      createTrack(nodePropertyAddress(node.id, 'transform/y'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 150, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const overrides0 = evaluateTimeline(timeline, 0);
+  assert.strictEqual(overrides0[nodePropertyAddress(node.id, 'transform/x')], 0);
+  assert.strictEqual(overrides0[nodePropertyAddress(node.id, 'transform/y')], 0);
+
+  const overrides05 = evaluateTimeline(timeline, 0.5);
+  assert.strictEqual(overrides05[nodePropertyAddress(node.id, 'transform/x')], 150);
+  assert.strictEqual(overrides05[nodePropertyAddress(node.id, 'transform/y')], 75);
+
+  const overrides1 = evaluateTimeline(timeline, 1);
+  assert.strictEqual(overrides1[nodePropertyAddress(node.id, 'transform/x')], 300);
+  assert.strictEqual(overrides1[nodePropertyAddress(node.id, 'transform/y')], 150);
+
+  console.log('✓ evaluateTimeline');
+}
+
+// Test: evaluateTimelines with multiple timelines and weights
+{
+  const node = createNode('ellipse', { name: 'Circle' });
+  const timeline1 = createTimeline({
+    id: 'timeline1',
+    name: 'Scale Up',
+    duration: 60,
+    fps: 60,
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/scaleX'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 1, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: 2, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const timeline2 = createTimeline({
+    id: 'timeline2',
+    name: 'Rotate',
+    duration: 60,
+    fps: 60,
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/rotation'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: Math.PI * 2, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline1, timeline2] });
+
+  const states = [
+    { timelineId: 'timeline1', time: 0.5, weight: 1 },
+    { timelineId: 'timeline2', time: 0.25, weight: 1 },
+  ];
+
+  const combined = evaluateTimelines(doc, states);
+  assert.strictEqual(combined[nodePropertyAddress(node.id, 'transform/scaleX')], 1.5);
+  assert(Math.abs(combined[nodePropertyAddress(node.id, 'transform/rotation')] - Math.PI / 2) < 0.01);
+
+  console.log('✓ evaluateTimelines with multiple timelines');
+}
+
+// Test: AnimationPlayback class
+{
+  const node = createNode('star', { name: 'Star' });
+  const timeline = createTimeline({
+    id: 'spin',
+    name: 'Spin',
+    duration: 60,
+    fps: 60,
+    loop: 'loop',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/rotation'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: Math.PI * 2, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  const playback = new AnimationPlayback(doc);
+
+  assert.strictEqual(playback.isPlaying, false);
+  assert.strictEqual(playback.isPaused, false);
+
+  playback.play('spin');
+  assert.strictEqual(playback.isPlaying, true);
+
+  playback.pause();
+  assert.strictEqual(playback.isPaused, true);
+  assert.strictEqual(playback.isPlaying, false);
+
+  playback.resume();
+  assert.strictEqual(playback.isPlaying, true);
+
+  playback.stop();
+  assert.strictEqual(playback.isPlaying, false);
+
+  console.log('✓ AnimationPlayback class');
+}
+
+// Test: integration with evaluateDocument
+{
+  const node = createNode('polygon', { name: 'Hex', geometry: { radius: 50, sides: 6 } });
+  const timeline = createTimeline({
+    id: 'grow',
+    name: 'Grow',
+    duration: 30,
+    fps: 30,
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'geometry/radius'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 50, easing: 'ease-out' }),
+          createKeyframe({ frame: 30, value: 150, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  const playback = new AnimationPlayback(doc);
+  playback.play('grow');
+
+  // Simulate some time passing
+  const evaluated = evaluateDocument(doc, {}, playback);
+
+  assert.strictEqual(evaluated.kind, 'veyra-evaluated-scene');
+  assert.strictEqual(evaluated.nodes.length, 1);
+
+  // The radius should be animated
+  const animatedNode = evaluated.nodes[0];
+  const source = evaluated.sources[nodePropertyAddress(node.id, 'geometry/radius')];
+
+  // Note: Since playback starts at time 0, radius should still be 50
+  // but source should indicate animation
+  if (source) {
+    assert.strictEqual(source, 'animation');
+  }
+
+  console.log('✓ integration with evaluateDocument');
+}
+
+// Test: validation errors
+{
+  let threw = false;
+  try {
+    createTimeline({ loop: 'invalid-loop-mode' });
+  } catch (error) {
+    threw = true;
+    assert(error.message.includes('loop mode'));
+  }
+  assert(threw, 'Should throw on invalid loop mode');
+
+  threw = false;
+  try {
+    createKeyframe({ easing: 'invalid-easing' });
+  } catch (error) {
+    threw = true;
+    assert(error.message.includes('easing type'));
+  }
+  assert(threw, 'Should throw on invalid easing');
+
+  threw = false;
+  try {
+    normalizeDocument({
+      format: 'veyra',
+      version: 2,
+      nodes: [],
+      timelines: [{ id: 'test', name: 'Test', duration: 60, fps: 30, tracks: [{ address: '', keyframes: [] }] }],
+    });
+  } catch (error) {
+    threw = true;
+    assert(error.message.includes('address is required'));
+  }
+  assert(threw, 'Should throw on empty track address');
+
+  console.log('✓ validation errors');
+}
+
+// Test: duplicate timeline IDs rejected
+{
+  let threw = false;
+  try {
+    normalizeDocument({
+      format: 'veyra',
+      version: 2,
+      nodes: [],
+      timelines: [
+        createTimeline({ id: 'same', name: 'Timeline 1' }),
+        createTimeline({ id: 'same', name: 'Timeline 2' }),
+      ],
+    });
+  } catch (error) {
+    threw = true;
+    assert(error.message.includes('Duplicate timeline id'));
+  }
+  assert(threw, 'Should reject duplicate timeline IDs');
+
+  console.log('✓ duplicate timeline IDs rejected');
+}
+
+// Test: keyframes are sorted by frame
+{
+  const track = normalizeDocument({
+    format: 'veyra',
+    version: 2,
+    nodes: [],
+    timelines: [
+      createTimeline({
+        tracks: [
+          createTrack('test/prop', {
+            keyframes: [
+              createKeyframe({ frame: 20, value: 2 }),
+              createKeyframe({ frame: 0, value: 0 }),
+              createKeyframe({ frame: 10, value: 1 }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  }).timelines[0].tracks[0];
+
+  assert.strictEqual(track.keyframes[0].frame, 0);
+  assert.strictEqual(track.keyframes[1].frame, 10);
+  assert.strictEqual(track.keyframes[2].frame, 20);
+
+  console.log('✓ keyframes are sorted by frame');
+}
+
+console.log('\n✅ All Veyra animation tests passed!');

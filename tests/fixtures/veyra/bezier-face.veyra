@@ -1,0 +1,141 @@
+{
+  "artboard": {
+    "background": "#fff7fc",
+    "height": 200,
+    "width": 200
+  },
+  "assets": [],
+  "bones": [],
+  "constraints": [],
+  "controls": [],
+  "conventions": {
+    "angleUnit": "radians",
+    "coordinateSystem": "screen-2d",
+    "lengthUnit": "pixels",
+    "origin": "artboard-top-left",
+    "positiveAngle": "clockwise",
+    "transformOrder": [
+      "translate",
+      "rotate",
+      "skewX",
+      "skewY",
+      "scale",
+      "pivot"
+    ],
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "format": "veyra",
+  "id": "document_bezier_face",
+  "meshes": [],
+  "name": "Golden Bezier Face",
+  "nodes": [
+    {
+      "geometry": {
+        "height": 150,
+        "width": 150
+      },
+      "id": "node_face",
+      "locked": false,
+      "name": "Face",
+      "opacity": 1,
+      "paint": {
+        "fill": "#fff7ed",
+        "stroke": "#831843",
+        "strokeWidth": 3
+      },
+      "parent": null,
+      "transform": {
+        "pivotX": 0,
+        "pivotY": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "skewX": 0,
+        "skewY": 0,
+        "x": 100,
+        "y": 100
+      },
+      "type": "ellipse",
+      "visible": true
+    },
+    {
+      "geometry": {
+        "closed": false,
+        "vertices": [
+          {
+            "id": "vertex_left",
+            "inX": 0,
+            "inY": 0,
+            "outX": 18,
+            "outY": 22,
+            "x": -35,
+            "y": 0
+          },
+          {
+            "id": "vertex_center",
+            "inX": -16,
+            "inY": 0,
+            "outX": 16,
+            "outY": 0,
+            "x": 0,
+            "y": 24
+          },
+          {
+            "id": "vertex_right",
+            "inX": -18,
+            "inY": 22,
+            "outX": 0,
+            "outY": 0,
+            "x": 35,
+            "y": 0
+          }
+        ]
+      },
+      "id": "node_smile",
+      "locked": false,
+      "name": "Smile",
+      "opacity": 1,
+      "paint": {
+        "fill": "none",
+        "stroke": "#ec4899",
+        "strokeWidth": 6
+      },
+      "parent": {
+        "id": "node_face",
+        "kind": "node"
+      },
+      "transform": {
+        "pivotX": 0,
+        "pivotY": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "skewX": 0,
+        "skewY": 0,
+        "x": 0,
+        "y": 28
+      },
+      "type": "path",
+      "visible": true
+    }
+  ],
+  "semantics": [
+    {
+      "description": "Authored cubic smile used for deterministic path tests.",
+      "role": "mouth",
+      "tags": [
+        "face",
+        "expression"
+      ],
+      "target": {
+        "id": "node_smile",
+        "kind": "node"
+      }
+    }
+  ],
+  "timelines": [],
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "version": 2
+}

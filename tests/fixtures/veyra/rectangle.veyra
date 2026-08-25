@@ -1,0 +1,82 @@
+{
+  "artboard": {
+    "background": "#ffffff",
+    "height": 120,
+    "width": 160
+  },
+  "assets": [],
+  "bones": [],
+  "constraints": [],
+  "controls": [],
+  "conventions": {
+    "angleUnit": "radians",
+    "coordinateSystem": "screen-2d",
+    "lengthUnit": "pixels",
+    "origin": "artboard-top-left",
+    "positiveAngle": "clockwise",
+    "transformOrder": [
+      "translate",
+      "rotate",
+      "skewX",
+      "skewY",
+      "scale",
+      "pivot"
+    ],
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "format": "veyra",
+  "id": "document_rectangle",
+  "meshes": [],
+  "name": "Golden Rectangle",
+  "nodes": [
+    {
+      "geometry": {
+        "cornerRadius": 8,
+        "height": 40,
+        "width": 80
+      },
+      "id": "node_rectangle",
+      "locked": false,
+      "name": "Rectangle",
+      "opacity": 1,
+      "paint": {
+        "fill": "#ec4899",
+        "stroke": "#831843",
+        "strokeWidth": 2
+      },
+      "parent": null,
+      "transform": {
+        "pivotX": 0,
+        "pivotY": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "skewX": 0,
+        "skewY": 0,
+        "x": 80,
+        "y": 60
+      },
+      "type": "rectangle",
+      "visible": true
+    }
+  ],
+  "semantics": [
+    {
+      "description": "A minimal deterministic rectangle fixture.",
+      "role": "fixture",
+      "tags": [
+        "golden",
+        "rectangle"
+      ],
+      "target": {
+        "id": "node_rectangle",
+        "kind": "node"
+      }
+    }
+  ],
+  "timelines": [],
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "version": 2
+}

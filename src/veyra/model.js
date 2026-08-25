@@ -1,0 +1,1060 @@
+import {
+  degreesToRadians,
+  inputAnglesUseDegrees,
+  normalizeConventions,
+  VEYRA_COORDINATE_CONVENTIONS,
+} from './contracts.js';
+import {
+  createBoneRef,
+  createControlRef,
+  createMeshVertexRef,
+  createNodeRef,
+  normalizeReference,
+  referenceId,
+} from './references.js';
+
+export const VEYRA_FORMAT = 'veyra';
+export const VEYRA_VERSION = 2;
+export const VEYRA_MIME = 'application/vnd.veyra+json';
+export const VEYRA_ASSET_TYPES = Object.freeze(['image', 'font', 'audio']);
+export const VEYRA_CONSTRAINT_TYPES = Object.freeze([
+  'ik',
+  'distance',
+  'transform',
+  'rotation',
+  'scale',
+  'path',
+]);
+export const VEYRA_NODE_TYPES = Object.freeze([
+  'group',
+  'path',
+  'rectangle',
+  'ellipse',
+  'polygon',
+  'star',
+]);
+export const VEYRA_EASING_TYPES = Object.freeze([
+  'linear',
+  'ease-in',
+  'ease-out',
+  'ease-in-out',
+  'cubic-bezier',
+  'step',
+  'hold',
+]);
+export const VEYRA_LOOP_MODES = Object.freeze(['none', 'loop', 'pingpong']);
+
+let fallbackId = 0;
+
+export function createId(prefix = 'node') {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `${prefix}_${uuid}`;
+  fallbackId += 1;
+  return `${prefix}_${Date.now().toString(36)}_${fallbackId.toString(36)}`;
+}
+
+export function cloneValue(value) {
+  return globalThis.structuredClone
+    ? globalThis.structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+}
+
+function baseNode(type) {
+  return {
+    id: createId(type),
+    type,
+    name: type[0].toUpperCase() + type.slice(1),
+    parent: null,
+    visible: true,
+    locked: false,
+    opacity: 1,
+    transform: {
+      x: 0,
+      y: 0,
+      rotation: 0,
+      skewX: 0,
+      skewY: 0,
+      scaleX: 1,
+      scaleY: 1,
+      pivotX: 0,
+      pivotY: 0,
+    },
+    paint: { fill: '#ec4899', stroke: '#2c1830', strokeWidth: 2 },
+    geometry: null,
+  };
+}
+
+function defaultGeometry(type) {
+  switch (type) {
+    case 'rectangle':
+      return { width: 180, height: 120, cornerRadius: 24 };
+    case 'ellipse':
+      return { width: 160, height: 110 };
+    case 'polygon':
+      return { radius: 80, sides: 6 };
+    case 'star':
+      return { outerRadius: 88, innerRadius: 42, points: 5 };
+    case 'path':
+      return {
+        closed: true,
+        vertices: [
+          { id: createId('vertex'), x: -80, y: 55, inX: 0, inY: 0, outX: 0, outY: 0 },
+          { id: createId('vertex'), x: 0, y: -70, inX: 0, inY: 0, outX: 0, outY: 0 },
+          { id: createId('vertex'), x: 80, y: 55, inX: 0, inY: 0, outX: 0, outY: 0 },
+        ],
+      };
+    default:
+      return null;
+  }
+}
+
+export function createNode(type, overrides = {}) {
+  if (!VEYRA_NODE_TYPES.includes(type)) throw new TypeError(`Unsupported Veyra node type: ${type}`);
+  const base = baseNode(type);
+  const node = {
+    ...base,
+    ...cloneValue(overrides),
+    id: overrides.id || base.id,
+    type,
+    parent: overrides.parent
+      ? normalizeReference(overrides.parent, 'node', `${type}.parent`)
+      : overrides.parentId
+        ? createNodeRef(overrides.parentId)
+        : null,
+    transform: { ...base.transform, ...(overrides.transform || {}) },
+    paint: { ...base.paint, ...(overrides.paint || {}) },
+    geometry: type === 'group'
+      ? null
+      : { ...defaultGeometry(type), ...(overrides.geometry || {}) },
+  };
+  if (type === 'path' && overrides.geometry?.vertices) {
+    node.geometry.vertices = cloneValue(overrides.geometry.vertices);
+  }
+  delete node.parentId;
+  return node;
+}
+
+export function createSemanticRecord(nodeId, overrides = {}) {
+  return {
+    target: createNodeRef(nodeId),
+    role: String(overrides.role || ''),
+    description: String(overrides.description || ''),
+    tags: [...new Set((overrides.tags || []).map((tag) => String(tag).trim()).filter(Boolean))],
+  };
+}
+
+export function createAsset(type, overrides = {}) {
+  if (!VEYRA_ASSET_TYPES.includes(type)) throw new TypeError(`Unsupported Veyra asset type: ${type}`);
+  const source = overrides.source || { kind: 'external', uri: '' };
+  return {
+    id: overrides.id || createId('asset'),
+    type,
+    name: String(overrides.name || `${type[0].toUpperCase()}${type.slice(1)} asset`),
+    mimeType: String(overrides.mimeType || ''),
+    source: cloneValue(source),
+    metadata: {
+      width: overrides.metadata?.width ?? null,
+      height: overrides.metadata?.height ?? null,
+      duration: overrides.metadata?.duration ?? null,
+    },
+  };
+}
+
+function rigTransform(overrides = {}) {
+  return {
+    x: 0,
+    y: 0,
+    rotation: 0,
+    scaleX: 1,
+    scaleY: 1,
+    ...cloneValue(overrides),
+  };
+}
+
+export function createBone(overrides = {}) {
+  return {
+    id: overrides.id || createId('bone'),
+    name: String(overrides.name || 'Bone'),
+    parent: overrides.parent ? normalizeReference(overrides.parent, 'bone', 'bone.parent') : null,
+    visible: overrides.visible !== false,
+    locked: Boolean(overrides.locked),
+    length: overrides.length ?? 100,
+    color: overrides.color || '#22d3ee',
+    rest: rigTransform(overrides.rest),
+    pose: rigTransform(overrides.pose),
+  };
+}
+
+export function createControl(overrides = {}) {
+  const kind = overrides.kind || 'position';
+  if (!['position', 'scalar'].includes(kind)) throw new TypeError(`Unsupported control kind: ${kind}`);
+  return {
+    id: overrides.id || createId('control'),
+    kind,
+    name: String(overrides.name || (kind === 'position' ? 'Position Control' : 'Scalar Control')),
+    visible: overrides.visible !== false,
+    locked: Boolean(overrides.locked),
+    position: {
+      x: overrides.position?.x ?? 0,
+      y: overrides.position?.y ?? 0,
+    },
+    value: overrides.value ?? 0,
+    min: overrides.min ?? 0,
+    max: overrides.max ?? 1,
+    color: overrides.color || '#facc15',
+  };
+}
+
+export function createMesh(overrides = {}) {
+  const vertices = overrides.vertices || [
+    { id: createId('meshVertex'), x: -60, y: -30, weights: [] },
+    { id: createId('meshVertex'), x: 60, y: -30, weights: [] },
+    { id: createId('meshVertex'), x: 60, y: 30, weights: [] },
+    { id: createId('meshVertex'), x: -60, y: 30, weights: [] },
+  ];
+  const triangles = overrides.triangles || [
+    [vertices[0], vertices[1], vertices[2]].map((vertex) => createMeshVertexRef(vertex.id)),
+    [vertices[0], vertices[2], vertices[3]].map((vertex) => createMeshVertexRef(vertex.id)),
+  ];
+  return {
+    id: overrides.id || createId('mesh'),
+    name: String(overrides.name || 'Mesh'),
+    visible: overrides.visible !== false,
+    locked: Boolean(overrides.locked),
+    opacity: overrides.opacity ?? 0.72,
+    paint: {
+      fill: overrides.paint?.fill || '#f472b6',
+      stroke: overrides.paint?.stroke || '#831843',
+      strokeWidth: overrides.paint?.strokeWidth ?? 2,
+    },
+    vertices: cloneValue(vertices),
+    triangles: cloneValue(triangles),
+  };
+}
+
+export function createConstraint(type, overrides = {}) {
+  if (!VEYRA_CONSTRAINT_TYPES.includes(type)) throw new TypeError(`Unsupported constraint type: ${type}`);
+  const base = {
+    id: overrides.id || createId('constraint'),
+    type,
+    name: String(overrides.name || `${type[0].toUpperCase()}${type.slice(1)} Constraint`),
+    enabled: overrides.enabled !== false,
+    strength: overrides.strength ?? 1,
+    order: overrides.order ?? 0,
+  };
+  if (type === 'ik') return {
+    ...base,
+    bones: cloneValue(overrides.bones || []),
+    target: overrides.target ? normalizeReference(overrides.target, 'control', 'constraint.target') : null,
+    bendDirection: overrides.bendDirection ?? 1,
+  };
+  if (type === 'distance') return {
+    ...base,
+    bone: overrides.bone ? normalizeReference(overrides.bone, 'bone', 'constraint.bone') : null,
+    target: overrides.target ? normalizeReference(overrides.target, 'control', 'constraint.target') : null,
+    distance: overrides.distance ?? 100,
+  };
+  if (type === 'path') return {
+    ...base,
+    bone: overrides.bone ? normalizeReference(overrides.bone, 'bone', 'constraint.bone') : null,
+    path: overrides.path ? normalizeReference(overrides.path, 'node', 'constraint.path') : null,
+    position: overrides.position ?? 0,
+    rotate: overrides.rotate !== false,
+  };
+  return {
+    ...base,
+    bone: overrides.bone ? normalizeReference(overrides.bone, 'bone', 'constraint.bone') : null,
+    target: overrides.target ? normalizeReference(overrides.target, 'bone', 'constraint.target') : null,
+    offset: overrides.offset ?? 0,
+  };
+}
+
+export function createKeyframe(overrides = {}) {
+  const easing = overrides.easing || 'linear';
+  if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`Unsupported easing type: ${easing}`);
+  const base = {
+    frame: overrides.frame ?? 0,
+    value: cloneValue(overrides.value),
+    easing,
+  };
+  if (easing === 'cubic-bezier') {
+    return {
+      ...base,
+      easingParams: overrides.easingParams || [0.42, 0, 0.58, 1],
+    };
+  }
+  return base;
+}
+
+export function createTimeline(overrides = {}) {
+  const loop = overrides.loop || 'none';
+  if (!VEYRA_LOOP_MODES.includes(loop)) throw new TypeError(`Unsupported loop mode: ${loop}`);
+  return {
+    id: overrides.id || createId('timeline'),
+    name: String(overrides.name || 'Timeline'),
+    duration: overrides.duration ?? 60,
+    fps: overrides.fps ?? 30,
+    loop,
+    tracks: cloneValue(overrides.tracks || []),
+  };
+}
+
+export function createTrack(address, overrides = {}) {
+  return {
+    id: overrides.id || createId('track'),
+    address: String(address || ''),
+    keyframes: cloneValue(overrides.keyframes || []),
+  };
+}
+
+export function createDocument(overrides = {}) {
+  const now = new Date().toISOString();
+  return {
+    format: VEYRA_FORMAT,
+    version: VEYRA_VERSION,
+    conventions: {
+      ...VEYRA_COORDINATE_CONVENTIONS,
+      transformOrder: [...VEYRA_COORDINATE_CONVENTIONS.transformOrder],
+    },
+    id: overrides.id || createId('document'),
+    name: overrides.name || 'Untitled Veyra',
+    createdAt: overrides.createdAt || now,
+    updatedAt: overrides.updatedAt || now,
+    artboard: {
+      width: 960,
+      height: 640,
+      background: '#fff7fc',
+      ...(overrides.artboard || {}),
+    },
+    assets: cloneValue(overrides.assets || []),
+    nodes: cloneValue(overrides.nodes || []),
+    semantics: cloneValue(overrides.semantics || []),
+    bones: cloneValue(overrides.bones || []),
+    meshes: cloneValue(overrides.meshes || []),
+    controls: cloneValue(overrides.controls || []),
+    constraints: cloneValue(overrides.constraints || []),
+    timelines: cloneValue(overrides.timelines || []),
+  };
+}
+
+function finite(value, path) {
+  if (!Number.isFinite(Number(value))) throw new TypeError(`${path} must be finite.`);
+  return Number(value);
+}
+
+function bounded(value, path, min, max) {
+  const number = finite(value, path);
+  if (number < min || number > max) throw new RangeError(`${path} must be between ${min} and ${max}.`);
+  return number;
+}
+
+function integer(value, path, min, max) {
+  const number = bounded(value, path, min, max);
+  if (!Number.isInteger(number)) throw new TypeError(`${path} must be an integer.`);
+  return number;
+}
+
+function color(value, path) {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'none' || /^#[0-9a-f]{6}$/.test(normalized)) return normalized;
+  throw new TypeError(`${path} must be "none" or a six-digit hex color.`);
+}
+
+function normalizeTransform(transform, path, anglesUseDegrees) {
+  const angle = (value, property) => {
+    const normalized = finite(value ?? 0, `${path}.${property}`);
+    return anglesUseDegrees ? degreesToRadians(normalized) : normalized;
+  };
+  return {
+    x: finite(transform?.x ?? 0, `${path}.x`),
+    y: finite(transform?.y ?? 0, `${path}.y`),
+    rotation: angle(transform?.rotation, 'rotation'),
+    skewX: bounded(angle(transform?.skewX, 'skewX'), `${path}.skewX`, -1.5533430342749532, 1.5533430342749532),
+    skewY: bounded(angle(transform?.skewY, 'skewY'), `${path}.skewY`, -1.5533430342749532, 1.5533430342749532),
+    scaleX: bounded(transform?.scaleX ?? 1, `${path}.scaleX`, -100, 100),
+    scaleY: bounded(transform?.scaleY ?? 1, `${path}.scaleY`, -100, 100),
+    pivotX: finite(transform?.pivotX ?? 0, `${path}.pivotX`),
+    pivotY: finite(transform?.pivotY ?? 0, `${path}.pivotY`),
+  };
+}
+
+function normalizeGeometry(type, geometry, path) {
+  switch (type) {
+    case 'group':
+      return null;
+    case 'rectangle':
+      return {
+        width: bounded(geometry?.width, `${path}.width`, 0.01, 100000),
+        height: bounded(geometry?.height, `${path}.height`, 0.01, 100000),
+        cornerRadius: bounded(geometry?.cornerRadius ?? 0, `${path}.cornerRadius`, 0, 100000),
+      };
+    case 'ellipse':
+      return {
+        width: bounded(geometry?.width, `${path}.width`, 0.01, 100000),
+        height: bounded(geometry?.height, `${path}.height`, 0.01, 100000),
+      };
+    case 'polygon':
+      return {
+        radius: bounded(geometry?.radius, `${path}.radius`, 0.01, 100000),
+        sides: integer(geometry?.sides, `${path}.sides`, 3, 256),
+      };
+    case 'star':
+      return {
+        outerRadius: bounded(geometry?.outerRadius, `${path}.outerRadius`, 0.01, 100000),
+        innerRadius: bounded(geometry?.innerRadius, `${path}.innerRadius`, 0, 100000),
+        points: integer(geometry?.points, `${path}.points`, 2, 256),
+      };
+    case 'path': {
+      if (!Array.isArray(geometry?.vertices) || geometry.vertices.length < 2) {
+        throw new TypeError(`${path}.vertices must contain at least two vertices.`);
+      }
+      if (geometry.vertices.length > 100000) throw new RangeError(`${path}.vertices is too large.`);
+      const ids = new Set();
+      const vertices = geometry.vertices.map((vertex, index) => {
+        const id = String(vertex.id || createId('vertex'));
+        if (ids.has(id)) throw new TypeError(`${path}.vertices contains duplicate id ${id}.`);
+        ids.add(id);
+        return {
+          id,
+          x: finite(vertex.x, `${path}.vertices[${index}].x`),
+          y: finite(vertex.y, `${path}.vertices[${index}].y`),
+          inX: finite(vertex.inX ?? 0, `${path}.vertices[${index}].inX`),
+          inY: finite(vertex.inY ?? 0, `${path}.vertices[${index}].inY`),
+          outX: finite(vertex.outX ?? 0, `${path}.vertices[${index}].outX`),
+          outY: finite(vertex.outY ?? 0, `${path}.vertices[${index}].outY`),
+        };
+      });
+      return { closed: Boolean(geometry.closed), vertices };
+    }
+    default:
+      throw new TypeError(`Unsupported geometry type: ${type}`);
+  }
+}
+
+function normalizeNode(node, index, anglesUseDegrees) {
+  const type = String(node?.type || '');
+  if (!VEYRA_NODE_TYPES.includes(type)) throw new TypeError(`nodes[${index}].type is unsupported.`);
+  const id = String(node.id || '');
+  if (!id) throw new TypeError(`nodes[${index}].id is required.`);
+  return {
+    id,
+    type,
+    name: String(node.name || type),
+    parent: normalizeReference(node.parent ?? node.parentId, 'node', `nodes[${index}].parent`),
+    visible: node.visible !== false,
+    locked: Boolean(node.locked),
+    opacity: bounded(node.opacity ?? 1, `nodes[${index}].opacity`, 0, 1),
+    transform: normalizeTransform(node.transform, `nodes[${index}].transform`, anglesUseDegrees),
+    paint: {
+      fill: color(node.paint?.fill ?? '#ec4899', `nodes[${index}].paint.fill`),
+      stroke: color(node.paint?.stroke ?? 'none', `nodes[${index}].paint.stroke`),
+      strokeWidth: bounded(node.paint?.strokeWidth ?? 0, `nodes[${index}].paint.strokeWidth`, 0, 10000),
+    },
+    geometry: normalizeGeometry(type, node.geometry, `nodes[${index}].geometry`),
+  };
+}
+
+function normalizeAsset(asset, index) {
+  const type = String(asset?.type || '');
+  if (!VEYRA_ASSET_TYPES.includes(type)) throw new TypeError(`assets[${index}].type is unsupported.`);
+  const id = String(asset?.id || '');
+  if (!id) throw new TypeError(`assets[${index}].id is required.`);
+  const sourceKind = String(asset?.source?.kind || '');
+  if (!['external', 'embedded'].includes(sourceKind)) {
+    throw new TypeError(`assets[${index}].source.kind must be "external" or "embedded".`);
+  }
+  const source = sourceKind === 'external'
+    ? { kind: sourceKind, uri: String(asset.source.uri || '') }
+    : { kind: sourceKind, data: String(asset.source.data || '') };
+  const optionalMetric = (value, path) => value == null ? null : bounded(value, path, 0, 1000000000);
+  return {
+    id,
+    type,
+    name: String(asset.name || type),
+    mimeType: String(asset.mimeType || ''),
+    source,
+    metadata: {
+      width: optionalMetric(asset.metadata?.width, `assets[${index}].metadata.width`),
+      height: optionalMetric(asset.metadata?.height, `assets[${index}].metadata.height`),
+      duration: optionalMetric(asset.metadata?.duration, `assets[${index}].metadata.duration`),
+    },
+  };
+}
+
+function normalizeRigTransform(transform, path, anglesUseDegrees) {
+  const angleValue = finite(transform?.rotation ?? 0, `${path}.rotation`);
+  return {
+    x: finite(transform?.x ?? 0, `${path}.x`),
+    y: finite(transform?.y ?? 0, `${path}.y`),
+    rotation: anglesUseDegrees ? degreesToRadians(angleValue) : angleValue,
+    scaleX: bounded(transform?.scaleX ?? 1, `${path}.scaleX`, -100, 100),
+    scaleY: bounded(transform?.scaleY ?? 1, `${path}.scaleY`, -100, 100),
+  };
+}
+
+function normalizeBone(bone, index, anglesUseDegrees) {
+  const id = String(bone?.id || '');
+  if (!id) throw new TypeError(`bones[${index}].id is required.`);
+  return {
+    id,
+    name: String(bone.name || 'Bone'),
+    parent: normalizeReference(bone.parent, 'bone', `bones[${index}].parent`),
+    visible: bone.visible !== false,
+    locked: Boolean(bone.locked),
+    length: bounded(bone.length ?? 100, `bones[${index}].length`, 0.01, 100000),
+    color: color(bone.color ?? '#22d3ee', `bones[${index}].color`),
+    rest: normalizeRigTransform(bone.rest, `bones[${index}].rest`, anglesUseDegrees),
+    pose: normalizeRigTransform(bone.pose, `bones[${index}].pose`, anglesUseDegrees),
+  };
+}
+
+function normalizeControl(control, index) {
+  const id = String(control?.id || '');
+  if (!id) throw new TypeError(`controls[${index}].id is required.`);
+  const kind = String(control.kind || 'position');
+  if (!['position', 'scalar'].includes(kind)) throw new TypeError(`controls[${index}].kind is unsupported.`);
+  const min = finite(control.min ?? 0, `controls[${index}].min`);
+  const max = finite(control.max ?? 1, `controls[${index}].max`);
+  if (min > max) throw new RangeError(`controls[${index}].min cannot exceed max.`);
+  return {
+    id,
+    kind,
+    name: String(control.name || 'Control'),
+    visible: control.visible !== false,
+    locked: Boolean(control.locked),
+    position: {
+      x: finite(control.position?.x ?? 0, `controls[${index}].position.x`),
+      y: finite(control.position?.y ?? 0, `controls[${index}].position.y`),
+    },
+    value: bounded(control.value ?? min, `controls[${index}].value`, min, max),
+    min,
+    max,
+    color: color(control.color ?? '#facc15', `controls[${index}].color`),
+  };
+}
+
+function normalizeMesh(mesh, index) {
+  const id = String(mesh?.id || '');
+  if (!id) throw new TypeError(`meshes[${index}].id is required.`);
+  if (!Array.isArray(mesh.vertices) || mesh.vertices.length < 3) {
+    throw new TypeError(`meshes[${index}].vertices must contain at least three vertices.`);
+  }
+  if (mesh.vertices.length > 100000) throw new RangeError(`meshes[${index}].vertices is too large.`);
+  const vertexIds = new Set();
+  const vertices = mesh.vertices.map((vertex, vertexIndex) => {
+    const vertexId = String(vertex?.id || '');
+    if (!vertexId) throw new TypeError(`meshes[${index}].vertices[${vertexIndex}].id is required.`);
+    if (vertexIds.has(vertexId)) throw new TypeError(`Mesh ${id} contains duplicate vertex id ${vertexId}.`);
+    vertexIds.add(vertexId);
+    if (!Array.isArray(vertex.weights)) throw new TypeError(`Mesh vertex ${vertexId}.weights must be an array.`);
+    if (vertex.weights.length > 8) throw new RangeError(`Mesh vertex ${vertexId} has more than eight bone influences.`);
+    const boneIds = new Set();
+    const weights = vertex.weights.map((weight, weightIndex) => {
+      const bone = normalizeReference(weight?.bone, 'bone', `meshes[${index}].vertices[${vertexIndex}].weights[${weightIndex}].bone`);
+      const boneId = referenceId(bone, 'bone');
+      if (boneIds.has(boneId)) throw new TypeError(`Mesh vertex ${vertexId} has duplicate bone weight ${boneId}.`);
+      boneIds.add(boneId);
+      return {
+        bone,
+        value: bounded(weight.value, `meshes[${index}].vertices[${vertexIndex}].weights[${weightIndex}].value`, 0, 1),
+      };
+    });
+    return {
+      id: vertexId,
+      x: finite(vertex.x, `meshes[${index}].vertices[${vertexIndex}].x`),
+      y: finite(vertex.y, `meshes[${index}].vertices[${vertexIndex}].y`),
+      weights,
+    };
+  });
+  if (!Array.isArray(mesh.triangles)) throw new TypeError(`meshes[${index}].triangles must be an array.`);
+  const triangles = mesh.triangles.map((triangle, triangleIndex) => {
+    if (!Array.isArray(triangle) || triangle.length !== 3) {
+      throw new TypeError(`meshes[${index}].triangles[${triangleIndex}] must contain three vertex references.`);
+    }
+    return triangle.map((reference, cornerIndex) => {
+      const normalized = normalizeReference(reference, 'meshVertex', `meshes[${index}].triangles[${triangleIndex}][${cornerIndex}]`);
+      const vertexId = referenceId(normalized, 'meshVertex');
+      if (!vertexIds.has(vertexId)) throw new TypeError(`Mesh ${id} triangle targets missing vertex ${vertexId}.`);
+      return normalized;
+    });
+  });
+  return {
+    id,
+    name: String(mesh.name || 'Mesh'),
+    visible: mesh.visible !== false,
+    locked: Boolean(mesh.locked),
+    opacity: bounded(mesh.opacity ?? 1, `meshes[${index}].opacity`, 0, 1),
+    paint: {
+      fill: color(mesh.paint?.fill ?? '#f472b6', `meshes[${index}].paint.fill`),
+      stroke: color(mesh.paint?.stroke ?? '#831843', `meshes[${index}].paint.stroke`),
+      strokeWidth: bounded(mesh.paint?.strokeWidth ?? 2, `meshes[${index}].paint.strokeWidth`, 0, 10000),
+    },
+    vertices,
+    triangles,
+  };
+}
+
+function requiredReference(value, kind, path) {
+  const reference = normalizeReference(value, kind, path);
+  if (!reference) throw new TypeError(`${path} is required.`);
+  return reference;
+}
+
+function normalizeConstraint(constraint, index, anglesUseDegrees) {
+  const type = String(constraint?.type || '');
+  if (!VEYRA_CONSTRAINT_TYPES.includes(type)) throw new TypeError(`constraints[${index}].type is unsupported.`);
+  const id = String(constraint.id || '');
+  if (!id) throw new TypeError(`constraints[${index}].id is required.`);
+  const base = {
+    id,
+    type,
+    name: String(constraint.name || `${type} constraint`),
+    enabled: constraint.enabled !== false,
+    strength: bounded(constraint.strength ?? 1, `constraints[${index}].strength`, 0, 1),
+    order: integer(constraint.order ?? 0, `constraints[${index}].order`, -100000, 100000),
+  };
+  if (type === 'ik') {
+    if (!Array.isArray(constraint.bones) || ![1, 2].includes(constraint.bones.length)) {
+      throw new TypeError(`constraints[${index}].bones must contain one or two bone references.`);
+    }
+    return {
+      ...base,
+      bones: constraint.bones.map((bone, boneIndex) => requiredReference(bone, 'bone', `constraints[${index}].bones[${boneIndex}]`)),
+      target: requiredReference(constraint.target, 'control', `constraints[${index}].target`),
+      bendDirection: Number(constraint.bendDirection) < 0 ? -1 : 1,
+    };
+  }
+  if (type === 'distance') return {
+    ...base,
+    bone: requiredReference(constraint.bone, 'bone', `constraints[${index}].bone`),
+    target: requiredReference(constraint.target, 'control', `constraints[${index}].target`),
+    distance: bounded(constraint.distance ?? 100, `constraints[${index}].distance`, 0, 100000),
+  };
+  if (type === 'path') return {
+    ...base,
+    bone: requiredReference(constraint.bone, 'bone', `constraints[${index}].bone`),
+    path: requiredReference(constraint.path, 'node', `constraints[${index}].path`),
+    position: bounded(constraint.position ?? 0, `constraints[${index}].position`, 0, 1),
+    rotate: constraint.rotate !== false,
+  };
+  const offsetValue = finite(constraint.offset ?? 0, `constraints[${index}].offset`);
+  return {
+    ...base,
+    bone: requiredReference(constraint.bone, 'bone', `constraints[${index}].bone`),
+    target: requiredReference(constraint.target, 'bone', `constraints[${index}].target`),
+    offset: anglesUseDegrees && ['rotation', 'transform'].includes(type)
+      ? degreesToRadians(offsetValue)
+      : offsetValue,
+  };
+}
+
+function validateRigReferences(bones, meshes, controls, constraints, nodes) {
+  const boneById = new Map(bones.map((bone) => [bone.id, bone]));
+  const controlIds = new Set(controls.map((control) => control.id));
+  const nodeByIdMap = new Map(nodes.map((node) => [node.id, node]));
+  for (const bone of bones) {
+    const parentId = referenceId(bone.parent, 'bone');
+    if (parentId && !boneById.has(parentId)) throw new TypeError(`Bone ${bone.id} has dangling parent ${parentId}.`);
+    if (parentId === bone.id) throw new TypeError(`Bone ${bone.id} cannot parent itself.`);
+    const seen = new Set([bone.id]);
+    let cursor = parentId;
+    while (cursor) {
+      if (seen.has(cursor)) throw new TypeError(`Bone hierarchy cycle detected at ${bone.id}.`);
+      seen.add(cursor);
+      cursor = referenceId(boneById.get(cursor)?.parent, 'bone');
+    }
+  }
+  for (const mesh of meshes) {
+    for (const vertex of mesh.vertices) {
+      for (const weight of vertex.weights) {
+        const boneId = referenceId(weight.bone, 'bone');
+        if (!boneById.has(boneId)) throw new TypeError(`Mesh ${mesh.id} weight targets missing bone ${boneId}.`);
+      }
+    }
+  }
+  for (const constraint of constraints) {
+    const boneRefs = constraint.type === 'ik' ? constraint.bones : [constraint.bone];
+    for (const boneRef of boneRefs) {
+      const boneId = referenceId(boneRef, 'bone');
+      if (!boneById.has(boneId)) throw new TypeError(`Constraint ${constraint.id} targets missing bone ${boneId}.`);
+    }
+    if (constraint.target?.kind === 'bone' && !boneById.has(referenceId(constraint.target, 'bone'))) {
+      throw new TypeError(`Constraint ${constraint.id} targets a missing bone.`);
+    }
+    if (constraint.target?.kind === 'control' && !controlIds.has(referenceId(constraint.target, 'control'))) {
+      throw new TypeError(`Constraint ${constraint.id} targets a missing control.`);
+    }
+    if (constraint.type === 'path') {
+      const path = nodeByIdMap.get(referenceId(constraint.path, 'node'));
+      if (!path || path.type !== 'path') throw new TypeError(`Constraint ${constraint.id} requires an authored path node.`);
+    }
+    if (constraint.type === 'ik' && constraint.bones.length === 2) {
+      const firstId = referenceId(constraint.bones[0], 'bone');
+      const second = boneById.get(referenceId(constraint.bones[1], 'bone'));
+      if (referenceId(second?.parent, 'bone') !== firstId) {
+        throw new TypeError(`Constraint ${constraint.id} IK bones must form a parent-child chain.`);
+      }
+    }
+  }
+}
+
+function validateHierarchy(nodes) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  for (const node of nodes) {
+    const parentId = referenceId(node.parent, 'node');
+    if (parentId != null && !byId.has(parentId)) {
+      throw new TypeError(`Node ${node.id} has dangling parent ${parentId}.`);
+    }
+    if (parentId === node.id) throw new TypeError(`Node ${node.id} cannot parent itself.`);
+    const seen = new Set([node.id]);
+    let cursor = parentId;
+    while (cursor != null) {
+      if (seen.has(cursor)) throw new TypeError(`Hierarchy cycle detected at ${node.id}.`);
+      seen.add(cursor);
+      cursor = referenceId(byId.get(cursor)?.parent, 'node');
+    }
+  }
+}
+
+function normalizeKeyframe(keyframe, trackPath, index) {
+  const frame = integer(keyframe?.frame ?? 0, `${trackPath}.keyframes[${index}].frame`, 0, 100000);
+  const easing = String(keyframe?.easing || 'linear');
+  if (!VEYRA_EASING_TYPES.includes(easing)) {
+    throw new TypeError(`${trackPath}.keyframes[${index}].easing must be a valid easing type.`);
+  }
+  const normalized = {
+    frame,
+    value: cloneValue(keyframe?.value),
+    easing,
+  };
+  if (easing === 'cubic-bezier') {
+    if (!Array.isArray(keyframe?.easingParams) || keyframe.easingParams.length !== 4) {
+      throw new TypeError(`${trackPath}.keyframes[${index}].easingParams must be an array of 4 numbers.`);
+    }
+    normalized.easingParams = keyframe.easingParams.map((param, i) =>
+      bounded(param, `${trackPath}.keyframes[${index}].easingParams[${i}]`, 0, 1)
+    );
+  }
+  return normalized;
+}
+
+function normalizeTrack(track, timelinePath, index) {
+  const id = String(track?.id || createId('track'));
+  const address = String(track?.address || '');
+  if (!address) throw new TypeError(`${timelinePath}.tracks[${index}].address is required.`);
+  const trackPath = `${timelinePath}.tracks[${index}]`;
+  if (!Array.isArray(track?.keyframes)) {
+    throw new TypeError(`${trackPath}.keyframes must be an array.`);
+  }
+  const keyframes = track.keyframes
+    .map((keyframe, kfIndex) => normalizeKeyframe(keyframe, trackPath, kfIndex))
+    .sort((a, b) => a.frame - b.frame);
+  return { id, address, keyframes };
+}
+
+function normalizeTimeline(timeline, index) {
+  const id = String(timeline?.id || createId('timeline'));
+  const name = String(timeline?.name || 'Timeline');
+  const duration = integer(timeline?.duration ?? 60, `timelines[${index}].duration`, 1, 1000000);
+  const fps = integer(timeline?.fps ?? 30, `timelines[${index}].fps`, 1, 240);
+  const loop = String(timeline?.loop || 'none');
+  if (!VEYRA_LOOP_MODES.includes(loop)) {
+    throw new TypeError(`timelines[${index}].loop must be a valid loop mode.`);
+  }
+  if (!Array.isArray(timeline?.tracks)) {
+    throw new TypeError(`timelines[${index}].tracks must be an array.`);
+  }
+  const tracks = timeline.tracks.map((track, trackIndex) =>
+    normalizeTrack(track, `timelines[${index}]`, trackIndex)
+  );
+  return { id, name, duration, fps, loop, tracks };
+}
+
+export function normalizeDocument(input) {
+  if (!input || typeof input !== 'object') throw new TypeError('Veyra document must be an object.');
+  if (input.format !== VEYRA_FORMAT) throw new TypeError(`Expected format "${VEYRA_FORMAT}".`);
+  const inputVersion = Number(input.version);
+  if (![1, VEYRA_VERSION].includes(inputVersion)) {
+    throw new TypeError(`Unsupported Veyra version ${input.version}; expected version 1 or ${VEYRA_VERSION}.`);
+  }
+  if (!Array.isArray(input.nodes)) throw new TypeError('nodes must be an array.');
+  if (input.nodes.length > 10000) throw new RangeError('Veyra document contains too many nodes.');
+
+  const anglesUseDegrees = inputAnglesUseDegrees(input.conventions);
+  const conventions = normalizeConventions(input.conventions);
+  const nodes = input.nodes.map((node, index) => normalizeNode(node, index, anglesUseDegrees));
+  const ids = new Set();
+  for (const node of nodes) {
+    if (ids.has(node.id)) throw new TypeError(`Duplicate node id ${node.id}.`);
+    ids.add(node.id);
+  }
+  validateHierarchy(nodes);
+
+  const bones = Array.isArray(input.bones)
+    ? input.bones.map((bone, index) => normalizeBone(bone, index, anglesUseDegrees))
+    : [];
+  const meshes = Array.isArray(input.meshes)
+    ? input.meshes.map((mesh, index) => normalizeMesh(mesh, index))
+    : [];
+  const controls = Array.isArray(input.controls)
+    ? input.controls.map((control, index) => normalizeControl(control, index))
+    : [];
+  const constraints = Array.isArray(input.constraints)
+    ? input.constraints.map((constraint, index) => normalizeConstraint(constraint, index, anglesUseDegrees))
+    : [];
+  for (const [label, items] of Object.entries({ bone: bones, mesh: meshes, control: controls, constraint: constraints })) {
+    const itemIds = new Set();
+    for (const item of items) {
+      if (itemIds.has(item.id)) throw new TypeError(`Duplicate ${label} id ${item.id}.`);
+      itemIds.add(item.id);
+    }
+  }
+  validateRigReferences(bones, meshes, controls, constraints, nodes);
+
+  const assets = Array.isArray(input.assets)
+    ? input.assets.map((asset, index) => normalizeAsset(asset, index))
+    : [];
+  const assetIds = new Set();
+  for (const asset of assets) {
+    if (assetIds.has(asset.id)) throw new TypeError(`Duplicate asset id ${asset.id}.`);
+    assetIds.add(asset.id);
+  }
+
+  const semantics = Array.isArray(input.semantics)
+    ? input.semantics.map((record, index) => {
+      const target = normalizeReference(record?.target ?? record?.nodeId, 'node', `semantics[${index}].target`);
+      const nodeId = referenceId(target, 'node');
+      if (!ids.has(nodeId)) throw new TypeError(`semantics[${index}] targets missing node ${nodeId}.`);
+      return createSemanticRecord(nodeId, record);
+    })
+    : [];
+  const semanticIds = new Set();
+  for (const record of semantics) {
+    const nodeId = referenceId(record.target, 'node');
+    if (semanticIds.has(nodeId)) throw new TypeError(`Duplicate semantic record for ${nodeId}.`);
+    semanticIds.add(nodeId);
+  }
+
+  const timelines = Array.isArray(input.timelines)
+    ? input.timelines.map((timeline, index) => normalizeTimeline(timeline, index))
+    : [];
+  const timelineIds = new Set();
+  for (const timeline of timelines) {
+    if (timelineIds.has(timeline.id)) throw new TypeError(`Duplicate timeline id ${timeline.id}.`);
+    timelineIds.add(timeline.id);
+  }
+
+  return {
+    format: VEYRA_FORMAT,
+    version: VEYRA_VERSION,
+    conventions,
+    id: String(input.id || createId('document')),
+    name: String(input.name || 'Untitled Veyra'),
+    createdAt: String(input.createdAt || new Date().toISOString()),
+    updatedAt: String(input.updatedAt || new Date().toISOString()),
+    artboard: {
+      width: bounded(input.artboard?.width ?? 960, 'artboard.width', 1, 100000),
+      height: bounded(input.artboard?.height ?? 640, 'artboard.height', 1, 100000),
+      background: color(input.artboard?.background ?? '#fff7fc', 'artboard.background'),
+    },
+    assets,
+    nodes,
+    semantics,
+    bones,
+    meshes,
+    controls,
+    constraints,
+    timelines,
+  };
+}
+
+export function semanticFor(document, nodeId, create = false) {
+  let record = document.semantics.find((candidate) => referenceId(candidate.target, 'node') === nodeId) || null;
+  if (!record && create) {
+    record = createSemanticRecord(nodeId);
+    document.semantics.push(record);
+  }
+  return record;
+}
+
+export function nodeById(document, nodeId) {
+  return document.nodes.find((node) => node.id === nodeId) || null;
+}
+
+export function boneById(document, boneId) {
+  return document.bones.find((bone) => bone.id === boneId) || null;
+}
+
+export function meshById(document, meshId) {
+  return document.meshes.find((mesh) => mesh.id === meshId) || null;
+}
+
+export function controlById(document, controlId) {
+  return document.controls.find((control) => control.id === controlId) || null;
+}
+
+export function constraintById(document, constraintId) {
+  return document.constraints.find((constraint) => constraint.id === constraintId) || null;
+}
+
+export function childrenOf(document, parentId) {
+  return document.nodes.filter((node) => referenceId(node.parent, 'node') === parentId);
+}
+
+export function descendantIds(document, nodeId) {
+  const result = [];
+  const visit = (parentId) => {
+    for (const child of childrenOf(document, parentId)) {
+      result.push(child.id);
+      visit(child.id);
+    }
+  };
+  visit(nodeId);
+  return result;
+}
+
+export function timelineById(document, timelineId) {
+  return document.timelines.find((timeline) => timeline.id === timelineId) || null;
+}
+
+export function trackByAddress(timeline, address) {
+  return timeline.tracks.find((track) => track.address === address) || null;
+}
+
+export function createStarterDocument() {
+  const character = createNode('group', {
+    name: 'Veyra Bloom',
+    transform: { x: 480, y: 330 },
+    paint: { fill: 'none', stroke: 'none', strokeWidth: 0 },
+  });
+  const halo = createNode('star', {
+    name: 'Signal Halo',
+    parent: createNodeRef(character.id),
+    transform: { x: 0, y: -8, rotation: degreesToRadians(-8) },
+    geometry: { outerRadius: 215, innerRadius: 202, points: 24 },
+    paint: { fill: '#fce7f3', stroke: '#f9a8d4', strokeWidth: 2 },
+    opacity: 0.72,
+  });
+  const face = createNode('ellipse', {
+    name: 'Face',
+    parent: createNodeRef(character.id),
+    transform: { x: 0, y: 0 },
+    geometry: { width: 310, height: 360 },
+    paint: { fill: '#fff7ed', stroke: '#831843', strokeWidth: 5 },
+  });
+  const leftEye = createNode('ellipse', {
+    name: 'Left Eye',
+    parent: createNodeRef(character.id),
+    transform: { x: -66, y: -38 },
+    geometry: { width: 72, height: 46 },
+    paint: { fill: '#0f172a', stroke: 'none', strokeWidth: 0 },
+  });
+  const rightEye = createNode('ellipse', {
+    name: 'Right Eye',
+    parent: createNodeRef(character.id),
+    transform: { x: 66, y: -38 },
+    geometry: { width: 72, height: 46 },
+    paint: { fill: '#0f172a', stroke: 'none', strokeWidth: 0 },
+  });
+  const leftSpark = createNode('ellipse', {
+    name: 'Left Eye Light',
+    parent: createNodeRef(character.id),
+    transform: { x: -53, y: -48 },
+    geometry: { width: 18, height: 13 },
+    paint: { fill: '#22d3ee', stroke: 'none', strokeWidth: 0 },
+  });
+  const rightSpark = createNode('ellipse', {
+    name: 'Right Eye Light',
+    parent: createNodeRef(character.id),
+    transform: { x: 79, y: -48 },
+    geometry: { width: 18, height: 13 },
+    paint: { fill: '#22d3ee', stroke: 'none', strokeWidth: 0 },
+  });
+  const mouth = createNode('path', {
+    name: 'Smile',
+    parent: createNodeRef(character.id),
+    transform: { x: 0, y: 72 },
+    geometry: {
+      closed: false,
+      vertices: [
+        { id: createId('vertex'), x: -70, y: -5, inX: 0, inY: 0, outX: 34, outY: 55 },
+        { id: createId('vertex'), x: 0, y: 38, inX: -30, inY: 0, outX: 30, outY: 0 },
+        { id: createId('vertex'), x: 70, y: -5, inX: -34, inY: 55, outX: 0, outY: 0 },
+      ],
+    },
+    paint: { fill: 'none', stroke: '#ec4899', strokeWidth: 10 },
+  });
+  const accent = createNode('star', {
+    name: 'Veyra Mark',
+    parent: createNodeRef(character.id),
+    transform: { x: 166, y: -152, rotation: degreesToRadians(12) },
+    geometry: { outerRadius: 48, innerRadius: 20, points: 6 },
+    paint: { fill: '#06b6d4', stroke: '#155e75', strokeWidth: 3 },
+  });
+
+  const upperArm = createBone({
+    name: 'Right Upper Arm',
+    length: 90,
+    rest: { x: 560, y: 390, rotation: 0 },
+    color: '#22d3ee',
+  });
+  const forearm = createBone({
+    name: 'Right Forearm',
+    parent: createBoneRef(upperArm.id),
+    length: 90,
+    rest: { x: 90, y: 0, rotation: 0 },
+    color: '#67e8f9',
+  });
+  const handTarget = createControl({
+    name: 'Right Hand Target',
+    position: { x: 720, y: 450 },
+    color: '#facc15',
+  });
+  const armVertices = [
+    { id: createId('meshVertex'), x: 560, y: 375, weights: [{ bone: createBoneRef(upperArm.id), value: 1 }] },
+    { id: createId('meshVertex'), x: 560, y: 405, weights: [{ bone: createBoneRef(upperArm.id), value: 1 }] },
+    { id: createId('meshVertex'), x: 650, y: 375, weights: [{ bone: createBoneRef(upperArm.id), value: 0.5 }, { bone: createBoneRef(forearm.id), value: 0.5 }] },
+    { id: createId('meshVertex'), x: 650, y: 405, weights: [{ bone: createBoneRef(upperArm.id), value: 0.5 }, { bone: createBoneRef(forearm.id), value: 0.5 }] },
+    { id: createId('meshVertex'), x: 740, y: 375, weights: [{ bone: createBoneRef(forearm.id), value: 1 }] },
+    { id: createId('meshVertex'), x: 740, y: 405, weights: [{ bone: createBoneRef(forearm.id), value: 1 }] },
+  ];
+  const armMesh = createMesh({
+    name: 'Right Arm Skin',
+    opacity: 0.58,
+    paint: { fill: '#f472b6', stroke: '#831843', strokeWidth: 2 },
+    vertices: armVertices,
+    triangles: [
+      [armVertices[0], armVertices[1], armVertices[2]].map((vertex) => createMeshVertexRef(vertex.id)),
+      [armVertices[1], armVertices[3], armVertices[2]].map((vertex) => createMeshVertexRef(vertex.id)),
+      [armVertices[2], armVertices[3], armVertices[4]].map((vertex) => createMeshVertexRef(vertex.id)),
+      [armVertices[3], armVertices[5], armVertices[4]].map((vertex) => createMeshVertexRef(vertex.id)),
+    ],
+  });
+  const armIk = createConstraint('ik', {
+    name: 'Right Arm IK',
+    bones: [createBoneRef(upperArm.id), createBoneRef(forearm.id)],
+    target: createControlRef(handTarget.id),
+    bendDirection: 1,
+    strength: 1,
+  });
+
+  return normalizeDocument(createDocument({
+    name: 'Veyra Bloom Rig',
+    nodes: [character, halo, face, leftEye, rightEye, leftSpark, rightSpark, mouth, accent],
+    bones: [upperArm, forearm],
+    meshes: [armMesh],
+    controls: [handTarget],
+    constraints: [armIk],
+    semantics: [
+      createSemanticRecord(character.id, {
+        role: 'character',
+        description: 'Root character component for the Veyra starter scene.',
+        tags: ['character', 'root'],
+      }),
+      createSemanticRecord(leftEye.id, { role: 'eye', tags: ['face', 'eye', 'left_eye'] }),
+      createSemanticRecord(rightEye.id, { role: 'eye', tags: ['face', 'eye', 'right_eye'] }),
+      createSemanticRecord(mouth.id, { role: 'mouth', tags: ['face', 'mouth', 'expression'] }),
+      createSemanticRecord(accent.id, { role: 'brand_mark', tags: ['veyra', 'accent'] }),
+    ],
+  }));
+}
