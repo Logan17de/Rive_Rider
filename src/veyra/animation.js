@@ -190,6 +190,14 @@ export class AnimationPlayback {
     this.#document = document;
   }
 
+  get document() {
+    return this.#document;
+  }
+
+  setDocument(document) {
+    this.#document = document;
+  }
+
   play(timelineId, options = {}) {
     const timeline = timelineById(this.#document, timelineId);
     if (!timeline) throw new Error(`Timeline ${timelineId} not found.`);

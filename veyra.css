@@ -384,6 +384,12 @@ button svg,
 .fieldGrid.oneColumn { grid-template-columns: 1fr; }
 .field { min-width: 0; display: grid; gap: 5px; }
 .field > span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.fieldHead { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.fieldHead > span { min-width: 0; color: var(--muted); font-size: 10px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fieldKeyButton { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--primary); cursor: pointer; }
+.fieldKeyButton:hover { border-color: var(--primary); background: rgb(236 72 153 / 10%); }
+.fieldKeyButton.hasKey { border-color: var(--control); background: rgb(34 211 238 / 12%); color: var(--control); }
+.fieldKeyButton svg { width: 11px; height: 11px; fill: currentColor; }
 .field input,
 .field textarea,
 .field select {
@@ -464,7 +470,8 @@ button svg,
 .stagePanel:has(.timelinePanel[data-collapsed='true']) { grid-template-rows: auto auto minmax(0, 1fr) 34px 48px; }
 
 .timelinePanel { display: flex; flex-direction: column; border-top: 1px solid var(--border); background: #0e0a11; overflow: hidden; }
-.timelinePanel[data-collapsed='true'] .timelineBody { display: none; }
+.timelinePanel[data-collapsed='true'] .timelineBody,
+.timelinePanel[data-collapsed='true'] .keyframeBar { display: none; }
 
 .timelineBar {
   min-height: 48px;
@@ -559,6 +566,24 @@ button svg,
   appearance: none;
 }
 
+.keyframeBar {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #120d16;
+  overflow-x: auto;
+}
+.keyframeBar[hidden] { display: none; }
+.keyframeBarLabel { min-width: 160px; max-width: 300px; overflow: hidden; color: var(--control); font: 700 10px/1.3 'Courier New', monospace; text-overflow: ellipsis; white-space: nowrap; }
+.keyframeBar select,
+.keyframeBar input { height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: 600 10px/1.3 var(--font-body); }
+.keyframeBar select { min-width: 118px; }
+.keyframeBar input { width: 52px; }
+.keyframeBar .iconButton { flex: none; width: 28px; height: 28px; }
+
 .timelineBody {
   position: relative;
   display: grid;
@@ -611,8 +636,8 @@ button svg,
   position: relative;
   min-height: 32px;
   background-image:
-    repeating-linear-gradient(90deg, transparent, transparent 19px, #1a141f 19px, #1a141f 20px),
-    repeating-linear-gradient(90deg, transparent, transparent 99px, #231a29 99px, #231a29 100px);
+    linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), #1a141f calc(100% - 1px), #1a141f 100%),
+    linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), #231a29 calc(100% - 1px), #231a29 100%);
   background-size: 20px 100%, 100px 100%;
 }
 
@@ -636,11 +661,13 @@ button svg,
   background: var(--primary);
   border: 1px solid #fff7fc;
   border-radius: 2px;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   transform: rotate(45deg);
   transition: transform 120ms ease-out;
 }
 .timelineKeyframe:hover { transform: rotate(45deg) scale(1.3); }
+.timelineKeyframe:active { cursor: grabbing; }
 .timelineKeyframe.isSelected { background: var(--control); border-color: #fff7fc; }
 
 @media (max-width: 640px) {

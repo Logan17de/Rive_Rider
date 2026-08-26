@@ -28,9 +28,9 @@ import {
   transformPoint,
 } from './src/veyra/contracts.js';
 import { evaluateDocument } from './src/veyra/evaluation.js';
-import { AnimationPlayback } from './src/veyra/animation.js';
+import { AnimationPlayback, evaluateTimeline, normalizeFrame } from './src/veyra/animation.js';
 import { parseVeyra, downloadSvg, downloadVeyra, serializeVeyra } from './src/veyra/io.js';
-import { nodePropertyAddress, readProperty, rigPropertyAddress, writeProperty } from './src/veyra/properties.js';
+import { isAnimatableProperty, nodePropertyAddress, readProperty, rigPropertyAddress, writeProperty } from './src/veyra/properties.js';
 import { createBoneRef, createControlRef, createMeshVertexRef, createNodeRef, referenceId } from './src/veyra/references.js';
 import { VeyraRenderer } from './src/veyra/renderer.js';
 import { mirrorMeshWeights, normalizeMeshWeights } from './src/veyra/rigging.js';
@@ -77,12 +77,16 @@ const fpsInput = $('fpsInput');
 const durationInput = $('durationInput');
 const timelineTracks = $('timelineTracks');
 const timelineGrid = $('timelineGrid');
+const timelineGridWrap = $('timelineGridWrap');
 const timelineRuler = $('timelineRuler');
+const keyframeBar = $('keyframeBar');
 const playhead = $('playhead');
 
 let toastTimer = null;
 let autosaveTimer = null;
-let playbackTimer = null;
+let playbackRaf = null;
+let playbackOffsetFrames = 0;
+let playbackLoopMode = null;
 let zoom = 1;
 let currentTool = 'select';
 let savedRevision = 0;
@@ -91,6 +95,12 @@ let animationPlayback = null;
 let activeTimelineId = null;
 let currentFrame = 0;
 let selectedTrackAddress = null;
+let selectedKeyframe = null;
+let suppressKeyframeClick = false;
+let keyframeDragPointerId = null;
+let timelinePxPerFrame = 20;
+let lastEasing = 'linear';
+let lastEasingParams = null;
 const selectedMeshVertices = new Map();
 
 function restoredDocument() {
@@ -196,10 +206,12 @@ function setStatus(message) {
 function commit(label, mutation) {
   try {
     store.execute(label, mutation);
+    return true;
   } catch (error) {
     console.error(error);
     showToast(error.message || String(error), true);
     renderAll('validation-error');
+    return false;
   }
 }
 
@@ -390,6 +402,34 @@ function section(title) {
   return { fieldset, grid };
 }
 
+function shortAddressLabel(address) {
+  return String(address || '').split('/').slice(1).join('.');
+}
+
+function hasKeyframeAt(address, frame) {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  const track = timeline ? trackByAddress(timeline, address) : null;
+  return Boolean(track?.keyframes.some((keyframe) => keyframe.frame === frame));
+}
+
+function createFieldKeyButton(address) {
+  if (!activeTimelineId || !isAnimatableProperty(store.document, address)) return null;
+  const frame = Math.round(currentFrame);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'fieldKeyButton';
+  button.classList.toggle('hasKey', hasKeyframeAt(address, frame));
+  button.title = `Keyframe ${shortAddressLabel(address)} at frame ${frame}`;
+  button.setAttribute('aria-label', button.title);
+  button.append(icon('key'));
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    recordKeyframeFor(address);
+  });
+  return button;
+}
+
 function field(labelText, value, onCommit, options = {}) {
   const label = document.createElement('label');
   label.className = `field${options.full ? ' fullField' : ''}`;
@@ -431,7 +471,15 @@ function field(labelText, value, onCommit, options = {}) {
       if (event.key === 'Enter') input.blur();
     });
   }
-  label.append(text, input);
+  const keyButton = options.address ? createFieldKeyButton(options.address) : null;
+  if (keyButton) {
+    const head = document.createElement('div');
+    head.className = 'fieldHead';
+    head.append(text, keyButton);
+    label.append(head, input);
+  } else {
+    label.append(text, input);
+  }
   return label;
 }
 
@@ -455,20 +503,38 @@ function appendNote(fieldset, text, className = 'geometryNote') {
   fieldset.appendChild(note);
 }
 
+function maybeAutoKey(address) {
+  if (!autoKeyToggle.checked || !activeTimelineId) return;
+  if (!isAnimatableProperty(store.document, address)) return;
+  try {
+    store.setKeyframe({
+      timelineId: activeTimelineId,
+      address,
+      frame: Math.round(currentFrame),
+      easing: lastEasing,
+      easingParams: lastEasingParams,
+    }, `Auto-keyframe ${shortAddressLabel(address)}`);
+  } catch (error) {
+    console.warn('Auto-keyframe failed:', error);
+  }
+}
+
 function nodePropertyMutation(node, path, label, value) {
   const address = nodePropertyAddress(node.id, path);
-  commit(
+  const changed = commit(
     { source: 'user', label, propertyAddresses: [address] },
     (documentModel) => writeProperty(documentModel, address, value),
   );
+  if (changed) maybeAutoKey(address);
 }
 
 function rigPropertyMutation(kind, object, path, label, value) {
   const address = rigPropertyAddress(kind, object.id, path);
-  commit(
+  const changed = commit(
     { source: 'user', label, propertyAddresses: [address] },
     (documentModel) => writeProperty(documentModel, address, value),
   );
+  if (changed) maybeAutoKey(address);
 }
 
 function inspectorAction(label, iconName, onClick) {
@@ -545,7 +611,7 @@ function renderNodeInspector(node) {
       `Set ${node.name} ${key}`,
       angle ? degreesToRadians(value) : value,
     ),
-    { type: 'number', number: true, step },
+    { type: 'number', number: true, step, address: nodePropertyAddress(node.id, `transform.${key}`) },
   );
   transform.grid.append(
     transformField('X', 'x'),
@@ -563,12 +629,12 @@ function renderNodeInspector(node) {
 
   const appearance = section('Appearance');
   if (node.type !== 'group') appearance.grid.append(
-    field('Fill', node.paint.fill, (value) => nodePropertyMutation(node, 'paint.fill', `Set ${node.name} fill`, value), { placeholder: '#ec4899 or none' }),
-    field('Stroke', node.paint.stroke, (value) => nodePropertyMutation(node, 'paint.stroke', `Set ${node.name} stroke`, value), { placeholder: '#2c1830 or none' }),
-    field('Stroke width', node.paint.strokeWidth, (value) => nodePropertyMutation(node, 'paint.strokeWidth', `Set ${node.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5 }),
+    field('Fill', node.paint.fill, (value) => nodePropertyMutation(node, 'paint.fill', `Set ${node.name} fill`, value), { placeholder: '#ec4899 or none', address: nodePropertyAddress(node.id, 'paint.fill') }),
+    field('Stroke', node.paint.stroke, (value) => nodePropertyMutation(node, 'paint.stroke', `Set ${node.name} stroke`, value), { placeholder: '#2c1830 or none', address: nodePropertyAddress(node.id, 'paint.stroke') }),
+    field('Stroke width', node.paint.strokeWidth, (value) => nodePropertyMutation(node, 'paint.strokeWidth', `Set ${node.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5, address: nodePropertyAddress(node.id, 'paint.strokeWidth') }),
   );
   appearance.grid.append(
-    field('Opacity', node.opacity, (value) => nodePropertyMutation(node, 'opacity', `Set ${node.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05 }),
+    field('Opacity', node.opacity, (value) => nodePropertyMutation(node, 'opacity', `Set ${node.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05, address: nodePropertyAddress(node.id, 'opacity') }),
     checkbox('Visible', node.visible, (value) => nodePropertyMutation(node, 'visible', `${value ? 'Show' : 'Hide'} ${node.name}`, value)),
     checkbox('Locked', node.locked, (value) => nodePropertyMutation(node, 'locked', `${value ? 'Lock' : 'Unlock'} ${node.name}`, value)),
   );
@@ -580,7 +646,7 @@ function renderNodeInspector(node) {
       label,
       node.geometry[key],
       (value) => nodePropertyMutation(node, `geometry.${key}`, `Set ${node.name} ${key}`, value),
-      { type: 'number', number: true, step: options.step ?? 1, min: options.min, max: options.max },
+      { type: 'number', number: true, step: options.step ?? 1, min: options.min, max: options.max, address: nodePropertyAddress(node.id, `geometry.${key}`) },
     );
     if (node.type === 'rectangle') {
       geometry.grid.append(property('Width', 'width', { min: 0.01 }), property('Height', 'height', { min: 0.01 }), property('Corner radius', 'cornerRadius', { min: 0 }));
@@ -634,7 +700,7 @@ function renderBoneInspector(bone) {
   identity.grid.append(
     field('Name', bone.name, (value) => rigPropertyMutation('bone', bone, 'name', `Rename ${bone.name}`, value)),
     field('Parent', referenceId(bone.parent, 'bone') || '', (value) => rigPropertyMutation('bone', bone, 'parent', `Reparent ${bone.name}`, value ? createBoneRef(value) : null), { select: parents }),
-    field('Length', bone.length, (value) => rigPropertyMutation('bone', bone, 'length', `Set ${bone.name} length`, value), { type: 'number', number: true, min: 0.01, step: 1 }),
+    field('Length', bone.length, (value) => rigPropertyMutation('bone', bone, 'length', `Set ${bone.name} length`, value), { type: 'number', number: true, min: 0.01, step: 1, address: rigPropertyAddress('bone', bone.id, 'length') }),
     field('Color', bone.color, (value) => rigPropertyMutation('bone', bone, 'color', `Set ${bone.name} color`, value)),
     checkbox('Visible', bone.visible, (value) => rigPropertyMutation('bone', bone, 'visible', `${value ? 'Show' : 'Hide'} ${bone.name}`, value)),
     checkbox('Locked', bone.locked, (value) => rigPropertyMutation('bone', bone, 'locked', `${value ? 'Lock' : 'Unlock'} ${bone.name}`, value)),
@@ -662,7 +728,7 @@ function renderBoneInspector(bone) {
       label,
       angle ? Number(radiansToDegrees(bone[key][propertyKey]).toFixed(3)) : bone[key][propertyKey],
       (value) => rigPropertyMutation('bone', bone, `${key}.${propertyKey}`, `Set ${bone.name} ${key} ${propertyKey}`, angle ? degreesToRadians(value) : value),
-      { type: 'number', number: true, step },
+      { type: 'number', number: true, step, address: key === 'pose' ? rigPropertyAddress('bone', bone.id, `${key}.${propertyKey}`) : null },
     );
     transform.grid.append(
       property('X', 'x'),
@@ -698,10 +764,10 @@ function renderMeshInspector(mesh) {
   const identity = section('Mesh');
   identity.grid.append(
     field('Name', mesh.name, (value) => rigPropertyMutation('mesh', mesh, 'name', `Rename ${mesh.name}`, value)),
-    field('Opacity', mesh.opacity, (value) => rigPropertyMutation('mesh', mesh, 'opacity', `Set ${mesh.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05 }),
-    field('Fill', mesh.paint.fill, (value) => rigPropertyMutation('mesh', mesh, 'paint.fill', `Set ${mesh.name} fill`, value)),
-    field('Stroke', mesh.paint.stroke, (value) => rigPropertyMutation('mesh', mesh, 'paint.stroke', `Set ${mesh.name} stroke`, value)),
-    field('Stroke width', mesh.paint.strokeWidth, (value) => rigPropertyMutation('mesh', mesh, 'paint.strokeWidth', `Set ${mesh.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5 }),
+    field('Opacity', mesh.opacity, (value) => rigPropertyMutation('mesh', mesh, 'opacity', `Set ${mesh.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05, address: rigPropertyAddress('mesh', mesh.id, 'opacity') }),
+    field('Fill', mesh.paint.fill, (value) => rigPropertyMutation('mesh', mesh, 'paint.fill', `Set ${mesh.name} fill`, value), { address: rigPropertyAddress('mesh', mesh.id, 'paint.fill') }),
+    field('Stroke', mesh.paint.stroke, (value) => rigPropertyMutation('mesh', mesh, 'paint.stroke', `Set ${mesh.name} stroke`, value), { address: rigPropertyAddress('mesh', mesh.id, 'paint.stroke') }),
+    field('Stroke width', mesh.paint.strokeWidth, (value) => rigPropertyMutation('mesh', mesh, 'paint.strokeWidth', `Set ${mesh.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5, address: rigPropertyAddress('mesh', mesh.id, 'paint.strokeWidth') }),
     checkbox('Visible', mesh.visible, (value) => rigPropertyMutation('mesh', mesh, 'visible', `${value ? 'Show' : 'Hide'} ${mesh.name}`, value)),
     checkbox('Locked', mesh.locked, (value) => rigPropertyMutation('mesh', mesh, 'locked', `${value ? 'Lock' : 'Unlock'} ${mesh.name}`, value)),
   );
@@ -785,14 +851,14 @@ function renderControlInspector(control) {
   const identity = section('Pose control');
   identity.grid.append(
     field('Name', control.name, (value) => rigPropertyMutation('control', control, 'name', `Rename ${control.name}`, value)),
-    field('X', control.position.x, (value) => rigPropertyMutation('control', control, 'position.x', `Set ${control.name} X`, value), { type: 'number', number: true, step: 1 }),
-    field('Y', control.position.y, (value) => rigPropertyMutation('control', control, 'position.y', `Set ${control.name} Y`, value), { type: 'number', number: true, step: 1 }),
+    field('X', control.position.x, (value) => rigPropertyMutation('control', control, 'position.x', `Set ${control.name} X`, value), { type: 'number', number: true, step: 1, address: rigPropertyAddress('control', control.id, 'position.x') }),
+    field('Y', control.position.y, (value) => rigPropertyMutation('control', control, 'position.y', `Set ${control.name} Y`, value), { type: 'number', number: true, step: 1, address: rigPropertyAddress('control', control.id, 'position.y') }),
     field('Color', control.color, (value) => rigPropertyMutation('control', control, 'color', `Set ${control.name} color`, value)),
     checkbox('Visible', control.visible, (value) => rigPropertyMutation('control', control, 'visible', `${value ? 'Show' : 'Hide'} ${control.name}`, value)),
     checkbox('Locked', control.locked, (value) => rigPropertyMutation('control', control, 'locked', `${value ? 'Lock' : 'Unlock'} ${control.name}`, value)),
   );
   if (control.kind === 'scalar') identity.grid.append(
-    field('Value', control.value, (value) => rigPropertyMutation('control', control, 'value', `Set ${control.name} value`, value), { type: 'number', number: true, min: control.min, max: control.max, step: 0.01 }),
+    field('Value', control.value, (value) => rigPropertyMutation('control', control, 'value', `Set ${control.name} value`, value), { type: 'number', number: true, min: control.min, max: control.max, step: 0.01, address: rigPropertyAddress('control', control.id, 'value') }),
     field('Minimum', control.min, (value) => rigPropertyMutation('control', control, 'min', `Set ${control.name} minimum`, value), { type: 'number', number: true, step: 0.01 }),
     field('Maximum', control.max, (value) => rigPropertyMutation('control', control, 'max', `Set ${control.name} maximum`, value), { type: 'number', number: true, step: 0.01 }),
   );
@@ -809,7 +875,7 @@ function renderConstraintInspector(constraint) {
   const pathOptions = store.document.nodes.filter((node) => node.type === 'path').map((node) => ({ value: node.id, label: node.name }));
   settings.grid.append(
     field('Name', constraint.name, (value) => rigPropertyMutation('constraint', constraint, 'name', `Rename ${constraint.name}`, value)),
-    field('Strength', constraint.strength, (value) => rigPropertyMutation('constraint', constraint, 'strength', `Set ${constraint.name} strength`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05 }),
+    field('Strength', constraint.strength, (value) => rigPropertyMutation('constraint', constraint, 'strength', `Set ${constraint.name} strength`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05, address: rigPropertyAddress('constraint', constraint.id, 'strength') }),
     field('Order', constraint.order, (value) => rigPropertyMutation('constraint', constraint, 'order', `Set ${constraint.name} order`, value), { type: 'number', number: true, step: 1 }),
     checkbox('Enabled', constraint.enabled, (value) => rigPropertyMutation('constraint', constraint, 'enabled', `${value ? 'Enable' : 'Disable'} ${constraint.name}`, value)),
   );
@@ -840,14 +906,14 @@ function renderConstraintInspector(constraint) {
     }),
   );
   if (constraint.type === 'distance') settings.grid.append(
-    field('Distance', constraint.distance, (value) => rigPropertyMutation('constraint', constraint, 'distance', `Set ${constraint.name} distance`, value), { type: 'number', number: true, min: 0, step: 1 }),
+    field('Distance', constraint.distance, (value) => rigPropertyMutation('constraint', constraint, 'distance', `Set ${constraint.name} distance`, value), { type: 'number', number: true, min: 0, step: 1, address: rigPropertyAddress('constraint', constraint.id, 'distance') }),
   );
   if (constraint.type === 'path') settings.grid.append(
-    field('Position', constraint.position, (value) => rigPropertyMutation('constraint', constraint, 'position', `Set ${constraint.name} position`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.01 }),
+    field('Position', constraint.position, (value) => rigPropertyMutation('constraint', constraint, 'position', `Set ${constraint.name} position`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.01, address: rigPropertyAddress('constraint', constraint.id, 'position') }),
     checkbox('Follow tangent', constraint.rotate, (value) => rigPropertyMutation('constraint', constraint, 'rotate', `Set ${constraint.name} tangent follow`, value)),
   );
   if (['rotation', 'transform'].includes(constraint.type)) settings.grid.append(
-    field('Offset °', Number(radiansToDegrees(constraint.offset).toFixed(3)), (value) => rigPropertyMutation('constraint', constraint, 'offset', `Set ${constraint.name} offset`, degreesToRadians(value)), { type: 'number', number: true, step: 0.5 }),
+    field('Offset °', Number(radiansToDegrees(constraint.offset).toFixed(3)), (value) => rigPropertyMutation('constraint', constraint, 'offset', `Set ${constraint.name} offset`, degreesToRadians(value)), { type: 'number', number: true, step: 0.5, address: rigPropertyAddress('constraint', constraint.id, 'offset') }),
   );
   const diagnostic = evaluatedScene?.diagnostics.constraints.find((candidate) => candidate.id === constraint.id);
   appendNote(settings.fieldset, `Solver: ${diagnostic?.status || 'not evaluated'}${Number.isFinite(diagnostic?.error) ? ` · endpoint error ${diagnostic.error.toFixed(2)} px` : ''}. Solved values are not authored.`);
@@ -877,6 +943,11 @@ function initializeTimeline() {
 }
 
 function renderTimelineSelect() {
+  if (!store.document.timelines.some((timeline) => timeline.id === activeTimelineId)) {
+    activeTimelineId = store.document.timelines[0]?.id || null;
+    selectedTrackAddress = null;
+    selectedKeyframe = null;
+  }
   timelineSelect.replaceChildren();
   for (const timeline of store.document.timelines) {
     const option = document.createElement('option');
@@ -908,7 +979,7 @@ function renderTimelineTracks() {
     emptyMsg.style.padding = '20px 12px';
     emptyMsg.style.color = 'var(--quiet)';
     emptyMsg.style.fontSize = '10px';
-    emptyMsg.textContent = 'No animated properties. Select a property and click the keyframe button.';
+    emptyMsg.textContent = 'No animated properties. Click the diamond beside any inspector property, or enable Auto-key.';
     timelineTracks.appendChild(emptyMsg);
     return;
   }
@@ -926,45 +997,229 @@ function renderTimelineTracks() {
   }
 }
 
+function timelineXFromClientX(clientX) {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return 0;
+  const rect = timelineGridWrap.getBoundingClientRect();
+  const x = clientX - rect.left + timelineGridWrap.scrollLeft;
+  return Math.max(0, Math.min(x, timeline.duration * timelinePxPerFrame));
+}
+
+function frameFromTimelineClientX(clientX) {
+  return Math.round(timelineXFromClientX(clientX) / timelinePxPerFrame);
+}
+
 function renderTimelineKeyframes() {
   timelineGrid.replaceChildren();
   const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
   if (!timeline) return;
 
   const trackHeight = 32;
+  const rulerWidth = timeline.duration * timelinePxPerFrame;
   timelineGrid.style.height = `${Math.max(trackHeight * timeline.tracks.length, trackHeight)}px`;
+  timelineGrid.style.backgroundSize = `${timelinePxPerFrame}px 100%, ${timelinePxPerFrame * 5}px 100%`;
 
   for (let i = 0; i < timeline.tracks.length; i++) {
     const track = timeline.tracks[i];
     for (const keyframe of track.keyframes) {
       const kfEl = document.createElement('div');
       kfEl.className = 'timelineKeyframe';
-      if (track.address === selectedTrackAddress) kfEl.classList.add('isSelected');
-      const x = (keyframe.frame / timeline.duration) * (timeline.duration * 20);
+      const isSelected = selectedKeyframe?.address === track.address
+        && selectedKeyframe.frame === keyframe.frame;
+      kfEl.classList.toggle('isSelected', isSelected);
       const y = i * trackHeight + trackHeight / 2;
-      kfEl.style.left = `${x}px`;
+      kfEl.style.left = `${keyframe.frame * timelinePxPerFrame}px`;
       kfEl.style.top = `${y}px`;
-      kfEl.title = `Frame ${keyframe.frame}, ${keyframe.easing}`;
-      kfEl.addEventListener('click', (e) => {
-        e.stopPropagation();
+      kfEl.title = `Frame ${keyframe.frame} · ${keyframe.easing}`;
+      kfEl.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (suppressKeyframeClick) {
+          suppressKeyframeClick = false;
+          return;
+        }
         selectedTrackAddress = track.address;
-        currentFrame = keyframe.frame;
+        selectedKeyframe = { address: track.address, frame: keyframe.frame };
+        setCurrentFrame(keyframe.frame);
         renderTimeline();
+      });
+      kfEl.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || keyframeDragPointerId !== null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        keyframeDragPointerId = event.pointerId;
+        kfEl.setPointerCapture?.(event.pointerId);
+        const startClientX = event.clientX;
+        let dragging = false;
+        const cleanup = () => {
+          kfEl.releasePointerCapture?.(event.pointerId);
+          keyframeDragPointerId = null;
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', finish);
+          window.removeEventListener('pointercancel', cancel);
+        };
+        const onMove = (moveEvent) => {
+          if (moveEvent.pointerId !== event.pointerId) return;
+          if (!dragging && Math.abs(moveEvent.clientX - startClientX) < 3) return;
+          dragging = true;
+          kfEl.style.left = `${timelineXFromClientX(moveEvent.clientX)}px`;
+        };
+        const finish = (finishEvent) => {
+          if (finishEvent.pointerId !== event.pointerId) return;
+          cleanup();
+          if (!dragging) return;
+          suppressKeyframeClick = true;
+          setTimeout(() => { suppressKeyframeClick = false; }, 0);
+          const nextFrame = frameFromTimelineClientX(finishEvent.clientX);
+          if (nextFrame !== keyframe.frame) {
+            try {
+              store.moveKeyframe({
+                timelineId: timeline.id,
+                address: track.address,
+                fromFrame: keyframe.frame,
+                toFrame: nextFrame,
+              }, `Move keyframe to frame ${nextFrame}`);
+              selectedTrackAddress = track.address;
+              selectedKeyframe = { address: track.address, frame: nextFrame };
+            } catch (error) {
+              showToast(error.message || String(error), true);
+            }
+          }
+          renderTimeline();
+        };
+        const cancel = (cancelEvent) => {
+          if (cancelEvent.pointerId !== event.pointerId) return;
+          cleanup();
+          renderTimeline();
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', finish);
+        window.addEventListener('pointercancel', cancel);
       });
       timelineGrid.appendChild(kfEl);
     }
   }
 
-  const rulerWidth = timeline.duration * 20;
   timelineRuler.style.width = `${rulerWidth}px`;
   timelineGrid.style.width = `${rulerWidth}px`;
+}
+
+function updateSelectedKeyframeEasing(easing, easingParams) {
+  if (!activeTimelineId || !selectedKeyframe) return;
+  const timeline = timelineById(store.document, activeTimelineId);
+  const track = timeline ? trackByAddress(timeline, selectedKeyframe.address) : null;
+  const keyframe = track?.keyframes.find((candidate) => candidate.frame === selectedKeyframe.frame);
+  if (!keyframe) return;
+  const params = easing === 'cubic-bezier'
+    ? easingParams || keyframe.easingParams || [0.42, 0, 0.58, 1]
+    : undefined;
+  try {
+    store.setKeyframe({
+      timelineId: activeTimelineId,
+      address: selectedKeyframe.address,
+      frame: selectedKeyframe.frame,
+      value: keyframe.value,
+      easing,
+      easingParams: params,
+    }, `Set ${shortAddressLabel(selectedKeyframe.address)} easing`);
+    lastEasing = easing;
+    lastEasingParams = params || null;
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+}
+
+function deleteSelectedKeyframe() {
+  if (!activeTimelineId || !selectedKeyframe) return;
+  const selection = selectedKeyframe;
+  selectedKeyframe = null;
+  try {
+    store.removeKeyframe({
+      timelineId: activeTimelineId,
+      address: selection.address,
+      frame: selection.frame,
+    }, `Delete ${shortAddressLabel(selection.address)} keyframe at frame ${selection.frame}`);
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+  renderTimeline();
+}
+
+function renderKeyframeBar() {
+  keyframeBar.replaceChildren();
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  const track = timeline && selectedKeyframe ? trackByAddress(timeline, selectedKeyframe.address) : null;
+  const keyframe = track?.keyframes.find((candidate) => candidate.frame === selectedKeyframe.frame);
+  if (!keyframe) {
+    keyframeBar.hidden = true;
+    return;
+  }
+
+  keyframeBar.hidden = false;
+  const label = document.createElement('span');
+  label.className = 'keyframeBarLabel';
+  label.textContent = `${shortAddressLabel(selectedKeyframe.address)} · frame ${keyframe.frame}`;
+
+  const easingSelect = document.createElement('select');
+  easingSelect.setAttribute('aria-label', 'Keyframe easing');
+  for (const easing of ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'step', 'hold', 'cubic-bezier']) {
+    const option = document.createElement('option');
+    option.value = easing;
+    option.textContent = easing;
+    option.selected = easing === keyframe.easing;
+    easingSelect.appendChild(option);
+  }
+  easingSelect.addEventListener('change', () => updateSelectedKeyframeEasing(easingSelect.value));
+
+  keyframeBar.append(label, easingSelect);
+  if (keyframe.easing === 'cubic-bezier') {
+    const defaults = [0.42, 0, 0.58, 1];
+    const parameters = keyframe.easingParams || defaults;
+    const inputs = parameters.map((parameter, index) => {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.max = '1';
+      input.step = '0.01';
+      input.value = String(Number(parameter).toFixed(2));
+      input.setAttribute('aria-label', `Cubic bezier parameter ${index + 1}`);
+      return input;
+    });
+    const updateParameters = () => {
+      const values = inputs.map((input, index) => {
+        const value = Number(input.value);
+        return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : defaults[index];
+      });
+      updateSelectedKeyframeEasing('cubic-bezier', values);
+    };
+    inputs.forEach((input) => input.addEventListener('change', updateParameters));
+    keyframeBar.append(...inputs);
+  }
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'iconButton';
+  remove.title = 'Delete keyframe (Delete)';
+  remove.setAttribute('aria-label', remove.title);
+  remove.append(icon('delete'));
+  remove.onclick = deleteSelectedKeyframe;
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'iconButton';
+  close.title = 'Close keyframe editor';
+  close.setAttribute('aria-label', close.title);
+  close.append(icon('close'));
+  close.onclick = () => {
+    selectedKeyframe = null;
+    renderTimeline();
+  };
+  keyframeBar.append(remove, close);
 }
 
 function updatePlayhead() {
   const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
   if (!timeline) return;
-  const x = (currentFrame / timeline.duration) * (timeline.duration * 20);
-  playhead.style.transform = `translateX(${x}px)`;
+  playhead.style.transform = `translateX(${currentFrame * timelinePxPerFrame}px)`;
 }
 
 function renderTimeline() {
@@ -972,7 +1227,17 @@ function renderTimeline() {
   renderTimelineSettings();
   renderTimelineTracks();
   renderTimelineKeyframes();
+  renderKeyframeBar();
   updatePlayhead();
+}
+
+function evaluateCurrentFrame() {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  const layers = timeline
+    ? { animation: evaluateTimeline(timeline, currentFrame / timeline.fps) }
+    : {};
+  evaluatedScene = evaluateDocument(store.document, layers);
+  renderer.render(evaluatedScene, store.selectedRef);
 }
 
 function setCurrentFrame(frame) {
@@ -981,100 +1246,140 @@ function setCurrentFrame(frame) {
   currentFrame = Math.max(0, Math.min(frame, timeline.duration));
   updatePlayhead();
   renderTimelineSettings();
-  evaluatedScene = evaluateDocument(store.document, {}, animationPlayback);
-  renderer.render(evaluatedScene, store.selectedRef);
+  evaluateCurrentFrame();
 }
 
-function playAnimation() {
+function setPlayButtonState(playing) {
+  playToggle.innerHTML = '';
+  playToggle.appendChild(icon(playing ? 'pause' : 'play'));
+  playToggle.title = playing ? 'Pause (Space)' : 'Play (Space)';
+  playToggle.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+}
+
+function finishPlayback() {
+  if (playbackRaf !== null) cancelAnimationFrame(playbackRaf);
+  playbackRaf = null;
+  if (animationPlayback) animationPlayback.stop();
+  setPlayButtonState(false);
+}
+
+function tickPlayback() {
+  playbackRaf = null;
+  if (!animationPlayback?.isPlaying) {
+    finishPlayback();
+    return;
+  }
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  const state = animationPlayback.getActiveStates()
+    .find((candidate) => candidate.timelineId === activeTimelineId);
+  if (!timeline || !state) {
+    const shouldShowEnd = timeline && (playbackLoopMode || timeline.loop) === 'none';
+    finishPlayback();
+    if (shouldShowEnd) setCurrentFrame(timeline.duration);
+    return;
+  }
+  const rawFrame = playbackOffsetFrames + state.time * timeline.fps;
+  const loop = playbackLoopMode || timeline.loop;
+  if (loop === 'none' && rawFrame >= timeline.duration) {
+    finishPlayback();
+    setCurrentFrame(timeline.duration);
+    return;
+  }
+  setCurrentFrame(normalizeFrame(rawFrame, timeline.duration, loop));
+  playbackRaf = requestAnimationFrame(tickPlayback);
+}
+
+function playAnimation(options = {}) {
   if (!activeTimelineId || !animationPlayback) return;
   const timeline = timelineById(store.document, activeTimelineId);
   if (!timeline) return;
 
   if (animationPlayback.isPlaying) {
     animationPlayback.pause();
-    playToggle.innerHTML = '';
-    playToggle.appendChild(icon('play'));
-    playToggle.title = 'Play (Space)';
-    clearInterval(playbackTimer);
+    if (playbackRaf !== null) cancelAnimationFrame(playbackRaf);
+    playbackRaf = null;
+    setPlayButtonState(false);
     return;
   }
 
-  if (currentFrame >= timeline.duration && timeline.loop === 'none') {
-    currentFrame = 0;
+  if (animationPlayback.isPaused) animationPlayback.resume();
+  let state = animationPlayback.getActiveStates()
+    .find((candidate) => candidate.timelineId === activeTimelineId);
+  if (!state) {
+    playbackLoopMode = options.loop ?? timeline.loop;
+    if (currentFrame >= timeline.duration && playbackLoopMode === 'none') currentFrame = 0;
+    animationPlayback.stop();
+    animationPlayback.play(activeTimelineId, options);
+    state = animationPlayback.getActiveStates()
+      .find((candidate) => candidate.timelineId === activeTimelineId);
   }
 
-  animationPlayback.play(activeTimelineId);
-  playToggle.innerHTML = '';
-  playToggle.appendChild(icon('pause'));
-  playToggle.title = 'Pause (Space)';
 
-  playbackTimer = setInterval(() => {
-    if (!animationPlayback.isPlaying) {
-      clearInterval(playbackTimer);
-      return;
-    }
-
-    const states = animationPlayback.getActiveStates();
-    if (states.length > 0) {
-      currentFrame = states[0].time * timeline.fps;
-      setCurrentFrame(currentFrame);
-    }
-
-    if (timeline.loop === 'none' && currentFrame >= timeline.duration) {
-      stopAnimation();
-    }
-  }, 1000 / timeline.fps);
+  playbackOffsetFrames = currentFrame - (state?.time ?? 0) * timeline.fps;
+  setPlayButtonState(true);
+  playbackRaf = requestAnimationFrame(tickPlayback);
 }
 
 function stopAnimation() {
-  if (animationPlayback) animationPlayback.stop();
-  clearInterval(playbackTimer);
-  playToggle.innerHTML = '';
-  playToggle.appendChild(icon('play'));
-  playToggle.title = 'Play (Space)';
+  finishPlayback();
   currentFrame = 0;
   setCurrentFrame(0);
 }
 
-function recordKeyframe() {
-  if (!activeTimelineId) return;
-  const selected = store.selectedRef;
-  if (!selected) {
-    showToast('Select an object first', true);
+function recordKeyframeFor(address) {
+  if (!activeTimelineId) {
+    showToast('Create a timeline before keyframing', true);
     return;
   }
-
-  // Determine animatable property from selection
-  let address = null;
-  if (selected.kind === 'node') {
-    const node = nodeById(store.document, selected.id);
-    if (node.type === 'rectangle') address = nodePropertyAddress(selected.id, 'geometry/width');
-    else if (node.type === 'ellipse') address = nodePropertyAddress(selected.id, 'geometry/width');
-    else address = nodePropertyAddress(selected.id, 'transform/x');
-  } else if (selected.kind === 'bone') {
-    address = rigPropertyAddress('bone', selected.id, 'pose.rotation');
-  } else if (selected.kind === 'control') {
-    address = rigPropertyAddress('control', selected.id, 'position.x');
-  }
-
-  if (!address) {
-    showToast('Cannot keyframe this property', true);
-    return;
-  }
-
+  const frame = Math.round(currentFrame);
   try {
     store.setKeyframe({
       timelineId: activeTimelineId,
       address,
-      frame: Math.round(currentFrame),
-      easing: 'ease-in-out',
-    }, `Keyframe at frame ${Math.round(currentFrame)}`);
+      frame,
+      easing: lastEasing,
+      easingParams: lastEasingParams,
+    }, `Keyframe ${shortAddressLabel(address)} at frame ${frame}`);
     selectedTrackAddress = address;
+    selectedKeyframe = { address, frame };
     renderTimeline();
-    showToast(`Keyframe recorded at frame ${Math.round(currentFrame)}`);
+    showToast(`Keyframed ${shortAddressLabel(address)} at frame ${frame}`);
   } catch (error) {
     showToast(error.message || String(error), true);
   }
+}
+
+function recordKeyframe() {
+  if (selectedTrackAddress && isAnimatableProperty(store.document, selectedTrackAddress)) {
+    recordKeyframeFor(selectedTrackAddress);
+    return;
+  }
+  const selected = store.selectedRef;
+  if (!selected) {
+    showToast('Select an object or inspector property first', true);
+    return;
+  }
+
+  let address = null;
+  if (selected.kind === 'node') {
+    const node = nodeById(store.document, selected.id);
+    if (['rectangle', 'ellipse'].includes(node.type)) address = nodePropertyAddress(selected.id, 'geometry.width');
+    else address = nodePropertyAddress(selected.id, 'transform.x');
+  } else if (selected.kind === 'bone') {
+    address = rigPropertyAddress('bone', selected.id, 'pose.rotation');
+  } else if (selected.kind === 'control') {
+    address = rigPropertyAddress('control', selected.id, 'position.x');
+  } else if (selected.kind === 'mesh') {
+    address = rigPropertyAddress('mesh', selected.id, 'opacity');
+  } else if (selected.kind === 'constraint') {
+    address = rigPropertyAddress('constraint', selected.id, 'strength');
+  }
+
+  if (!address) {
+    showToast('Cannot keyframe this selection', true);
+    return;
+  }
+  recordKeyframeFor(address);
 }
 
 function renderAll(reason = 'change') {
@@ -1091,15 +1396,10 @@ function renderAll(reason = 'change') {
   saveState.textContent = store.revision === savedRevision ? 'Saved' : 'Modified';
   artboardFrame.style.aspectRatio = `${store.document.artboard.width} / ${store.document.artboard.height}`;
 
-  // Re-create playback if document changed
-  if (!animationPlayback || animationPlayback.document !== store.document) {
-    const wasPlaying = animationPlayback?.isPlaying;
-    if (wasPlaying) stopAnimation();
-    animationPlayback = new AnimationPlayback(store.document);
-  }
+  if (!animationPlayback) animationPlayback = new AnimationPlayback(store.document);
+  else if (animationPlayback.document !== store.document) animationPlayback.setDocument(store.document);
 
-  evaluatedScene = evaluateDocument(store.document, {}, animationPlayback);
-  renderer.render(evaluatedScene, store.selectedRef);
+  evaluateCurrentFrame();
   renderHierarchy();
   renderInspector();
   renderTimeline();
@@ -1342,7 +1642,7 @@ timelineToggle.onclick = () => {
 
 timelineSelect.onchange = () => {
   activeTimelineId = timelineSelect.value;
-  if (animationPlayback?.isPlaying) stopAnimation();
+  if (animationPlayback?.isPlaying || animationPlayback?.isPaused) stopAnimation();
   renderTimeline();
 };
 
@@ -1366,7 +1666,7 @@ timelineDelete.onclick = () => {
   try {
     store.removeTimeline(activeTimelineId, `Delete timeline ${timeline.name}`);
     activeTimelineId = store.document.timelines[0]?.id || null;
-    if (animationPlayback?.isPlaying) stopAnimation();
+    if (animationPlayback?.isPlaying || animationPlayback?.isPaused) stopAnimation();
     renderTimeline();
     showToast('Timeline deleted');
   } catch (error) {
@@ -1422,14 +1722,32 @@ durationInput.onchange = () => {
   }
 };
 
-timelineRuler.addEventListener('click', (e) => {
+timelineRuler.addEventListener('click', (event) => {
   const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
   if (!timeline) return;
-  const rect = timelineRuler.getBoundingClientRect();
-  const x = e.clientX - rect.left + timelineRuler.parentElement.scrollLeft;
-  const frame = (x / (timeline.duration * 20)) * timeline.duration;
-  setCurrentFrame(frame);
+  const rect = timelineGridWrap.getBoundingClientRect();
+  const x = event.clientX - rect.left + timelineGridWrap.scrollLeft;
+  setCurrentFrame(x / timelinePxPerFrame);
 });
+
+timelineRuler.addEventListener('dblclick', () => {
+  timelinePxPerFrame = 20;
+  renderTimeline();
+});
+
+timelineGridWrap.addEventListener('wheel', (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return;
+  const rect = timelineGridWrap.getBoundingClientRect();
+  const pointerX = event.clientX - rect.left;
+  const frameAtPointer = (pointerX + timelineGridWrap.scrollLeft) / timelinePxPerFrame;
+  const factor = Math.exp(-event.deltaY * 0.002);
+  timelinePxPerFrame = Math.max(2, Math.min(120, timelinePxPerFrame * factor));
+  renderTimeline();
+  timelineGridWrap.scrollLeft = frameAtPointer * timelinePxPerFrame - pointerX;
+}, { passive: false });
 
 function updateZoomLabel() {
   zoomValue.value = `${Math.round(zoom * 100)}%`;
@@ -1438,15 +1756,13 @@ function updateZoomLabel() {
 
 function setZoom(next, anchor = null) {
   zoom = renderer.setZoom(next, anchor);
-  evaluatedScene = evaluateDocument(store.document);
-  renderer.render(evaluatedScene, store.selectedRef);
+  evaluateCurrentFrame();
   updateZoomLabel();
 }
 
 function fitCanvas() {
   zoom = renderer.resetView();
-  evaluatedScene = evaluateDocument(store.document);
-  renderer.render(evaluatedScene, store.selectedRef);
+  evaluateCurrentFrame();
   updateZoomLabel();
   setStatus('Canvas fitted');
 }
@@ -1541,11 +1857,21 @@ window.addEventListener('keydown', (event) => {
   } else if (!editing && event.key === ' ') {
     event.preventDefault();
     playAnimation();
-  } else if (!editing && (event.key === 'Delete' || event.key === 'Backspace') && store.selectedId) {
-    event.preventDefault();
-    store.removeSelection();
+  } else if (!editing && (event.key === 'Delete' || event.key === 'Backspace')) {
+    if (selectedKeyframe) {
+      event.preventDefault();
+      deleteSelectedKeyframe();
+    } else if (store.selectedId) {
+      event.preventDefault();
+      store.removeSelection();
+    }
   } else if (!editing && event.key === 'Escape') {
-    store.select(null);
+    if (selectedKeyframe) {
+      selectedKeyframe = null;
+      renderTimeline();
+    } else {
+      store.select(null);
+    }
   }
 });
 
@@ -1586,10 +1912,12 @@ globalThis.veyra = Object.freeze({
   },
   getTimelines: () => cloneValue(store.document.timelines),
   playTimeline: (timelineId, { loop, speed } = {}) => {
-    if (!animationPlayback) return false;
+    if (!animationPlayback || !timelineById(store.document, timelineId)) return false;
+    finishPlayback();
+    currentFrame = 0;
     activeTimelineId = timelineId;
-    animationPlayback.play(timelineId, { loop, speed });
     renderTimeline();
+    playAnimation({ loop, speed });
     return true;
   },
   stopPlayback: () => {

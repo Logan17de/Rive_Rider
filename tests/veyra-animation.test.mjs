@@ -285,6 +285,10 @@ console.log('Testing Veyra animation system...');
 
   const doc = createDocument({ nodes: [node], timelines: [timeline] });
   const playback = new AnimationPlayback(doc);
+  assert.strictEqual(playback.document, doc);
+  const replacement = createDocument({ nodes: [node], timelines: [timeline] });
+  playback.setDocument(replacement);
+  assert.strictEqual(playback.document, replacement);
 
   assert.strictEqual(playback.isPlaying, false);
   assert.strictEqual(playback.isPaused, false);
