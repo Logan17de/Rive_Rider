@@ -8,8 +8,10 @@ Veyra is a real local editor rather than a UI-only prototype. In addition to
 vector artwork, hierarchy, semantics, undo/redo, autosave, and deterministic
 SVG export, Milestone 2 adds bone hierarchies, weighted meshes, draggable pose
 controls, six constraint types, deformation diagnostics, normalization, and
-weight symmetry. The starter document is a two-bone IK character rig that can
-be inspected without guessing from layer names.
+weight symmetry. Milestone 3A adds multiple timelines, property-addressed
+keyframes, easing and cubic Bezier controls, Auto-key, scrubbing, playback,
+keyframe drag/delete, and timeline zoom. The starter document is a two-bone IK
+character rig that can be inspected without guessing from layer names.
 
 ## Run Veyra
 
@@ -35,8 +37,12 @@ Useful shortcuts:
 - `Alt+drag`: pan from any tool;
 - `Shift+bone drag`: snap rotation to 15-degree increments or translation to
   one axis;
-- `Delete`: remove the selected object;
-- `Escape`: cancel a drag or clear the selection.
+- `Space`: play or pause the active timeline;
+- `Ctrl+wheel` over the timeline: zoom around the pointer; double-click the
+  ruler to reset to 20 pixels per frame;
+- `Delete`: remove the selected keyframe, or the selected object when no
+  keyframe is selected;
+- `Escape`: close the keyframe editor, cancel a drag, or clear the selection.
 
 In the Bones tool, drag a bone's cyan end handle to pose it and its start joint
 to translate it. Dragging an IK-driven bone moves the linked target so the
@@ -69,6 +75,10 @@ constraint solvers, migration, and diagnostics are specified in
 [`docs/VEYRA_RIGGING.md`](docs/VEYRA_RIGGING.md). Existing version 1 files are
 migrated in memory and save as version 2 without changing their artwork.
 
+Milestone 3A's timeline schema, interpolation, easing, playback ownership,
+editor interactions, command semantics, and serialization rules are specified
+in [`docs/VEYRA_ANIMATION.md`](docs/VEYRA_ANIMATION.md).
+
 Local scripts and agents can use the running editor through `globalThis.veyra`:
 
 ```js
@@ -86,6 +96,20 @@ veyra.setMeshVertexWeights({
   vertexId: '<mesh-vertex-id>',
   weights: [{ boneId: '<bone-id>', value: 1 }],
 });
+const timelineId = veyra.createTimeline({
+  name: 'Wave',
+  duration: 60,
+  fps: 30,
+  loop: 'loop',
+});
+veyra.setKeyframe({
+  timelineId,
+  address: 'node:<id>/transform/rotation',
+  frame: 0,
+  value: 0,
+  easing: 'ease-in-out',
+});
+veyra.playTimeline(timelineId, { speed: 1 });
 ```
 
 ## Rive research lab
@@ -252,13 +276,17 @@ revision and tools configuration.
   property, evaluation, and serialization rules.
 - `docs/VEYRA_RIGGING.md` - normative Milestone 2 bone, mesh, skinning,
   constraint, diagnostic, and migration rules.
+- `docs/VEYRA_ANIMATION.md` - normative Milestone 3A timeline, interpolation,
+  playback, interaction, and serialization rules.
 - `tests/veyra-model.test.mjs` - document, geometry, file, and history tests.
 - `tests/veyra-foundation.test.mjs` - typed reference, capability, property,
   evaluation, provenance, asset, summary, and migration tests.
 - `tests/veyra-rigging.test.mjs` - bones, skinning, all six constraints,
   diagnostics, normalization, symmetry, and authored/evaluated ownership tests.
-- `tests/fixtures/veyra` / `tests/veyra-golden.test.mjs` - canonical artwork
-  and weighted IK scenes with deterministic rendered-frame hashes.
+- `tests/veyra-animation.test.mjs` - timeline, easing, interpolation, loop,
+  playback, and evaluation integration tests.
+- `tests/fixtures/veyra` / `tests/veyra-golden.test.mjs` - canonical artwork,
+  animated, and weighted IK scenes with deterministic rendered-frame hashes.
 - `tests/veyra-browser.html` - browser renderer smoke test.
 - `deep.html` / `deep.js` — deep geometry viewer/editor.
 - `index.html` / `app.js` — original public-runtime API inspector.

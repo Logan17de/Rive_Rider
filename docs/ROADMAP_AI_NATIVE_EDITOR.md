@@ -23,67 +23,75 @@ structured API that mirrors every editor capability.
 - **File I/O** — new, open, save `.veyra`, export SVG
 - **Character rigging** — bones, bone hierarchy, weighted meshes, 6 constraint types (IK, distance, rotation, scale, transform, path), pose controls, deformation
 - **Rig diagnostics** — weight normalization, symmetry, deformation preview
-- **AI API** — `globalThis.veyra` with `getSceneSummary()`, `getDocument()`, `getEvaluatedScene()`, `readProperty()`, `applyCommand()`, `setMeshVertexWeights()`
+- **Animation model and evaluation** — multiple timelines, property-addressed tracks, keyframes, seven easing modes, color/numeric interpolation, looping, mixing, and authored → animation → constraints evaluation
+- **Timeline editor** — inspector diamonds, Auto-key, scrubbing, playback, keyframe selection/drag/delete, easing and cubic Bezier controls, and timeline zoom
+- **AI API** — `globalThis.veyra` exposes scene/property/rig commands plus `createTimeline()`, `setKeyframe()`, `removeKeyframe()`, `getTimelines()`, `playTimeline()`, and `stopPlayback()`
 - **Design system** — dark creative workspace, magenta/cyan palette, responsive layout
 - **Foundation contracts** — canonical coordinates, property addresses, typed references, evaluation pipeline, deterministic serialization
-- **Tests** — comprehensive Node.js tests for model, foundation, rigging, golden renders
+- **Tests** — comprehensive Node.js tests for model, foundation, rigging, animation, fixture round-trips, and golden renders
 
 ### ❌ Missing (Gap vs Rive)
-1. **Animation timeline** — no keyframes, no timeline UI, no playback
-2. **State machines** — no visual state graph, no transitions, no conditions
-3. **Gradients** — no linear/radial gradient UI
-4. **Blend modes** — not exposed in editor
-5. **Clipping/masking** — no clip path support
-6. **Trim/dash path effects** — not implemented
-7. **Text** — no text objects
-8. **Images** — no image import/embedding
-9. **Nested components** — no artboard nesting or instance overrides
-10. **View models / data binding** — no reactive data layer
-11. **Interactive inputs** — no pointer listeners, no hover/click behaviors
-12. **Layout** — no flex/grid layout system
-13. **Audio** — no audio events
-14. **Canvas/WebGL renderer** — SVG only (limits performance for complex scenes)
-15. **Runtime player** — no embeddable lightweight player
-16. **Export formats** — SVG only, no Lottie/compact binary
-17. **Real-time collaboration** — single user only
-18. **AI autonomy** — AI can edit properties but cannot create full scenes, animate, or build state machines from scratch
+1. **State machines** — no visual state graph, no transitions, no conditions
+2. **Gradients** — no linear/radial gradient UI
+3. **Blend modes** — not exposed in editor
+4. **Clipping/masking** — no clip path support
+5. **Trim/dash path effects** — not implemented
+6. **Text** — no text objects
+7. **Images** — no image import/embedding
+8. **Nested components** — no artboard nesting or instance overrides
+9. **View models / data binding** — no reactive data layer
+10. **Interactive inputs** — no pointer listeners, no hover/click behaviors
+11. **Layout** — no flex/grid layout system
+12. **Audio** — no audio events
+13. **Canvas/WebGL renderer** — SVG only (limits performance for complex scenes)
+14. **Runtime player** — no embeddable lightweight player
+15. **Export formats** — SVG only, no Lottie/compact binary
+16. **Real-time collaboration** — single user only
+17. **AI autonomy** — AI can edit and animate properties, but cannot yet generate complete scenes or build state machines from scratch
 
 ---
 
 ## Phased Implementation Plan
 
-### Phase 1: Core Animation System (Milestone 3A)
+### Phase 1: Core Animation System (Milestone 3A) — ✅ Core shipped
 **Goal**: Keyframe animation with timeline UI — the single biggest feature gap.
 
-#### 1.1 Animation Data Model
+The normative shipped contract is [`VEYRA_ANIMATION.md`](VEYRA_ANIMATION.md).
+
+#### 1.1 Animation Data Model — ✅ Complete
 - `timeline` records in the document: name, duration, FPS, loop mode
 - `keyframe` records targeting property addresses (reusing Milestone 1B system)
-- Interpolation: linear, ease-in, ease-out, ease-in-out, cubic bezier, step
+- Interpolation: linear, ease-in, ease-out, ease-in-out, cubic Bezier, step, hold
 - Multiple timelines per document
-- Mix/blend between timelines
+- Mix/blend between timeline states
 
-#### 1.2 Animation Evaluation
-- Extend evaluation pipeline: authored → **animation** → constraints → interactive
-- Time-based property override with interpolation
+#### 1.2 Animation Evaluation — ✅ Complete
+- Evaluation pipeline: authored → **animation** → constraints → interactive
+- Time-based property override with numeric and color interpolation
 - Animation priority and mixing weights
-- Work area (in/out markers)
+- Wall-clock playback and explicit frame scrubbing
 
-#### 1.3 Timeline UI
-- Horizontal timeline panel below the canvas (collapsible)
-- Keyframe diamonds on property tracks
-- Scrub head with frame/time display
+Remaining extension: work-area in/out markers.
+
+#### 1.3 Timeline UI — ✅ Core shipped
+- Collapsible horizontal panel below the canvas
+- Inspector keyframe diamonds and property tracks
+- Scrub head with frame display and pointer-anchored timeline zoom
 - Play/pause/stop transport controls
-- Track grouping by object, collapsible
-- Keyframe selection, move, delete, copy
-- Easing curve editor (cubic bezier)
+- Auto-key on inspector property edits
+- Keyframe selection, drag-to-move, and Delete/Backspace removal
+- Easing selection and editable cubic Bezier parameters
 
-#### 1.4 AI Timeline API
+Remaining extensions: object-grouped/collapsible tracks, copy/paste, box selection,
+and a visual easing graph.
+
+#### 1.4 AI Timeline API — ✅ Complete
 ```js
-veyra.createTimeline({ name, duration, fps, loop });
-veyra.setKeyframe({ timeline, address, frame, value, easing });
-veyra.removeKeyframe({ timeline, address, frame });
+const timelineId = veyra.createTimeline({ name, duration, fps, loop });
+veyra.setKeyframe({ timelineId, address, frame, value, easing, easingParams });
+veyra.removeKeyframe({ timelineId, address, frame });
 veyra.getTimelines();
-veyra.playTimeline(name, { loop, speed });
+veyra.playTimeline(timelineId, { loop, speed });
 veyra.stopPlayback();
 ```
 
@@ -255,12 +263,13 @@ veyra.generateScene({
 
 | Priority | What | Why |
 |----------|------|-----|
-| 🔴 P0 | Animation timeline + keyframes | Without this, it's a static editor |
-| 🔴 P0 | State machines + interactions | This is what makes Rive special |
-| 🟡 P1 | Gradients, text, images | Visual completeness |
+| ✅ Shipped | Animation timeline + keyframes | Milestone 3A core is implemented and specified |
+| 🔴 P0 | Gradients + blend modes | Make the breaking paint-schema change before more timelines depend on v2 paint |
+| 🔴 P0 | State machines + interactions | Additive layer built on the shipped timeline model |
+| 🟡 P1 | Text and images | Visual completeness |
 | 🟡 P1 | Deep AI scene generation API | Your differentiator |
 | 🟢 P2 | Canvas renderer + runtime player | Distribution |
-| 🟢 P2 | Path effects, blend modes, clipping | Polish |
+| 🟢 P2 | Path effects and clipping | Polish |
 | 🔵 P3 | Data binding, nested components | Advanced features |
 | 🔵 P3 | Export formats, framework integrations | Ecosystem |
 | ⚪ P4 | Collaboration, cloud | Scale features |
@@ -279,6 +288,12 @@ veyra.generateScene({
 
 ## Next Steps
 
-Start with **Phase 1.1 + 1.2** (animation data model and evaluation) — this is
-pure model work with no UI and can be fully tested. Then build **Phase 1.3**
-(timeline UI) on top of the working model.
+Milestone 3A's model, evaluation, core timeline UI, and script API are shipped.
+Next, implement **Phase 2.1 gradients plus object blend modes** as a deliberate
+`.veyra` version 3 paint-schema migration. Converting `paint.fill` from a bare
+color string to a tagged solid/linear/radial union is a breaking change across
+normalization, property addresses, capabilities, animation values, rendering,
+and existing documents; doing it now keeps that blast radius bounded.
+
+After the v3 paint migration, build **Phase 3 state machines** as an additive
+root registry referencing the timelines already in place.

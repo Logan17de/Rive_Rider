@@ -1,0 +1,146 @@
+{
+  "artboard": {
+    "background": "#ffffff",
+    "height": 120,
+    "width": 180
+  },
+  "assets": [],
+  "bones": [],
+  "constraints": [],
+  "controls": [],
+  "conventions": {
+    "angleUnit": "radians",
+    "coordinateSystem": "screen-2d",
+    "lengthUnit": "pixels",
+    "origin": "artboard-top-left",
+    "positiveAngle": "clockwise",
+    "transformOrder": [
+      "translate",
+      "rotate",
+      "skewX",
+      "skewY",
+      "scale",
+      "pivot"
+    ],
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "format": "veyra",
+  "id": "document_animated",
+  "meshes": [],
+  "name": "Golden Animated Rectangle",
+  "nodes": [
+    {
+      "geometry": {
+        "cornerRadius": 10,
+        "height": 36,
+        "width": 72
+      },
+      "id": "node_animated_rectangle",
+      "locked": false,
+      "name": "Animated Rectangle",
+      "opacity": 1,
+      "paint": {
+        "fill": "#ec4899",
+        "stroke": "#831843",
+        "strokeWidth": 2
+      },
+      "parent": null,
+      "transform": {
+        "pivotX": 0,
+        "pivotY": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "skewX": 0,
+        "skewY": 0,
+        "x": 50,
+        "y": 60
+      },
+      "type": "rectangle",
+      "visible": true
+    }
+  ],
+  "semantics": [
+    {
+      "description": "A deterministic fixture with position, rotation, and color tracks.",
+      "role": "animated-fixture",
+      "tags": [
+        "golden",
+        "animation"
+      ],
+      "target": {
+        "id": "node_animated_rectangle",
+        "kind": "node"
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "duration": 60,
+      "fps": 30,
+      "id": "timeline_motion",
+      "loop": "none",
+      "name": "Motion",
+      "tracks": [
+        {
+          "address": "node:node_animated_rectangle/transform/x",
+          "id": "track_position_x",
+          "keyframes": [
+            {
+              "easing": "linear",
+              "frame": 0,
+              "value": 50
+            },
+            {
+              "easing": "ease-in-out",
+              "frame": 60,
+              "value": 130
+            }
+          ]
+        },
+        {
+          "address": "node:node_animated_rectangle/transform/rotation",
+          "id": "track_rotation",
+          "keyframes": [
+            {
+              "easing": "cubic-bezier",
+              "easingParams": [
+                0.42,
+                0,
+                0.58,
+                1
+              ],
+              "frame": 0,
+              "value": 0
+            },
+            {
+              "easing": "linear",
+              "frame": 60,
+              "value": 1.5707963267948966
+            }
+          ]
+        },
+        {
+          "address": "node:node_animated_rectangle/paint/fill",
+          "id": "track_fill",
+          "keyframes": [
+            {
+              "easing": "linear",
+              "frame": 0,
+              "value": "#ec4899"
+            },
+            {
+              "easing": "linear",
+              "frame": 60,
+              "value": "#22d3ee"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "version": 2
+}
