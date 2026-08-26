@@ -3,6 +3,8 @@ import {
   cloneValue,
   createAsset,
   createDocument,
+  createGradientStop,
+  createLinearGradient,
   createNode,
   createStarterDocument,
   normalizeDocument,
@@ -53,6 +55,8 @@ assert.ok(Math.abs(pivotPosition.y - 20) < 1e-10);
 
 const legacy = cloneValue(starter);
 legacy.version = 1;
+legacy.nodes.forEach((node) => { node.paint.fill = node.paint.fill.color; });
+legacy.meshes.forEach((mesh) => { mesh.paint.fill = mesh.paint.fill.color; });
 delete legacy.conventions;
 delete legacy.bones;
 delete legacy.meshes;
@@ -64,7 +68,8 @@ delete legacy.nodes[1].parent;
 legacy.semantics[0].nodeId = referenceId(legacy.semantics[0].target, 'node');
 delete legacy.semantics[0].target;
 const migrated = normalizeDocument(legacy);
-assert.equal(migrated.version, 2);
+assert.equal(migrated.version, 3);
+assert.equal(migrated.nodes[0].paint.fill.type, 'solid');
 assert.deepEqual(
   { bones: migrated.bones, meshes: migrated.meshes, controls: migrated.controls, constraints: migrated.constraints },
   { bones: [], meshes: [], controls: [], constraints: [] },
@@ -72,6 +77,30 @@ assert.deepEqual(
 assert.ok(Math.abs(migrated.nodes[0].transform.rotation - Math.PI / 2) < 1e-12);
 assert.equal(migrated.nodes[1].parent.kind, 'node');
 assert.equal(migrated.semantics[0].target.kind, 'node');
+
+const legacyV2 = cloneValue(starter);
+legacyV2.version = 2;
+legacyV2.nodes.forEach((node) => { node.paint.fill = node.paint.fill.color; });
+legacyV2.meshes.forEach((mesh) => { mesh.paint.fill = mesh.paint.fill.color; });
+legacyV2.timelines = [{
+  id: 'timeline_legacy_fill',
+  name: 'Legacy fill',
+  duration: 30,
+  fps: 30,
+  loop: 'none',
+  tracks: [{
+    id: 'track_legacy_fill',
+    address: `node:${legacyV2.nodes[0].id}/paint/fill`,
+    keyframes: [
+      { frame: 0, value: '#ec4899', easing: 'linear' },
+      { frame: 30, value: '#22d3ee', easing: 'linear' },
+    ],
+  }],
+}];
+const migratedV2 = normalizeDocument(legacyV2);
+assert.equal(migratedV2.version, 3);
+assert.deepEqual(migratedV2.nodes[0].paint.fill, { type: 'solid', color: legacyV2.nodes[0].paint.fill });
+assert.deepEqual(migratedV2.timelines[0].tracks[0].keyframes[1].value, { type: 'solid', color: '#22d3ee' });
 
 const image = createAsset('image', {
   id: 'asset_logo',
@@ -107,6 +136,25 @@ const vertexAddress = formatPropertyAddress(createNodeRef(smile.id), ['geometry'
 assert.equal(readProperty(starter, vertexAddress), smileVertex.x);
 assert.equal(nodeCapabilities(smile).editVertices, true);
 assert.ok(nodeCapabilities(smile).animatable.includes('geometry.vertices.*.x'));
+
+const gradientNode = createNode('rectangle', {
+  id: 'node_gradient_properties',
+  paint: {
+    fill: createLinearGradient({
+      stops: [
+        createGradientStop({ id: 'stop_a', offset: 0, color: '#ec4899' }),
+        createGradientStop({ id: 'stop_b', offset: 1, color: '#22d3ee' }),
+      ],
+    }),
+  },
+});
+const gradientProperties = normalizeDocument(createDocument({ nodes: [gradientNode] }));
+const stopColorAddress = formatPropertyAddress(createNodeRef(gradientNode.id), ['paint', 'fill', 'stops', 'stop_a', 'color']);
+assert.equal(readProperty(gradientProperties, stopColorAddress), '#ec4899');
+assert.equal(isAnimatableProperty(gradientProperties, stopColorAddress), true);
+writeProperty(gradientProperties, stopColorAddress, '#facc15');
+assert.equal(readProperty(gradientProperties, stopColorAddress), '#facc15');
+assert.ok(nodeCapabilities(gradientProperties.nodes[0]).animatable.includes('paint.fill.stops.*.color'));
 
 const rotationAddress = nodePropertyAddress(rightEye.id, 'transform.rotation');
 const evaluated = evaluateDocument(starter, {

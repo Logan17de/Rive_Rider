@@ -41,7 +41,10 @@
       "name": "Face",
       "opacity": 1,
       "paint": {
-        "fill": "#fff7ed",
+        "fill": {
+          "color": "#fff7ed",
+          "type": "solid"
+        },
         "stroke": "#831843",
         "strokeWidth": 3
       },
@@ -98,7 +101,10 @@
       "name": "Smile",
       "opacity": 1,
       "paint": {
-        "fill": "none",
+        "fill": {
+          "color": "none",
+          "type": "solid"
+        },
         "stroke": "#ec4899",
         "strokeWidth": 6
       },
@@ -137,5 +143,5 @@
   ],
   "timelines": [],
   "updatedAt": "2026-01-01T00:00:00.000Z",
-  "version": 2
+  "version": 3
 }

@@ -78,6 +78,25 @@ function interpolateValue(valueA, valueB, t) {
     }
     return t < 0.5 ? valueA : valueB;
   }
+  if (Array.isArray(valueA) && Array.isArray(valueB) && valueA.length === valueB.length) {
+    const byId = valueB.every((value) => value && typeof value === 'object' && value.id)
+      ? new Map(valueB.map((value) => [value.id, value]))
+      : null;
+    return valueA.map((value, index) => interpolateValue(value, byId?.get(value?.id) ?? valueB[index], t));
+  }
+  if (valueA && valueB && typeof valueA === 'object' && typeof valueB === 'object'
+    && !Array.isArray(valueA) && !Array.isArray(valueB)
+    && (!valueA.type || valueA.type === valueB.type)) {
+    const result = {};
+    for (const key of new Set([...Object.keys(valueA), ...Object.keys(valueB)])) {
+      if (!(key in valueA) || !(key in valueB) || key === 'id' || key === 'type') {
+        result[key] = cloneValue(t < 0.5 ? valueA[key] : valueB[key]);
+      } else {
+        result[key] = interpolateValue(valueA[key], valueB[key], t);
+      }
+    }
+    return result;
+  }
   return t < 0.5 ? cloneValue(valueA) : cloneValue(valueB);
 }
 

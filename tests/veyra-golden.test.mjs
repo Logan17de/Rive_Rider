@@ -7,10 +7,11 @@ import { renderSvgString } from '../src/veyra/geometry.js';
 import { parseVeyra, serializeVeyra } from '../src/veyra/io.js';
 
 const fixtures = {
-  animated: '79b5ad1d7bfc93b89fbe3d690e6c86be6b8a1352465faad31c2f0a3de4ad3f84',
-  rectangle: '164926d7b99cce4e23dbe0beba103baf13893589fe85917357980abdc6089708',
-  'bezier-face': '41235a2a6898b33e8fe56e57154ecb359957eb3fe9c139f3c9947577a085b795',
-  'ik-arm': 'f4b5d5a7e39666858000a11eba1c8401081c31e2efd3f3489a97c9947d90ab26',
+  animated: 'e73a39cc65aa41f7b35369cf21008de7485172cddde2619b1b0ac1325d9a5712',
+  rectangle: 'f5ffcd82208ae60e67459ff6d29b4ef098c418e6341ab2e6480331085e379810',
+  'bezier-face': '5ce88bf9652213542f7a6c11bcca7d7994f03571e5a2625bccac1205b19497a0',
+  gradients: '1d6a0d34fc95fbb4ba52a484d73a5db26a28acd75cd8fce2e9b74d4fca9f3c43',
+  'ik-arm': '9447c8d798df4512515a79819ecec5742f05bf43b88acd28fe43cd252d15b943',
 };
 
 function hash(value) {
@@ -26,6 +27,13 @@ for (const [name, expectedSvgHash] of Object.entries(fixtures)) {
   assert.equal(firstRender, secondRender, `${name} must render deterministically.`);
   assert.equal(hash(firstRender), expectedSvgHash, `${name} SVG golden hash changed.`);
 }
+
+const gradientRaw = fs.readFileSync(new URL('./fixtures/veyra/gradients.veyra', import.meta.url), 'utf8');
+const gradientSvg = renderSvgString(evaluateDocument(parseVeyra(gradientRaw)));
+assert.match(gradientSvg, /<linearGradient[^>]+gradientUnits="objectBoundingBox"/);
+assert.match(gradientSvg, /<radialGradient[^>]+gradientUnits="objectBoundingBox"/);
+assert.match(gradientSvg, /stop-opacity="0.8"/);
+assert.match(gradientSvg, /fill="url\(#veyra-node-node_linear_gradient-fill\)"/);
 
 const armRaw = fs.readFileSync(new URL('./fixtures/veyra/ik-arm.veyra', import.meta.url), 'utf8');
 const arm = parseVeyra(armRaw);
@@ -51,12 +59,12 @@ const halfwayLayer = evaluateTimeline(animated.timelines[0], 1);
 assert.deepEqual(halfwayLayer, {
   'node:node_animated_rectangle/transform/x': 90,
   'node:node_animated_rectangle/transform/rotation': Math.PI / 4,
-  'node:node_animated_rectangle/paint/fill': '#878ec4',
+  'node:node_animated_rectangle/paint/fill': { color: '#878ec4', type: 'solid' },
 });
 const animatedFrame = renderSvgString(evaluateDocument(animated, { animation: halfwayLayer }));
 assert.equal(
   hash(animatedFrame),
-  'd384197beeb1e4773c8cb9ef6a6fe7008f5e605cd752104a6af3ad36806f1258',
+  '0710dbfbb72c460b0a1dab14501869bbaa6e7c662728e5fd9299effb4460d8fe',
   'Known fixture-driven animation frame changed.',
 );
 assert.equal(animated.nodes[0].transform.x, 50, 'Golden-frame evaluation must not bake into authored data.');

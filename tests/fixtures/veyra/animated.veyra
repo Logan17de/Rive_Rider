@@ -42,7 +42,10 @@
       "name": "Animated Rectangle",
       "opacity": 1,
       "paint": {
-        "fill": "#ec4899",
+        "fill": {
+          "color": "#ec4899",
+          "type": "solid"
+        },
         "stroke": "#831843",
         "strokeWidth": 2
       },
@@ -129,12 +132,18 @@
             {
               "easing": "linear",
               "frame": 0,
-              "value": "#ec4899"
+              "value": {
+                "color": "#ec4899",
+                "type": "solid"
+              }
             },
             {
               "easing": "linear",
               "frame": 60,
-              "value": "#22d3ee"
+              "value": {
+                "color": "#22d3ee",
+                "type": "solid"
+              }
             }
           ]
         }
@@ -142,5 +151,5 @@
     }
   ],
   "updatedAt": "2026-01-01T00:00:00.000Z",
-  "version": 2
+  "version": 3
 }

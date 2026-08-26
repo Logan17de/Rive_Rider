@@ -10,8 +10,11 @@ SVG export, Milestone 2 adds bone hierarchies, weighted meshes, draggable pose
 controls, six constraint types, deformation diagnostics, normalization, and
 weight symmetry. Milestone 3A adds multiple timelines, property-addressed
 keyframes, easing and cubic Bezier controls, Auto-key, scrubbing, playback,
-keyframe drag/delete, and timeline zoom. The starter document is a two-bone IK
-character rig that can be inspected without guessing from layer names.
+keyframe drag/delete, and timeline zoom. Version 3 adds tagged solid, linear,
+and radial fills with stable gradient-stop addresses, animation, inspector
+controls, and deterministic SVG paint servers. The starter document is a
+two-bone IK character rig that can be inspected without guessing from layer
+names.
 
 ## Run Veyra
 
@@ -58,7 +61,7 @@ npm run check
 
 The Veyra implementation plan and format decisions are in
 [`docs/VEYRA_PLAN.md`](docs/VEYRA_PLAN.md). The current file format is
-`format: "veyra"`, `version: 2`, with MIME type
+`format: "veyra"`, `version: 3`, with MIME type
 `application/vnd.veyra+json`. Stable IDs, authored geometry, hierarchy, and
 semantic records are stored explicitly; SVG selection overlays and generated
 render paths are not stored in the document.
@@ -73,11 +76,16 @@ and golden render fixtures. See
 Milestone 2's rest/pose ownership, linear blend skinning, typed rig references,
 constraint solvers, migration, and diagnostics are specified in
 [`docs/VEYRA_RIGGING.md`](docs/VEYRA_RIGGING.md). Existing version 1 files are
-migrated in memory and save as version 2 without changing their artwork.
+migrated in memory without changing their artwork.
 
 Milestone 3A's timeline schema, interpolation, easing, playback ownership,
 editor interactions, command semantics, and serialization rules are specified
 in [`docs/VEYRA_ANIMATION.md`](docs/VEYRA_ANIMATION.md).
+
+Version 3's tagged fill union, v1/v2 migration, normalized gradient coordinates,
+stable stops, animation semantics, SVG mapping, and inspector controls are
+specified in [`docs/VEYRA_PAINT.md`](docs/VEYRA_PAINT.md). Version 1 and 2 files
+load in memory and the next save writes canonical version 3 JSON.
 
 Local scripts and agents can use the running editor through `globalThis.veyra`:
 
@@ -90,6 +98,19 @@ veyra.applyCommand({
   label: 'Make the right eye wider',
   address: 'node:<id>/geometry/width',
   value: 104,
+});
+veyra.applyCommand({
+  source: 'ai',
+  label: 'Add a cyan-magenta gradient',
+  address: 'node:<id>/paint/fill',
+  value: {
+    type: 'linearGradient',
+    x1: 0, y1: 0, x2: 1, y2: 1,
+    stops: [
+      { id: 'stop_start', offset: 0, color: '#ec4899', opacity: 1 },
+      { id: 'stop_end', offset: 1, color: '#22d3ee', opacity: 1 },
+    ],
+  },
 });
 veyra.setMeshVertexWeights({
   meshId: '<mesh-id>',
@@ -278,6 +299,8 @@ revision and tools configuration.
   constraint, diagnostic, and migration rules.
 - `docs/VEYRA_ANIMATION.md` - normative Milestone 3A timeline, interpolation,
   playback, interaction, and serialization rules.
+- `docs/VEYRA_PAINT.md` - normative version 3 fill schema, gradient, migration,
+  property-address, animation, and SVG rendering rules.
 - `tests/veyra-model.test.mjs` - document, geometry, file, and history tests.
 - `tests/veyra-foundation.test.mjs` - typed reference, capability, property,
   evaluation, provenance, asset, summary, and migration tests.
@@ -286,7 +309,8 @@ revision and tools configuration.
 - `tests/veyra-animation.test.mjs` - timeline, easing, interpolation, loop,
   playback, and evaluation integration tests.
 - `tests/fixtures/veyra` / `tests/veyra-golden.test.mjs` - canonical artwork,
-  animated, and weighted IK scenes with deterministic rendered-frame hashes.
+  gradient, animated, and weighted IK scenes with deterministic rendered-frame
+  hashes.
 - `tests/veyra-browser.html` - browser renderer smoke test.
 - `deep.html` / `deep.js` — deep geometry viewer/editor.
 - `index.html` / `app.js` — original public-runtime API inspector.

@@ -1,6 +1,6 @@
 # Veyra animation contract
 
-Status: implemented as Milestone 3A in `.veyra` version 2.
+Status: implemented as Milestone 3A in `.veyra` version 3.
 
 ## Ownership and evaluation order
 
@@ -92,6 +92,9 @@ Interpolation rules are deterministic:
 
 - finite numbers interpolate arithmetically;
 - `#RRGGBB` colors interpolate by RGB channel;
+- tagged fills (solid, linear, radial) interpolate recursively when both
+  keyframes use the same variant, pairing gradient stops by stable ID — see
+  the [paint contract](VEYRA_PAINT.md);
 - booleans switch at the segment midpoint;
 - other strings and structured values choose the nearest endpoint;
 - `hold` preserves the outgoing keyframe value through the segment;

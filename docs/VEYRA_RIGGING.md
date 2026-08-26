@@ -1,13 +1,17 @@
 # Veyra rigging contract
 
-Status: implemented as Milestone 2 in `.veyra` version 2.
+Status: implemented as Milestone 2 in `.veyra` version 2; carried forward in
+version 3.
 
 ## Version and migration
 
 Version 2 adds four required root registries: `bones`, `meshes`, `controls`,
 and `constraints`. Loading a version 1 document preserves its artwork, assets,
 semantics, IDs, and coordinate conventions, creates empty rig registries, and
-serializes the next save as version 2. Unsupported versions are rejected.
+serializes the next save as version 2. The version 3 paint migration carries
+these registries forward unchanged; the loader accepts version 1, 2, or 3 and
+rejects anything else. See the [paint contract](VEYRA_PAINT.md) for the v1/v2
+fill conversion that version 3 applies on load.
 
 ## Bones and poses
 

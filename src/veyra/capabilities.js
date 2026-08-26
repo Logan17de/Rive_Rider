@@ -38,6 +38,22 @@ const COMMON_ANIMATABLE = Object.freeze([
   'paint.strokeWidth',
 ]);
 
+function fillProperties(fill) {
+  if (!fill || fill.type === 'solid') return ['paint.fill.color'];
+  const stops = [
+    'paint.fill.stops.*.offset',
+    'paint.fill.stops.*.color',
+    'paint.fill.stops.*.opacity',
+  ];
+  if (fill.type === 'linearGradient') {
+    return ['paint.fill.x1', 'paint.fill.y1', 'paint.fill.x2', 'paint.fill.y2', ...stops];
+  }
+  if (fill.type === 'radialGradient') {
+    return ['paint.fill.cx', 'paint.fill.cy', 'paint.fill.r', 'paint.fill.fx', 'paint.fill.fy', ...stops];
+  }
+  return [];
+}
+
 const GEOMETRY_PROPERTIES = Object.freeze({
   group: [],
   rectangle: ['geometry.width', 'geometry.height', 'geometry.cornerRadius'],
@@ -63,19 +79,22 @@ export function nodeCapabilities(node) {
   const commonAnimatable = node.type === 'group'
     ? COMMON_ANIMATABLE.filter((path) => !path.startsWith('paint.'))
     : COMMON_ANIMATABLE;
+  const fill = node.type === 'group' ? [] : fillProperties(node.paint?.fill);
   return {
     transform: true,
     style: node.type !== 'group',
     resize: ['rectangle', 'ellipse', 'polygon', 'star'].includes(node.type),
     editVertices: node.type === 'path',
     groupChildren: node.type === 'group',
-    writable: [...commonWritable, ...geometry],
-    animatable: [...commonAnimatable, ...geometry],
+    writable: [...commonWritable, ...fill, ...geometry],
+    animatable: [...commonAnimatable, ...fill, ...geometry],
   };
 }
 
 function pathPattern(path) {
-  return path.replace(/\.vertices\.[^.]+\./, '.vertices.*.');
+  return path
+    .replace(/\.vertices\.[^.]+\./, '.vertices.*.')
+    .replace(/\.stops\.[^.]+\./, '.stops.*.');
 }
 
 export function supportsNodeProperty(node, path, mode = 'writable') {
@@ -115,6 +134,7 @@ const RIG_CAPABILITIES = Object.freeze({
 export function rigCapabilities(kind, object) {
   const base = RIG_CAPABILITIES[kind];
   if (!base) throw new TypeError(`Unsupported rig capability kind: ${kind}`);
+  const fill = kind === 'mesh' ? fillProperties(object.paint?.fill) : [];
   return {
     kind,
     draggable: kind === 'control' && object.kind === 'position',
@@ -123,8 +143,8 @@ export function rigCapabilities(kind, object) {
     constrainable: kind === 'bone',
     normalizeWeights: kind === 'mesh',
     mirrorWeights: kind === 'mesh',
-    writable: [...base.writable],
-    animatable: [...base.animatable],
+    writable: [...base.writable, ...fill],
+    animatable: [...base.animatable, ...fill],
   };
 }
 

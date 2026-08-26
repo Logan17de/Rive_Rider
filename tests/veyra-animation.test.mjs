@@ -1,6 +1,8 @@
 import assert from 'node:assert';
 import {
   createDocument,
+  createGradientStop,
+  createLinearGradient,
   createTimeline,
   createTrack,
   createKeyframe,
@@ -159,6 +161,38 @@ console.log('Testing Veyra animation system...');
   assert.strictEqual(midColor, '#808080');
 
   console.log('✓ evaluateTrack with color interpolation');
+}
+
+// Test: evaluateTrack with tagged gradient interpolation
+{
+  const start = createLinearGradient({
+    x2: 1,
+    stops: [
+      createGradientStop({ id: 'stop_a', offset: 0, color: '#000000' }),
+      createGradientStop({ id: 'stop_b', offset: 1, color: '#ffffff' }),
+    ],
+  });
+  const end = createLinearGradient({
+    x2: 0.5,
+    stops: [
+      createGradientStop({ id: 'stop_a', offset: 0.2, color: '#ffffff' }),
+      createGradientStop({ id: 'stop_b', offset: 0.8, color: '#000000' }),
+    ],
+  });
+  const track = createTrack('test/fill', {
+    keyframes: [
+      createKeyframe({ frame: 0, value: start, easing: 'linear' }),
+      createKeyframe({ frame: 10, value: end, easing: 'linear' }),
+    ],
+  });
+  const middle = evaluateTrack(track, 5);
+  assert.strictEqual(middle.type, 'linearGradient');
+  assert.strictEqual(middle.x2, 0.75);
+  assert.strictEqual(middle.stops[0].id, 'stop_a');
+  assert.strictEqual(middle.stops[0].offset, 0.1);
+  assert.strictEqual(middle.stops[0].color, '#808080');
+
+  console.log('✓ evaluateTrack with tagged gradient interpolation');
 }
 
 // Test: normalizeFrame with loop modes

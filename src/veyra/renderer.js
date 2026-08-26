@@ -1,4 +1,11 @@
-import { geometryDescriptor, localBounds, transformAttribute } from './geometry.js';
+import {
+  fillPaintValue,
+  geometryDescriptor,
+  gradientDescriptor,
+  localBounds,
+  paintServerId,
+  transformAttribute,
+} from './geometry.js';
 import { referenceId } from './references.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -15,6 +22,21 @@ function applyAttributes(element, attributes) {
   for (const [name, value] of Object.entries(attributes)) {
     element.setAttribute(name, String(value));
   }
+}
+
+function gradientElement(fill, id) {
+  const descriptor = gradientDescriptor(fill, id);
+  if (!descriptor) return null;
+  const gradient = svgElement(descriptor.tag, descriptor.attributes);
+  for (const stop of descriptor.stops) {
+    gradient.appendChild(svgElement('stop', {
+      'data-stop-id': stop.id,
+      offset: stop.offset,
+      'stop-color': stop.color,
+      'stop-opacity': stop.opacity,
+    }));
+  }
+  return gradient;
 }
 
 export class VeyraRenderer {
@@ -125,6 +147,17 @@ export class VeyraRenderer {
     });
     background.addEventListener('pointerdown', () => this.callbacks.select?.(null));
 
+    const definitions = svgElement('defs');
+    for (const node of scene.nodes) {
+      if (node.type === 'group') continue;
+      const gradient = gradientElement(node.paint.fill, paintServerId('node', node.id));
+      if (gradient) definitions.appendChild(gradient);
+    }
+    for (const mesh of scene.meshes || []) {
+      const gradient = gradientElement(mesh.paint.fill, paintServerId('mesh', mesh.id));
+      if (gradient) definitions.appendChild(gradient);
+    }
+
     const sceneGroup = svgElement('g', { class: 'veyraScene' });
     const children = new Map();
     for (const node of scene.nodes) {
@@ -137,7 +170,10 @@ export class VeyraRenderer {
     }
     const meshGroup = this.#renderMeshes();
     const rigOverlay = this.#renderRigOverlay();
-    this.svg.replaceChildren(background, sceneGroup, meshGroup, rigOverlay);
+    const childrenToRender = [background];
+    if (definitions.childNodes.length) childrenToRender.push(definitions);
+    childrenToRender.push(sceneGroup, meshGroup, rigOverlay);
+    this.svg.replaceChildren(...childrenToRender);
   }
 
   #renderNode(node, children) {
@@ -154,7 +190,7 @@ export class VeyraRenderer {
       const descriptor = geometryDescriptor(node);
       const shape = svgElement(descriptor.tag, {
         ...descriptor.attributes,
-        fill: node.paint.fill,
+        fill: fillPaintValue(node.paint.fill, paintServerId('node', node.id)),
         stroke: node.paint.stroke,
         'stroke-width': node.paint.strokeWidth,
         'vector-effect': 'non-scaling-stroke',
@@ -192,7 +228,7 @@ export class VeyraRenderer {
         const polygon = svgElement('polygon', {
           class: 'meshTriangle',
           points,
-          fill: mesh.paint.fill,
+          fill: fillPaintValue(mesh.paint.fill, paintServerId('mesh', mesh.id)),
           stroke: mesh.paint.stroke,
           'stroke-width': mesh.paint.strokeWidth,
           'vector-effect': 'non-scaling-stroke',

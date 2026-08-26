@@ -12,10 +12,10 @@ structured API that mirrors every editor capability.
 ## Current State (What Exists Today)
 
 ### ✅ Working
-- **Document model** — validated `.veyra` JSON format (v2) with stable UUIDs
+- **Document model** — validated `.veyra` JSON format (v3) with stable UUIDs
 - **Vector shapes** — rectangle, ellipse, polygon, star, path with vertices
 - **Transforms** — position, rotation, scale, skew, pivot, opacity
-- **Paint** — solid fill, solid stroke
+- **Paint** — tagged solid fill, linear and radial gradients with stable, addressable stops, solid stroke
 - **Scene hierarchy** — parent/child, groups, visibility, locking
 - **SVG renderer** — live canvas with selection overlays and vertex handles
 - **Property inspector** — two-column inspector for all node properties
@@ -32,8 +32,7 @@ structured API that mirrors every editor capability.
 
 ### ❌ Missing (Gap vs Rive)
 1. **State machines** — no visual state graph, no transitions, no conditions
-2. **Gradients** — no linear/radial gradient UI
-3. **Blend modes** — not exposed in editor
+2. **Blend modes** — not exposed in editor
 4. **Clipping/masking** — no clip path support
 5. **Trim/dash path effects** — not implemented
 6. **Text** — no text objects
@@ -100,11 +99,15 @@ veyra.stopPlayback();
 ### Phase 2: Visual Polish & Effects
 **Goal**: Paint, effects, and visual richness matching professional tools.
 
-#### 2.1 Gradients
-- Linear and radial gradient fill/stroke
-- Gradient stop editor (color + position)
-- On-canvas gradient handles (start/end points)
+#### 2.1 Gradients — ✅ Core shipped (v3)
+- Linear and radial gradient **fill** (stroke gradients remain a later extension)
+- Inspector gradient stop editor (color, offset, opacity) with stable stop IDs
+- Deterministic SVG paint servers shared by the live renderer and exporter
+- Interpolatable as a whole tagged fill or per stable stop/coordinate address
 - AI: `applyCommand({ address: 'node:<id>/paint/fill', value: { type: 'linearGradient', stops: [...] } })`
+
+Remaining extension: on-canvas gradient handles (start/end and center/radius).
+The normative schema and migration rules are in [`VEYRA_PAINT.md`](VEYRA_PAINT.md).
 
 #### 2.2 Blend Modes
 - Standard blend modes: multiply, screen, overlay, darken, lighten, etc.
@@ -264,7 +267,7 @@ veyra.generateScene({
 | Priority | What | Why |
 |----------|------|-----|
 | ✅ Shipped | Animation timeline + keyframes | Milestone 3A core is implemented and specified |
-| 🔴 P0 | Gradients + blend modes | Make the breaking paint-schema change before more timelines depend on v2 paint |
+| ✅ Shipped | Gradients (v3 paint schema) | Tagged solid/linear/radial fill with v1/v2 migration is implemented and specified |
 | 🔴 P0 | State machines + interactions | Additive layer built on the shipped timeline model |
 | 🟡 P1 | Text and images | Visual completeness |
 | 🟡 P1 | Deep AI scene generation API | Your differentiator |
@@ -288,12 +291,12 @@ veyra.generateScene({
 
 ## Next Steps
 
-Milestone 3A's model, evaluation, core timeline UI, and script API are shipped.
-Next, implement **Phase 2.1 gradients plus object blend modes** as a deliberate
-`.veyra` version 3 paint-schema migration. Converting `paint.fill` from a bare
-color string to a tagged solid/linear/radial union is a breaking change across
-normalization, property addresses, capabilities, animation values, rendering,
-and existing documents; doing it now keeps that blast radius bounded.
+Milestone 3A's model, evaluation, core timeline UI, and script API are shipped,
+and the **version 3 paint-schema migration with tagged gradients** (Phase 2.1)
+is now complete: `paint.fill` is a tagged solid/linear/radial union, with
+v1/v2 migration, stable stop addresses, deterministic SVG paint servers, and
+the inspector stop editor.
 
-After the v3 paint migration, build **Phase 3 state machines** as an additive
-root registry referencing the timelines already in place.
+Next, build **Phase 3 state machines** as an additive root registry referencing
+the timelines already in place. Blend modes (Phase 2.2) slot into the same
+`paint` object once state machines land.

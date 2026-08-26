@@ -125,7 +125,10 @@
       "name": "Weighted Arm",
       "opacity": 0.72,
       "paint": {
-        "fill": "#f472b6",
+        "fill": {
+          "color": "#f472b6",
+          "type": "solid"
+        },
         "stroke": "#831843",
         "strokeWidth": 2
       },
@@ -204,5 +207,5 @@
   "semantics": [],
   "timelines": [],
   "updatedAt": "2026-08-15T00:00:00.000Z",
-  "version": 2
+  "version": 3
 }

@@ -7,8 +7,12 @@ import {
   createConstraint,
   createControl,
   createDocument,
+  createGradientStop,
+  createLinearGradient,
   createMesh,
   createNode,
+  createRadialGradient,
+  createSolidFill,
   createStarterDocument,
   createTimeline,
   descendantIds,
@@ -576,6 +580,128 @@ function renderDocumentInspector() {
   inspector.appendChild(rig.fieldset);
 }
 
+function appendFillInspector(targetSection, kind, object) {
+  const fill = object.paint.fill;
+  const addressFor = (path) => kind === 'node'
+    ? nodePropertyAddress(object.id, path)
+    : rigPropertyAddress(kind, object.id, path);
+  const mutate = (path, label, value) => {
+    if (kind === 'node') nodePropertyMutation(object, path, label, value);
+    else rigPropertyMutation(kind, object, path, label, value);
+  };
+  const replaceFill = (next, label) => mutate('paint.fill', label, next);
+  const typeOptions = [
+    { value: 'solid', label: 'Solid' },
+    { value: 'linearGradient', label: 'Linear gradient' },
+    { value: 'radialGradient', label: 'Radial gradient' },
+  ];
+
+  targetSection.grid.append(field('Fill type', fill.type, (type) => {
+    if (type === fill.type) return;
+    const stops = fill.stops || [
+      createGradientStop({ offset: 0, color: fill.color === 'none' ? '#ec4899' : fill.color }),
+      createGradientStop({ offset: 1, color: '#22d3ee' }),
+    ];
+    const next = type === 'solid'
+      ? createSolidFill(stops[0]?.color || '#ec4899')
+      : type === 'linearGradient'
+        ? createLinearGradient({ stops })
+        : createRadialGradient({ stops });
+    replaceFill(next, `Set ${object.name} fill type`);
+  }, { select: typeOptions, address: addressFor('paint.fill') }));
+
+  if (fill.type === 'solid') {
+    targetSection.grid.append(field(
+      'Fill color',
+      fill.color,
+      (value) => mutate('paint.fill.color', `Set ${object.name} fill color`, value),
+      { placeholder: '#ec4899 or none', address: addressFor('paint.fill.color') },
+    ));
+    return;
+  }
+
+  const numberField = (label, property, min = -10, max = 10) => field(
+    label,
+    fill[property],
+    (value) => mutate(`paint.fill.${property}`, `Set ${object.name} gradient ${property}`, value),
+    { type: 'number', number: true, min, max, step: 0.01, address: addressFor(`paint.fill.${property}`) },
+  );
+  if (fill.type === 'linearGradient') {
+    targetSection.grid.append(
+      numberField('Start X', 'x1'),
+      numberField('Start Y', 'y1'),
+      numberField('End X', 'x2'),
+      numberField('End Y', 'y2'),
+    );
+  } else {
+    targetSection.grid.append(
+      numberField('Center X', 'cx'),
+      numberField('Center Y', 'cy'),
+      numberField('Radius', 'r', 0.000001, 10),
+      numberField('Focus X', 'fx'),
+      numberField('Focus Y', 'fy'),
+    );
+  }
+
+  fill.stops.forEach((stop, index) => {
+    const stopPath = ['paint', 'fill', 'stops', stop.id];
+    targetSection.grid.append(
+      field(`Stop ${index + 1} color`, stop.color, (value) => mutate(
+        [...stopPath, 'color'],
+        `Set ${object.name} gradient stop color`,
+        value,
+      ), { address: addressFor([...stopPath, 'color']) }),
+      field(`Stop ${index + 1} offset`, stop.offset, (value) => mutate(
+        [...stopPath, 'offset'],
+        `Set ${object.name} gradient stop offset`,
+        value,
+      ), { type: 'number', number: true, min: 0, max: 1, step: 0.01, address: addressFor([...stopPath, 'offset']) }),
+      field(`Stop ${index + 1} opacity`, stop.opacity, (value) => mutate(
+        [...stopPath, 'opacity'],
+        `Set ${object.name} gradient stop opacity`,
+        value,
+      ), { type: 'number', number: true, min: 0, max: 1, step: 0.05, address: addressFor([...stopPath, 'opacity']) }),
+    );
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'inlineActions';
+  actions.append(inspectorAction('Add stop', 'plus', () => {
+    const stops = [...fill.stops].sort((a, b) => a.offset - b.offset);
+    let gapIndex = 0;
+    let gapSize = -1;
+    for (let index = 0; index < stops.length - 1; index++) {
+      const gap = stops[index + 1].offset - stops[index].offset;
+      if (gap > gapSize) {
+        gapSize = gap;
+        gapIndex = index;
+      }
+    }
+    const left = stops[gapIndex];
+    const right = stops[Math.min(gapIndex + 1, stops.length - 1)];
+    const next = cloneValue(fill);
+    next.stops.push(createGradientStop({
+      offset: (left.offset + right.offset) / 2,
+      color: left.color,
+      opacity: (left.opacity + right.opacity) / 2,
+    }));
+    replaceFill(next, `Add ${object.name} gradient stop`);
+  }));
+  const remove = inspectorAction('Remove last', 'minus', () => {
+    if (fill.stops.length <= 2) {
+      showToast('A gradient requires at least two stops', true);
+      return;
+    }
+    const next = cloneValue(fill);
+    next.stops.pop();
+    replaceFill(next, `Remove ${object.name} gradient stop`);
+  });
+  remove.disabled = fill.stops.length <= 2;
+  actions.append(remove);
+  targetSection.fieldset.appendChild(actions);
+  appendNote(targetSection.fieldset, 'Gradient coordinates use normalized object bounds. Stops retain stable IDs for property addresses and animation.');
+}
+
 function renderNodeInspector(node) {
   inspectorTitle.textContent = node.name;
   selectedType.textContent = node.type.toUpperCase();
@@ -628,11 +754,13 @@ function renderNodeInspector(node) {
   inspector.appendChild(transform.fieldset);
 
   const appearance = section('Appearance');
-  if (node.type !== 'group') appearance.grid.append(
-    field('Fill', node.paint.fill, (value) => nodePropertyMutation(node, 'paint.fill', `Set ${node.name} fill`, value), { placeholder: '#ec4899 or none', address: nodePropertyAddress(node.id, 'paint.fill') }),
-    field('Stroke', node.paint.stroke, (value) => nodePropertyMutation(node, 'paint.stroke', `Set ${node.name} stroke`, value), { placeholder: '#2c1830 or none', address: nodePropertyAddress(node.id, 'paint.stroke') }),
-    field('Stroke width', node.paint.strokeWidth, (value) => nodePropertyMutation(node, 'paint.strokeWidth', `Set ${node.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5, address: nodePropertyAddress(node.id, 'paint.strokeWidth') }),
-  );
+  if (node.type !== 'group') {
+    appendFillInspector(appearance, 'node', node);
+    appearance.grid.append(
+      field('Stroke', node.paint.stroke, (value) => nodePropertyMutation(node, 'paint.stroke', `Set ${node.name} stroke`, value), { placeholder: '#2c1830 or none', address: nodePropertyAddress(node.id, 'paint.stroke') }),
+      field('Stroke width', node.paint.strokeWidth, (value) => nodePropertyMutation(node, 'paint.strokeWidth', `Set ${node.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5, address: nodePropertyAddress(node.id, 'paint.strokeWidth') }),
+    );
+  }
   appearance.grid.append(
     field('Opacity', node.opacity, (value) => nodePropertyMutation(node, 'opacity', `Set ${node.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05, address: nodePropertyAddress(node.id, 'opacity') }),
     checkbox('Visible', node.visible, (value) => nodePropertyMutation(node, 'visible', `${value ? 'Show' : 'Hide'} ${node.name}`, value)),
@@ -765,7 +893,9 @@ function renderMeshInspector(mesh) {
   identity.grid.append(
     field('Name', mesh.name, (value) => rigPropertyMutation('mesh', mesh, 'name', `Rename ${mesh.name}`, value)),
     field('Opacity', mesh.opacity, (value) => rigPropertyMutation('mesh', mesh, 'opacity', `Set ${mesh.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05, address: rigPropertyAddress('mesh', mesh.id, 'opacity') }),
-    field('Fill', mesh.paint.fill, (value) => rigPropertyMutation('mesh', mesh, 'paint.fill', `Set ${mesh.name} fill`, value), { address: rigPropertyAddress('mesh', mesh.id, 'paint.fill') }),
+  );
+  appendFillInspector(identity, 'mesh', mesh);
+  identity.grid.append(
     field('Stroke', mesh.paint.stroke, (value) => rigPropertyMutation('mesh', mesh, 'paint.stroke', `Set ${mesh.name} stroke`, value), { address: rigPropertyAddress('mesh', mesh.id, 'paint.stroke') }),
     field('Stroke width', mesh.paint.strokeWidth, (value) => rigPropertyMutation('mesh', mesh, 'paint.strokeWidth', `Set ${mesh.name} stroke width`, value), { type: 'number', number: true, min: 0, step: 0.5, address: rigPropertyAddress('mesh', mesh.id, 'paint.strokeWidth') }),
     checkbox('Visible', mesh.visible, (value) => rigPropertyMutation('mesh', mesh, 'visible', `${value ? 'Show' : 'Hide'} ${mesh.name}`, value)),

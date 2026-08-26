@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import {
   cloneValue,
   createDocument,
+  createGradientStop,
+  createLinearGradient,
   createNode,
+  createRadialGradient,
   createSemanticRecord,
   createStarterDocument,
   normalizeDocument,
@@ -15,7 +18,8 @@ import { VeyraStore } from '../src/veyra/store.js';
 
 const starter = createStarterDocument();
 assert.equal(starter.format, 'veyra');
-assert.equal(starter.version, 2);
+assert.equal(starter.version, 3);
+assert.equal(starter.nodes[0].paint.fill.type, 'solid');
 assert.equal(starter.name, 'Veyra Bloom Rig');
 assert.equal(starter.nodes.length, 9);
 assert.equal(starter.bones.length, 2);
@@ -30,6 +34,36 @@ assert.deepEqual(roundTrip, starter);
 assert.match(renderSvgString(evaluateDocument(starter)), /<svg[\s\S]*Veyra/);
 assert.match(renderSvgString(evaluateDocument(starter)), /<path/);
 assert.equal(starPoints(10, 5, 6).length, 12);
+
+const gradientNodes = [
+  createNode('rectangle', {
+    id: 'node_linear',
+    paint: {
+      fill: createLinearGradient({
+        x1: 0,
+        y1: 0.5,
+        x2: 1,
+        y2: 0.5,
+        stops: [
+          createGradientStop({ id: 'stop_end', offset: 1, color: '#22d3ee' }),
+          createGradientStop({ id: 'stop_start', offset: 0, color: '#ec4899' }),
+        ],
+      }),
+    },
+  }),
+  createNode('ellipse', {
+    id: 'node_radial',
+    paint: { fill: createRadialGradient() },
+  }),
+];
+const gradientDocument = normalizeDocument(createDocument({ nodes: gradientNodes }));
+assert.equal(gradientDocument.nodes[0].paint.fill.type, 'linearGradient');
+assert.deepEqual(gradientDocument.nodes[0].paint.fill.stops.map((stop) => stop.id), ['stop_start', 'stop_end']);
+assert.equal(gradientDocument.nodes[1].paint.fill.type, 'radialGradient');
+const gradientSvg = renderSvgString(evaluateDocument(gradientDocument));
+assert.match(gradientSvg, /<linearGradient/);
+assert.match(gradientSvg, /<radialGradient/);
+assert.match(gradientSvg, /fill="url\(#veyra-node-node_linear-fill\)"/);
 
 const smile = starter.nodes.find((node) => node.name === 'Smile');
 const smilePath = pathData(smile.geometry);
@@ -89,6 +123,17 @@ assert.throws(() => normalizeDocument(cycle), /cycle/i);
 const invalidNumber = cloneValue(starter);
 invalidNumber.nodes[1].transform.x = Number.NaN;
 assert.throws(() => normalizeDocument(invalidNumber), /must be finite/);
+
+const invalidV3Fill = cloneValue(starter);
+invalidV3Fill.nodes[0].paint.fill = '#ec4899';
+assert.throws(() => normalizeDocument(invalidV3Fill), /tagged fill object/);
+
+const invalidGradient = cloneValue(gradientDocument);
+invalidGradient.nodes[0].paint.fill.stops = [invalidGradient.nodes[0].paint.fill.stops[0]];
+assert.throws(() => normalizeDocument(invalidGradient), /at least two gradient stops/);
+const duplicateGradientStop = cloneValue(gradientDocument);
+duplicateGradientStop.nodes[0].paint.fill.stops[1].id = duplicateGradientStop.nodes[0].paint.fill.stops[0].id;
+assert.throws(() => normalizeDocument(duplicateGradientStop), /duplicate stop id/);
 
 const invalidPolygon = createNode('polygon');
 invalidPolygon.geometry.sides = 2;

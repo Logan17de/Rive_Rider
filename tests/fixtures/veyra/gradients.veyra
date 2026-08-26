@@ -1,0 +1,145 @@
+{
+  "artboard": {
+    "background": "#ffffff",
+    "height": 140,
+    "width": 240
+  },
+  "assets": [],
+  "bones": [],
+  "constraints": [],
+  "controls": [],
+  "conventions": {
+    "angleUnit": "radians",
+    "coordinateSystem": "screen-2d",
+    "lengthUnit": "pixels",
+    "origin": "artboard-top-left",
+    "positiveAngle": "clockwise",
+    "transformOrder": [
+      "translate",
+      "rotate",
+      "skewX",
+      "skewY",
+      "scale",
+      "pivot"
+    ],
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "format": "veyra",
+  "id": "document_gradients",
+  "meshes": [],
+  "name": "Golden Gradients",
+  "nodes": [
+    {
+      "geometry": {
+        "cornerRadius": 12,
+        "height": 72,
+        "width": 88
+      },
+      "id": "node_linear_gradient",
+      "locked": false,
+      "name": "Linear Gradient",
+      "opacity": 1,
+      "paint": {
+        "fill": {
+          "stops": [
+            {
+              "color": "#ec4899",
+              "id": "stop_linear_start",
+              "offset": 0,
+              "opacity": 1
+            },
+            {
+              "color": "#facc15",
+              "id": "stop_linear_middle",
+              "offset": 0.5,
+              "opacity": 0.8
+            },
+            {
+              "color": "#22d3ee",
+              "id": "stop_linear_end",
+              "offset": 1,
+              "opacity": 1
+            }
+          ],
+          "type": "linearGradient",
+          "x1": 0,
+          "x2": 1,
+          "y1": 0,
+          "y2": 1
+        },
+        "stroke": "#831843",
+        "strokeWidth": 2
+      },
+      "parent": null,
+      "transform": {
+        "pivotX": 0,
+        "pivotY": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "skewX": 0,
+        "skewY": 0,
+        "x": 64,
+        "y": 70
+      },
+      "type": "rectangle",
+      "visible": true
+    },
+    {
+      "geometry": {
+        "height": 78,
+        "width": 78
+      },
+      "id": "node_radial_gradient",
+      "locked": false,
+      "name": "Radial Gradient",
+      "opacity": 1,
+      "paint": {
+        "fill": {
+          "cx": 0.5,
+          "cy": 0.5,
+          "fx": 0.35,
+          "fy": 0.3,
+          "r": 0.6,
+          "stops": [
+            {
+              "color": "#fff7fc",
+              "id": "stop_radial_start",
+              "offset": 0,
+              "opacity": 1
+            },
+            {
+              "color": "#7c3aed",
+              "id": "stop_radial_end",
+              "offset": 1,
+              "opacity": 1
+            }
+          ],
+          "type": "radialGradient"
+        },
+        "stroke": "#4c1d95",
+        "strokeWidth": 2
+      },
+      "parent": null,
+      "transform": {
+        "pivotX": 0,
+        "pivotY": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "skewX": 0,
+        "skewY": 0,
+        "x": 174,
+        "y": 70
+      },
+      "type": "ellipse",
+      "visible": true
+    }
+  ],
+  "semantics": [],
+  "timelines": [],
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "version": 3
+}

@@ -58,13 +58,39 @@ ships with a two-bone, weighted-mesh starter rig and keeps solved poses and
 deformed vertices in evaluated scenes only. The normative schema and solver
 rules are in [`VEYRA_RIGGING.md`](VEYRA_RIGGING.md).
 
+## Milestone 3A — timeline animation (implemented)
+
+- multiple timelines with duration, FPS, and loop modes;
+- keyframe tracks targeting canonical property addresses;
+- linear, ease-in/out, cubic Bezier, step, and hold interpolation;
+- numeric and color interpolation with mixing weights;
+- requestAnimationFrame playback and explicit-frame scrubbing;
+- inspector keyframe diamonds, Auto-key, drag-to-move, delete, and timeline
+  zoom.
+
+The normative schema, interpolation, and interaction rules are in
+[`VEYRA_ANIMATION.md`](VEYRA_ANIMATION.md).
+
+## Version 3 — tagged paint and gradients (implemented)
+
+Version 3 converts `paint.fill` from a bare color string into a tagged
+union of `solid`, `linearGradient`, and `radialGradient` fills. Gradient
+stops carry stable IDs so stop color, offset, and opacity become
+addressable, writable, and animatable properties. Version 1 and 2 documents
+migrate their authored fills and fill keyframe values in memory; the next
+save writes canonical version 3 JSON. The renderer and SVG exporter share
+one deterministic paint-server mapping. The normative rules are in
+[`VEYRA_PAINT.md`](VEYRA_PAINT.md).
+
 ## Later milestones
 
-### Milestone 3 — motion and behavior
+### Milestone 3B — behavior and state
 
-- timelines and keyframes that target the Milestone 1B property addresses;
-- timelines, keyframes, interpolation, mixing, and clips;
+The animation core above (Milestone 3A) is implemented. The remaining motion
+and behavior work:
+
 - state graph, variables, events, pointer input, and reusable behaviors;
+- timeline clips, in/out work areas, and multi-timeline blending;
 - nested components and instance overrides;
 - deterministic runtime player and frame capture.
 

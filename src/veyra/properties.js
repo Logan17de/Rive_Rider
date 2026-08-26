@@ -71,6 +71,21 @@ function nodePropertyPath(segments) {
   return segments.join('.');
 }
 
+function nestedTarget(root, segments, path) {
+  if (segments.length === 1) return { container: root, key: segments[0] };
+  let container = root;
+  for (let index = 0; index < segments.length - 1; index++) {
+    const segment = segments[index];
+    container = Array.isArray(container)
+      ? container.find((candidate) => candidate?.id === segment)
+      : container?.[segment];
+    if (!container || typeof container !== 'object') {
+      throw new TypeError(`Property container ${segments.slice(0, index + 1).join('.')} is unavailable for ${path}.`);
+    }
+  }
+  return { container, key: segments.at(-1) };
+}
+
 function propertyTarget(document, address, createSemantic = false) {
   const parsed = typeof address === 'string' ? parsePropertyAddress(address) : address;
   if (parsed.reference.kind !== 'node') {
@@ -87,10 +102,7 @@ function propertyTarget(document, address, createSemantic = false) {
     if (!supportsRigProperty(parsed.reference.kind, object, parsed.path)) {
       throw new TypeError(`${parsed.reference.kind} does not support property ${parsed.path}.`);
     }
-    if (parsed.segments.length === 1) return { parsed, object, container: object, key: parsed.segments[0] };
-    const container = object[parsed.segments[0]];
-    if (!container || typeof container !== 'object') throw new TypeError(`Property container ${parsed.segments[0]} is unavailable.`);
-    return { parsed, object, container, key: parsed.segments[1] };
+    return { parsed, object, ...nestedTarget(object, parsed.segments, parsed.path) };
   }
   const node = nodeById(document, parsed.reference.id);
   if (!node) throw new TypeError(`Property target node ${parsed.reference.id} does not exist.`);
@@ -100,17 +112,7 @@ function propertyTarget(document, address, createSemantic = false) {
   if (parsed.segments[0] === 'semantic') {
     return { parsed, node, container: semanticFor(document, node.id, createSemantic), key: parsed.segments[1] };
   }
-  if (parsed.segments[0] === 'geometry' && parsed.segments[1] === 'vertices') {
-    const vertex = node.geometry.vertices.find((candidate) => candidate.id === parsed.segments[2]);
-    if (!vertex) throw new TypeError(`Vertex ${parsed.segments[2]} does not exist on node ${node.id}.`);
-    return { parsed, node, container: vertex, key: parsed.segments[3] };
-  }
-  if (parsed.segments.length === 1) {
-    return { parsed, node, container: node, key: parsed.segments[0] };
-  }
-  const container = node[parsed.segments[0]];
-  if (!container || typeof container !== 'object') throw new TypeError(`Property container ${parsed.segments[0]} is unavailable.`);
-  return { parsed, node, container, key: parsed.segments[1] };
+  return { parsed, node, ...nestedTarget(node, parsed.segments, path) };
 }
 
 export function readProperty(document, address) {

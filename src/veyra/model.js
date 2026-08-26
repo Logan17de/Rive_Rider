@@ -14,7 +14,7 @@ import {
 } from './references.js';
 
 export const VEYRA_FORMAT = 'veyra';
-export const VEYRA_VERSION = 2;
+export const VEYRA_VERSION = 3;
 export const VEYRA_MIME = 'application/vnd.veyra+json';
 export const VEYRA_ASSET_TYPES = Object.freeze(['image', 'font', 'audio']);
 export const VEYRA_CONSTRAINT_TYPES = Object.freeze([
@@ -43,6 +43,7 @@ export const VEYRA_EASING_TYPES = Object.freeze([
   'hold',
 ]);
 export const VEYRA_LOOP_MODES = Object.freeze(['none', 'loop', 'pingpong']);
+export const VEYRA_FILL_TYPES = Object.freeze(['solid', 'linearGradient', 'radialGradient']);
 
 let fallbackId = 0;
 
@@ -57,6 +58,55 @@ export function cloneValue(value) {
   return globalThis.structuredClone
     ? globalThis.structuredClone(value)
     : JSON.parse(JSON.stringify(value));
+}
+
+export function createGradientStop(overrides = {}) {
+  return {
+    id: overrides.id || createId('gradientStop'),
+    offset: overrides.offset ?? 0,
+    color: String(overrides.color || '#000000').toLowerCase(),
+    opacity: overrides.opacity ?? 1,
+  };
+}
+
+export function createSolidFill(value = '#ec4899') {
+  const source = typeof value === 'string' ? { color: value } : value || {};
+  return { type: 'solid', color: String(source.color || '#ec4899').toLowerCase() };
+}
+
+export function createLinearGradient(overrides = {}) {
+  return {
+    type: 'linearGradient',
+    x1: overrides.x1 ?? 0,
+    y1: overrides.y1 ?? 0,
+    x2: overrides.x2 ?? 1,
+    y2: overrides.y2 ?? 1,
+    stops: cloneValue(overrides.stops || [
+      createGradientStop({ offset: 0, color: '#ec4899' }),
+      createGradientStop({ offset: 1, color: '#22d3ee' }),
+    ]),
+  };
+}
+
+export function createRadialGradient(overrides = {}) {
+  return {
+    type: 'radialGradient',
+    cx: overrides.cx ?? 0.5,
+    cy: overrides.cy ?? 0.5,
+    r: overrides.r ?? 0.5,
+    fx: overrides.fx ?? overrides.cx ?? 0.5,
+    fy: overrides.fy ?? overrides.cy ?? 0.5,
+    stops: cloneValue(overrides.stops || [
+      createGradientStop({ offset: 0, color: '#fff7fc' }),
+      createGradientStop({ offset: 1, color: '#ec4899' }),
+    ]),
+  };
+}
+
+function fillForCreate(value, fallback) {
+  if (value == null) return createSolidFill(fallback);
+  if (typeof value === 'string') return createSolidFill(value);
+  return cloneValue(value);
 }
 
 function baseNode(type) {
@@ -79,7 +129,7 @@ function baseNode(type) {
       pivotX: 0,
       pivotY: 0,
     },
-    paint: { fill: '#ec4899', stroke: '#2c1830', strokeWidth: 2 },
+    paint: { fill: createSolidFill('#ec4899'), stroke: '#2c1830', strokeWidth: 2 },
     geometry: null,
   };
 }
@@ -122,7 +172,11 @@ export function createNode(type, overrides = {}) {
         ? createNodeRef(overrides.parentId)
         : null,
     transform: { ...base.transform, ...(overrides.transform || {}) },
-    paint: { ...base.paint, ...(overrides.paint || {}) },
+    paint: {
+      ...base.paint,
+      ...(overrides.paint || {}),
+      fill: fillForCreate(overrides.paint?.fill ?? base.paint.fill, '#ec4899'),
+    },
     geometry: type === 'group'
       ? null
       : { ...defaultGeometry(type), ...(overrides.geometry || {}) },
@@ -223,7 +277,7 @@ export function createMesh(overrides = {}) {
     locked: Boolean(overrides.locked),
     opacity: overrides.opacity ?? 0.72,
     paint: {
-      fill: overrides.paint?.fill || '#f472b6',
+      fill: fillForCreate(overrides.paint?.fill, '#f472b6'),
       stroke: overrides.paint?.stroke || '#831843',
       strokeWidth: overrides.paint?.strokeWidth ?? 2,
     },
@@ -360,6 +414,68 @@ function color(value, path) {
   throw new TypeError(`${path} must be "none" or a six-digit hex color.`);
 }
 
+function gradientColor(value, path) {
+  const normalized = color(value, path);
+  if (normalized === 'none') throw new TypeError(`${path} must be a six-digit hex color.`);
+  return normalized;
+}
+
+function normalizeGradientStops(stops, path) {
+  if (!Array.isArray(stops) || stops.length < 2) {
+    throw new TypeError(`${path} must contain at least two gradient stops.`);
+  }
+  if (stops.length > 256) throw new RangeError(`${path} contains too many gradient stops.`);
+  const ids = new Set();
+  return stops.map((stop, index) => {
+    const id = String(stop?.id || createId('gradientStop'));
+    if (ids.has(id)) throw new TypeError(`${path} contains duplicate stop id ${id}.`);
+    ids.add(id);
+    return {
+      id,
+      offset: bounded(stop?.offset ?? 0, `${path}[${index}].offset`, 0, 1),
+      color: gradientColor(stop?.color ?? '#000000', `${path}[${index}].color`),
+      opacity: bounded(stop?.opacity ?? 1, `${path}[${index}].opacity`, 0, 1),
+    };
+  }).sort((a, b) => a.offset - b.offset);
+}
+
+function normalizeFill(fill, path, inputVersion, fallback) {
+  if (typeof fill === 'string') {
+    if (inputVersion >= 3) throw new TypeError(`${path} must be a tagged fill object in version 3.`);
+    return createSolidFill(color(fill, path));
+  }
+  const source = fill ?? createSolidFill(fallback);
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    throw new TypeError(`${path} must be a tagged fill object.`);
+  }
+  const type = String(source.type || '');
+  if (!VEYRA_FILL_TYPES.includes(type)) throw new TypeError(`${path}.type is unsupported.`);
+  if (type === 'solid') {
+    return { type, color: color(source.color ?? fallback, `${path}.color`) };
+  }
+  const common = {
+    type,
+    stops: normalizeGradientStops(source.stops, `${path}.stops`),
+  };
+  if (type === 'linearGradient') {
+    return {
+      ...common,
+      x1: bounded(source.x1 ?? 0, `${path}.x1`, -10, 10),
+      y1: bounded(source.y1 ?? 0, `${path}.y1`, -10, 10),
+      x2: bounded(source.x2 ?? 1, `${path}.x2`, -10, 10),
+      y2: bounded(source.y2 ?? 1, `${path}.y2`, -10, 10),
+    };
+  }
+  return {
+    ...common,
+    cx: bounded(source.cx ?? 0.5, `${path}.cx`, -10, 10),
+    cy: bounded(source.cy ?? 0.5, `${path}.cy`, -10, 10),
+    r: bounded(source.r ?? 0.5, `${path}.r`, 0.000001, 10),
+    fx: bounded(source.fx ?? source.cx ?? 0.5, `${path}.fx`, -10, 10),
+    fy: bounded(source.fy ?? source.cy ?? 0.5, `${path}.fy`, -10, 10),
+  };
+}
+
 function normalizeTransform(transform, path, anglesUseDegrees) {
   const angle = (value, property) => {
     const normalized = finite(value ?? 0, `${path}.${property}`);
@@ -431,7 +547,7 @@ function normalizeGeometry(type, geometry, path) {
   }
 }
 
-function normalizeNode(node, index, anglesUseDegrees) {
+function normalizeNode(node, index, anglesUseDegrees, inputVersion) {
   const type = String(node?.type || '');
   if (!VEYRA_NODE_TYPES.includes(type)) throw new TypeError(`nodes[${index}].type is unsupported.`);
   const id = String(node.id || '');
@@ -446,7 +562,7 @@ function normalizeNode(node, index, anglesUseDegrees) {
     opacity: bounded(node.opacity ?? 1, `nodes[${index}].opacity`, 0, 1),
     transform: normalizeTransform(node.transform, `nodes[${index}].transform`, anglesUseDegrees),
     paint: {
-      fill: color(node.paint?.fill ?? '#ec4899', `nodes[${index}].paint.fill`),
+      fill: normalizeFill(node.paint?.fill, `nodes[${index}].paint.fill`, inputVersion, '#ec4899'),
       stroke: color(node.paint?.stroke ?? 'none', `nodes[${index}].paint.stroke`),
       strokeWidth: bounded(node.paint?.strokeWidth ?? 0, `nodes[${index}].paint.strokeWidth`, 0, 10000),
     },
@@ -533,7 +649,7 @@ function normalizeControl(control, index) {
   };
 }
 
-function normalizeMesh(mesh, index) {
+function normalizeMesh(mesh, index, inputVersion) {
   const id = String(mesh?.id || '');
   if (!id) throw new TypeError(`meshes[${index}].id is required.`);
   if (!Array.isArray(mesh.vertices) || mesh.vertices.length < 3) {
@@ -585,7 +701,7 @@ function normalizeMesh(mesh, index) {
     locked: Boolean(mesh.locked),
     opacity: bounded(mesh.opacity ?? 1, `meshes[${index}].opacity`, 0, 1),
     paint: {
-      fill: color(mesh.paint?.fill ?? '#f472b6', `meshes[${index}].paint.fill`),
+      fill: normalizeFill(mesh.paint?.fill, `meshes[${index}].paint.fill`, inputVersion, '#f472b6'),
       stroke: color(mesh.paint?.stroke ?? '#831843', `meshes[${index}].paint.stroke`),
       strokeWidth: bounded(mesh.paint?.strokeWidth ?? 2, `meshes[${index}].paint.strokeWidth`, 0, 10000),
     },
@@ -716,7 +832,14 @@ function validateHierarchy(nodes) {
   }
 }
 
-function normalizeKeyframe(keyframe, trackPath, index) {
+function normalizeKeyframeValue(value, address, inputVersion, path) {
+  if (inputVersion <= 2 && /\/paint\/fill$/.test(address) && typeof value === 'string') {
+    return normalizeFill(value, path, inputVersion, '#ec4899');
+  }
+  return cloneValue(value);
+}
+
+function normalizeKeyframe(keyframe, trackPath, index, address, inputVersion) {
   const frame = integer(keyframe?.frame ?? 0, `${trackPath}.keyframes[${index}].frame`, 0, 100000);
   const easing = String(keyframe?.easing || 'linear');
   if (!VEYRA_EASING_TYPES.includes(easing)) {
@@ -724,7 +847,7 @@ function normalizeKeyframe(keyframe, trackPath, index) {
   }
   const normalized = {
     frame,
-    value: cloneValue(keyframe?.value),
+    value: normalizeKeyframeValue(keyframe?.value, address, inputVersion, `${trackPath}.keyframes[${index}].value`),
     easing,
   };
   if (easing === 'cubic-bezier') {
@@ -738,7 +861,7 @@ function normalizeKeyframe(keyframe, trackPath, index) {
   return normalized;
 }
 
-function normalizeTrack(track, timelinePath, index) {
+function normalizeTrack(track, timelinePath, index, inputVersion) {
   const id = String(track?.id || createId('track'));
   const address = String(track?.address || '');
   if (!address) throw new TypeError(`${timelinePath}.tracks[${index}].address is required.`);
@@ -747,12 +870,12 @@ function normalizeTrack(track, timelinePath, index) {
     throw new TypeError(`${trackPath}.keyframes must be an array.`);
   }
   const keyframes = track.keyframes
-    .map((keyframe, kfIndex) => normalizeKeyframe(keyframe, trackPath, kfIndex))
+    .map((keyframe, kfIndex) => normalizeKeyframe(keyframe, trackPath, kfIndex, address, inputVersion))
     .sort((a, b) => a.frame - b.frame);
   return { id, address, keyframes };
 }
 
-function normalizeTimeline(timeline, index) {
+function normalizeTimeline(timeline, index, inputVersion) {
   const id = String(timeline?.id || createId('timeline'));
   const name = String(timeline?.name || 'Timeline');
   const duration = integer(timeline?.duration ?? 60, `timelines[${index}].duration`, 1, 1000000);
@@ -765,7 +888,7 @@ function normalizeTimeline(timeline, index) {
     throw new TypeError(`timelines[${index}].tracks must be an array.`);
   }
   const tracks = timeline.tracks.map((track, trackIndex) =>
-    normalizeTrack(track, `timelines[${index}]`, trackIndex)
+    normalizeTrack(track, `timelines[${index}]`, trackIndex, inputVersion)
   );
   return { id, name, duration, fps, loop, tracks };
 }
@@ -774,15 +897,15 @@ export function normalizeDocument(input) {
   if (!input || typeof input !== 'object') throw new TypeError('Veyra document must be an object.');
   if (input.format !== VEYRA_FORMAT) throw new TypeError(`Expected format "${VEYRA_FORMAT}".`);
   const inputVersion = Number(input.version);
-  if (![1, VEYRA_VERSION].includes(inputVersion)) {
-    throw new TypeError(`Unsupported Veyra version ${input.version}; expected version 1 or ${VEYRA_VERSION}.`);
+  if (![1, 2, VEYRA_VERSION].includes(inputVersion)) {
+    throw new TypeError(`Unsupported Veyra version ${input.version}; expected version 1, 2, or ${VEYRA_VERSION}.`);
   }
   if (!Array.isArray(input.nodes)) throw new TypeError('nodes must be an array.');
   if (input.nodes.length > 10000) throw new RangeError('Veyra document contains too many nodes.');
 
   const anglesUseDegrees = inputAnglesUseDegrees(input.conventions);
   const conventions = normalizeConventions(input.conventions);
-  const nodes = input.nodes.map((node, index) => normalizeNode(node, index, anglesUseDegrees));
+  const nodes = input.nodes.map((node, index) => normalizeNode(node, index, anglesUseDegrees, inputVersion));
   const ids = new Set();
   for (const node of nodes) {
     if (ids.has(node.id)) throw new TypeError(`Duplicate node id ${node.id}.`);
@@ -794,7 +917,7 @@ export function normalizeDocument(input) {
     ? input.bones.map((bone, index) => normalizeBone(bone, index, anglesUseDegrees))
     : [];
   const meshes = Array.isArray(input.meshes)
-    ? input.meshes.map((mesh, index) => normalizeMesh(mesh, index))
+    ? input.meshes.map((mesh, index) => normalizeMesh(mesh, index, inputVersion))
     : [];
   const controls = Array.isArray(input.controls)
     ? input.controls.map((control, index) => normalizeControl(control, index))
@@ -836,7 +959,7 @@ export function normalizeDocument(input) {
   }
 
   const timelines = Array.isArray(input.timelines)
-    ? input.timelines.map((timeline, index) => normalizeTimeline(timeline, index))
+    ? input.timelines.map((timeline, index) => normalizeTimeline(timeline, index, inputVersion))
     : [];
   const timelineIds = new Set();
   for (const timeline of timelines) {
