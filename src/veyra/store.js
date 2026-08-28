@@ -323,7 +323,7 @@ export class VeyraStore {
       : { label: `Update timeline ${timeline.name}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
       const target = timelineById(document, timelineId);
-      for (const key of ['name', 'duration', 'fps', 'loop']) {
+      for (const key of ['name', 'duration', 'fps', 'loop', 'workStart', 'workEnd']) {
         if (changes[key] !== undefined) target[key] = changes[key];
       }
     });

@@ -1,5 +1,5 @@
-import { cloneValue, timelineById, trackByAddress } from './model.js';
-import { parsePropertyAddress } from './properties.js';
+import { cloneValue, timelineById, trackByAddress, VEYRA_LOOP_MODES } from './model.js';
+import { parsePropertyAddress, readProperty } from './properties.js';
 
 // Easing functions following standard CSS timing function definitions
 function linear(t) {
@@ -142,26 +142,49 @@ export function evaluateTrack(track, frame) {
   return interpolateValue(kfA.value, kfB.value, easedT);
 }
 
-export function normalizeFrame(frame, duration, loop) {
+// The work area is the inclusive frame range [workStart, workEnd]. The
+// defaults reproduce the legacy full-duration behaviour exactly, so the
+// original three-argument calls are unchanged; 'loop' wraps within the span
+// (workEnd samples workStart, mirroring how frame duration sampled 0) and
+// 'pingpong' reflects within the same span with workEnd reachable at the turn.
+export function normalizeFrame(frame, duration, loop, workStart = 0, workEnd = duration) {
   if (loop === 'none') {
-    return Math.max(0, Math.min(frame, duration));
+    return Math.max(workStart, Math.min(frame, workEnd));
   }
   if (loop === 'loop') {
-    return ((frame % duration) + duration) % duration;
+    const span = workEnd - workStart;
+    return workStart + (((frame - workStart) % span + span) % span);
   }
   if (loop === 'pingpong') {
-    const cycle = duration * 2;
-    const t = ((frame % cycle) + cycle) % cycle;
-    return t < duration ? t : cycle - t;
+    const span = workEnd - workStart;
+    const cycle = span * 2;
+    const t = (((frame - workStart) % cycle + cycle) % cycle);
+    return workStart + (t < span ? t : cycle - t);
   }
   return frame;
 }
 
-export function evaluateTimeline(timeline, time) {
+export function evaluateTimeline(timeline, time, options = {}) {
   if (!timeline || !timeline.tracks) return {};
 
+  // An explicit loop option overrides the authored value; it is validated,
+  // while the two-argument call keeps the authored timeline.loop.
+  let loop = timeline.loop;
+  if (options.loop !== undefined) {
+    if (!VEYRA_LOOP_MODES.includes(options.loop)) {
+      throw new TypeError(`Unsupported loop mode: ${options.loop}`);
+    }
+    loop = options.loop;
+  }
+
   const frame = time * timeline.fps;
-  const normalizedFrame = normalizeFrame(frame, timeline.duration, timeline.loop);
+  const normalizedFrame = normalizeFrame(
+    frame,
+    timeline.duration,
+    loop,
+    timeline.workStart ?? 0,
+    timeline.workEnd ?? timeline.duration,
+  );
 
   const overrides = {};
   for (const track of timeline.tracks) {
@@ -181,8 +204,9 @@ export function evaluateTimelines(document, timelineStates) {
     const timeline = timelineById(document, state.timelineId);
     if (!timeline) continue;
 
-    const weight = state.weight ?? 1;
-    const overrides = evaluateTimeline(timeline, state.time);
+    // Missing weights stay fully authoritative; clamp defensively to [0, 1].
+    const weight = Math.max(0, Math.min(1, state.weight ?? 1));
+    const overrides = evaluateTimeline(timeline, state.time, { loop: state.loop });
 
     for (const [address, value] of Object.entries(overrides)) {
       if (weight >= 1) {
@@ -190,7 +214,17 @@ export function evaluateTimelines(document, timelineStates) {
       } else if (combined[address] !== undefined) {
         combined[address] = interpolateValue(combined[address], value, weight);
       } else {
-        combined[address] = value;
+        // The first contributor to an address blends against the value
+        // authored in the document, so partial weights partially drive the
+        // property and a zero weight leaves it authored.
+        try {
+          combined[address] = interpolateValue(readProperty(document, address), value, weight);
+        } catch {
+          // readProperty throws on unresolvable addresses (deleted node,
+          // malformed address). Keep the previous behaviour: assign the
+          // animated value directly so evaluation never throws.
+          combined[address] = value;
+        }
       }
     }
   }
@@ -201,12 +235,12 @@ export function evaluateTimelines(document, timelineStates) {
 export class AnimationPlayback {
   #document = null;
   #activeTimelines = new Map();
-  #startTime = null;
-  #pausedAt = null;
   #speed = 1;
+  #now = () => Date.now() / 1000;
 
-  constructor(document) {
+  constructor(document, { now } = {}) {
     this.#document = document;
+    this.#now = now ?? (() => Date.now() / 1000);
   }
 
   get document() {
@@ -217,92 +251,131 @@ export class AnimationPlayback {
     this.#document = document;
   }
 
+  // The single place where the effective rate is applied:
+  // local time = frozen elapsed + (now - origin) * timelineSpeed * globalSpeed.
+  #localTime(state, now = this.#now()) {
+    if (state.origin === null) return state.elapsed;
+    return state.elapsed + (now - state.origin) * state.speed * this.#speed;
+  }
+
   play(timelineId, options = {}) {
     const timeline = timelineById(this.#document, timelineId);
     if (!timeline) throw new Error(`Timeline ${timelineId} not found.`);
 
-    const state = {
+    // Playing an already-active timeline restarts it at local time 0.
+    this.#activeTimelines.set(timelineId, {
       timelineId,
-      startTime: Date.now() / 1000,
+      elapsed: 0,
+      origin: this.#now(),
       weight: options.weight ?? 1,
       loop: options.loop ?? timeline.loop,
       speed: options.speed ?? 1,
-    };
-
-    this.#activeTimelines.set(timelineId, state);
-    if (this.#startTime === null) {
-      this.#startTime = Date.now() / 1000;
-    }
+    });
   }
 
   stop(timelineId) {
     if (timelineId) {
       this.#activeTimelines.delete(timelineId);
     } else {
+      // Every clock lives on a state, so clearing the set fully resets them.
       this.#activeTimelines.clear();
-    }
-
-    if (this.#activeTimelines.size === 0) {
-      this.#startTime = null;
-      this.#pausedAt = null;
     }
   }
 
   pause() {
-    if (this.#pausedAt === null && this.#startTime !== null) {
-      this.#pausedAt = Date.now() / 1000;
+    const now = this.#now();
+    for (const state of this.#activeTimelines.values()) {
+      if (state.origin !== null) {
+        // Fold the running segment into elapsed and freeze it.
+        state.elapsed = this.#localTime(state, now);
+        state.origin = null;
+      }
     }
   }
 
   resume() {
-    if (this.#pausedAt !== null) {
-      const pauseDuration = (Date.now() / 1000) - this.#pausedAt;
-      this.#startTime += pauseDuration;
-      this.#pausedAt = null;
+    const now = this.#now();
+    for (const state of this.#activeTimelines.values()) {
+      if (state.origin === null) {
+        // Continue each timeline exactly where it stopped.
+        state.origin = now;
+      }
     }
   }
 
   setSpeed(speed) {
+    const now = this.#now();
+    // Fold every running segment into elapsed at the current speed first,
+    // so the new speed only affects future advancement.
+    for (const state of this.#activeTimelines.values()) {
+      if (state.origin !== null) {
+        state.elapsed = this.#localTime(state, now);
+      }
+    }
     this.#speed = Math.max(0.01, Math.min(speed, 10));
+    for (const state of this.#activeTimelines.values()) {
+      if (state.origin !== null) {
+        state.origin = now;
+      }
+    }
   }
 
   get isPlaying() {
-    return this.#activeTimelines.size > 0 && this.#pausedAt === null;
+    for (const state of this.#activeTimelines.values()) {
+      if (state.origin !== null) return true;
+    }
+    return false;
   }
 
   get isPaused() {
-    return this.#activeTimelines.size > 0 && this.#pausedAt !== null;
+    for (const state of this.#activeTimelines.values()) {
+      if (state.origin === null) return true;
+    }
+    return false;
   }
 
   getCurrentTime() {
-    if (this.#startTime === null) return 0;
-    if (this.#pausedAt !== null) return (this.#pausedAt - this.#startTime) * this.#speed;
-    return ((Date.now() / 1000) - this.#startTime) * this.#speed;
+    // The maximum local elapsed time across active timelines; 0 when idle.
+    const now = this.#now();
+    let max = 0;
+    for (const state of this.#activeTimelines.values()) {
+      max = Math.max(max, this.#localTime(state, now));
+    }
+    return max;
   }
 
   getActiveStates() {
     if (this.#activeTimelines.size === 0) return [];
 
-    const currentTime = this.getCurrentTime();
+    const now = this.#now();
     const states = [];
+    const finished = [];
 
     for (const [timelineId, state] of this.#activeTimelines) {
       const timeline = timelineById(this.#document, timelineId);
       if (!timeline) continue;
 
-      const elapsed = (currentTime - (state.startTime - this.#startTime)) * state.speed;
+      const time = this.#localTime(state, now);
 
-      // Check if timeline should stop (if not looping and past duration)
-      if (state.loop === 'none' && elapsed > timeline.duration / timeline.fps) {
-        this.#activeTimelines.delete(timelineId);
+      // Check if timeline should stop: an effective 'none' loop finishes
+      // when its local time passes the work area end, which equals the old
+      // duration threshold for full-length work areas.
+      if (state.loop === 'none' && time > (timeline.workEnd ?? timeline.duration) / timeline.fps) {
+        finished.push(timelineId);
         continue;
       }
 
       states.push({
         timelineId,
-        time: elapsed,
+        time,
         weight: state.weight,
+        loop: state.loop,
       });
+    }
+
+    // Never delete from the Map while iterating it.
+    for (const timelineId of finished) {
+      this.#activeTimelines.delete(timelineId);
     }
 
     return states;

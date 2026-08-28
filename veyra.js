@@ -7,6 +7,7 @@ import {
   createConstraint,
   createControl,
   createDocument,
+  createId,
   createGradientStop,
   createLinearGradient,
   createMesh,
@@ -43,6 +44,8 @@ import { createSceneSummary } from './src/veyra/summary.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
+const UI_THEME_KEY = 'veyra.ui-theme.v1';
+const UI_THEMES = new Set(['magenta', 'blue', 'green', 'orange', 'yellow']);
 
 const documentName = $('documentName');
 const saveState = $('saveState');
@@ -79,12 +82,28 @@ const autoKeyToggle = $('autoKeyToggle');
 const loopMode = $('loopMode');
 const fpsInput = $('fpsInput');
 const durationInput = $('durationInput');
+const workStartInput = $('workStartInput');
+const workEndInput = $('workEndInput');
+const themeSelect = $('themeSelect');
 const timelineTracks = $('timelineTracks');
 const timelineGrid = $('timelineGrid');
 const timelineGridWrap = $('timelineGridWrap');
 const timelineRuler = $('timelineRuler');
 const keyframeBar = $('keyframeBar');
 const playhead = $('playhead');
+
+function applyTheme(theme) {
+  const nextTheme = UI_THEMES.has(theme) ? theme : 'magenta';
+  document.documentElement.dataset.theme = nextTheme;
+  themeSelect.value = nextTheme;
+  return nextTheme;
+}
+
+applyTheme(localStorage.getItem(UI_THEME_KEY));
+themeSelect.onchange = () => {
+  const nextTheme = applyTheme(themeSelect.value);
+  localStorage.setItem(UI_THEME_KEY, nextTheme);
+};
 
 let toastTimer = null;
 let autosaveTimer = null;
@@ -105,6 +124,7 @@ let keyframeDragPointerId = null;
 let timelinePxPerFrame = 20;
 let lastEasing = 'linear';
 let lastEasingParams = null;
+let draftPathPoints = [];
 const selectedMeshVertices = new Map();
 
 function restoredDocument() {
@@ -123,10 +143,25 @@ const store = new VeyraStore(restored || createStarterDocument());
 if (restored) savedRevision = -1;
 const renderer = new VeyraRenderer($('veyraCanvas'), {
   select: (reference) => store.select(reference),
+  drawPoint: (point) => {
+    draftPathPoints.push({ x: point.x, y: point.y });
+    renderer.setDraftPath(draftPathPoints);
+    setStatus(`${draftPathPoints.length} path point${draftPathPoints.length === 1 ? '' : 's'} · Enter to commit`);
+  },
   begin: (label) => store.begin(label),
   moveNode: (nodeId, next) => store.mutate((documentModel) => {
     writeProperty(documentModel, nodePropertyAddress(nodeId, 'transform.x'), next.x);
     writeProperty(documentModel, nodePropertyAddress(nodeId, 'transform.y'), next.y);
+  }, 'drag'),
+  moveGroup: (groupId, delta) => store.mutate((documentModel) => {
+    const target = nodeById(documentModel, groupId);
+    writeProperty(documentModel, nodePropertyAddress(groupId, 'transform.x'), target.transform.x + delta.x);
+    writeProperty(documentModel, nodePropertyAddress(groupId, 'transform.y'), target.transform.y + delta.y);
+  }, 'drag'),
+  moveHandle: (nodeId, vertexIndex, prefix, next) => store.mutate((documentModel) => {
+    const vertexId = nodeById(documentModel, nodeId).geometry.vertices[vertexIndex].id;
+    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, `${prefix}X`]), next.x);
+    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, `${prefix}Y`]), next.y);
   }, 'drag'),
   moveVertex: (nodeId, vertexIndex, next) => store.mutate((documentModel) => {
     const vertexId = nodeById(documentModel, nodeId).geometry.vertices[vertexIndex].id;
@@ -233,7 +268,9 @@ function nodeIcon(type) {
 }
 
 const TOOL_HINTS = Object.freeze({
-  select: 'Select and drag artwork or authored path vertices.',
+  select: 'Select artwork. Select a Path to reveal and drag its vertices.',
+  vertex: 'Select a Path, then drag its cyan vertices. Escape returns to Select.',
+  pencil: 'Click to place path points. Enter commits; Escape cancels.',
   bone: 'Drag a bone end to pose it; drag its joint to translate. IK bones move their target.',
   mesh: 'Select a mesh, choose a vertex, and edit each bone influence in Properties.',
   control: 'Drag yellow controls to solve IK and other control-driven constraints.',
@@ -242,6 +279,10 @@ const TOOL_HINTS = Object.freeze({
 });
 
 function setTool(tool, selectComponent = true) {
+  if (currentTool === 'pencil' && tool !== 'pencil') {
+    draftPathPoints = [];
+    renderer.setDraftPath([]);
+  }
   currentTool = tool;
   renderer.setTool(tool);
   stagePanel.dataset.tool = tool;
@@ -259,6 +300,9 @@ function setTool(tool, selectComponent = true) {
     constraint: store.document.constraints[0],
   }[tool];
   if (candidate) store.select({ kind: tool, id: candidate.id });
+  // Tool choice affects renderer overlays (notably path vertex controls),
+  // so repaint immediately instead of waiting for a later document change.
+  if (evaluatedScene) renderer.render(evaluatedScene, store.selectedRef);
   setStatus(`${tool[0].toUpperCase()}${tool.slice(1)} tool`);
 }
 
@@ -789,8 +833,24 @@ function renderNodeInspector(node) {
       const summary = document.createElement('div');
       summary.className = 'vertexSummary';
       summary.innerHTML = `<span>Authored vertices</span><strong>${node.geometry.vertices.length}</strong>`;
-      geometry.fieldset.appendChild(summary);
-      appendNote(geometry.fieldset, 'Cyan points are authoritative vertices. Pale circles show Bezier handles; handle editing is planned for the next geometry pass.');
+      const actions = document.createElement('div');
+      actions.className = 'pathVertexActions';
+      const addVertex = document.createElement('button');
+      addVertex.type = 'button';
+      addVertex.className = 'textButton';
+      addVertex.textContent = 'Add vertex';
+      addVertex.title = 'Add a vertex, then position it with the Vertices tool';
+      addVertex.onclick = () => addPathVertex(node);
+      const removeVertex = document.createElement('button');
+      removeVertex.type = 'button';
+      removeVertex.className = 'textButton danger';
+      removeVertex.textContent = 'Remove last';
+      removeVertex.disabled = node.geometry.vertices.length <= 2;
+      removeVertex.title = 'Remove the most recently added vertex';
+      removeVertex.onclick = () => removePathVertex(node);
+      actions.append(addVertex, removeVertex);
+      geometry.fieldset.append(summary, actions);
+      appendNote(geometry.fieldset, 'Use Vertices (E) to drag cyan points. Add/Remove is undoable; pale Bezier handles are display-only.');
     }
     inspector.appendChild(geometry.fieldset);
   }
@@ -1091,11 +1151,24 @@ function renderTimelineSelect() {
 
 function renderTimelineSettings() {
   const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
-  if (!timeline) return;
+  const disabled = !timeline;
+  for (const control of [loopMode, fpsInput, durationInput, workStartInput, workEndInput]) {
+    control.disabled = disabled;
+  }
+  if (!timeline) {
+    frameReadout.textContent = '—';
+    return;
+  }
 
   loopMode.value = timeline.loop;
   fpsInput.value = timeline.fps;
   durationInput.value = timeline.duration;
+  workStartInput.value = timeline.workStart ?? 0;
+  workEndInput.value = timeline.workEnd ?? timeline.duration;
+  workStartInput.min = '0';
+  workStartInput.max = String((timeline.workEnd ?? timeline.duration) - 1);
+  workEndInput.min = String((timeline.workStart ?? 0) + 1);
+  workEndInput.max = String(timeline.duration);
   frameReadout.textContent = `${Math.round(currentFrame)} / ${timeline.duration}`;
   timelineRuler.setAttribute('aria-valuemax', String(timeline.duration));
   timelineRuler.setAttribute('aria-valuenow', String(Math.round(currentFrame)));
@@ -1109,7 +1182,7 @@ function renderTimelineTracks() {
     emptyMsg.style.padding = '20px 12px';
     emptyMsg.style.color = 'var(--quiet)';
     emptyMsg.style.fontSize = '10px';
-    emptyMsg.textContent = 'No animated properties. Click the diamond beside any inspector property, or enable Auto-key.';
+    emptyMsg.textContent = 'Create a timeline with +, then select an animatable property and use the diamond key button or Auto-key.';
     timelineTracks.appendChild(emptyMsg);
     return;
   }
@@ -1148,6 +1221,26 @@ function renderTimelineKeyframes() {
   const rulerWidth = timeline.duration * timelinePxPerFrame;
   timelineGrid.style.height = `${Math.max(trackHeight * timeline.tracks.length, trackHeight)}px`;
   timelineGrid.style.backgroundSize = `${timelinePxPerFrame}px 100%, ${timelinePxPerFrame * 5}px 100%`;
+  const workStart = timeline.workStart ?? 0;
+  const workEnd = timeline.workEnd ?? timeline.duration;
+  const workArea = document.createElement('div');
+  workArea.className = 'workAreaBand';
+  workArea.title = 'Drag to move the work area · drag the edges to resize it';
+  workArea.style.left = `${workStart * timelinePxPerFrame}px`;
+  workArea.style.width = `${Math.max(1, (workEnd - workStart) * timelinePxPerFrame)}px`;
+  for (const edge of ['start', 'end']) {
+    const handle = document.createElement('div');
+    handle.className = 'workAreaEdge';
+    handle.dataset.edge = edge;
+    handle.title = edge === 'start' ? 'Drag to move the In point' : 'Drag to move the Out point';
+    handle.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+      beginWorkAreaDrag(event, edge, workStart, workEnd);
+    });
+    workArea.appendChild(handle);
+  }
+  workArea.addEventListener('pointerdown', (event) => beginWorkAreaDrag(event, 'move', workStart, workEnd));
+  timelineGrid.appendChild(workArea);
 
   for (let i = 0; i < timeline.tracks.length; i++) {
     const track = timeline.tracks[i];
@@ -1363,8 +1456,12 @@ function renderTimeline() {
 
 function evaluateCurrentFrame() {
   const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
-  const layers = timeline
-    ? { animation: evaluateTimeline(timeline, currentFrame / timeline.fps) }
+  // While playback is running, honor the per-play loop preview so the canvas
+  // and the playhead agree (e.g. looping a loop:'none' authored timeline).
+  const playing = !!animationPlayback?.isPlaying;
+  const effectiveLoop = playing ? (playbackLoopMode || timeline?.loop) : timeline?.loop;
+  const layers = timeline && effectiveLoop
+    ? { animation: evaluateTimeline(timeline, currentFrame / timeline.fps, { loop: effectiveLoop }) }
     : {};
   evaluatedScene = evaluateDocument(store.document, layers);
   renderer.render(evaluatedScene, store.selectedRef);
@@ -1389,6 +1486,7 @@ function setPlayButtonState(playing) {
 function finishPlayback() {
   if (playbackRaf !== null) cancelAnimationFrame(playbackRaf);
   playbackRaf = null;
+  playbackLoopMode = null;
   if (animationPlayback) animationPlayback.stop();
   setPlayButtonState(false);
 }
@@ -1405,17 +1503,18 @@ function tickPlayback() {
   if (!timeline || !state) {
     const shouldShowEnd = timeline && (playbackLoopMode || timeline.loop) === 'none';
     finishPlayback();
-    if (shouldShowEnd) setCurrentFrame(timeline.duration);
+    if (shouldShowEnd) setCurrentFrame(timeline.workEnd ?? timeline.duration);
     return;
   }
   const rawFrame = playbackOffsetFrames + state.time * timeline.fps;
   const loop = playbackLoopMode || timeline.loop;
-  if (loop === 'none' && rawFrame >= timeline.duration) {
+  if (loop === 'none' && rawFrame >= (timeline.workEnd ?? timeline.duration)) {
     finishPlayback();
-    setCurrentFrame(timeline.duration);
+    setCurrentFrame(timeline.workEnd ?? timeline.duration);
     return;
   }
-  setCurrentFrame(normalizeFrame(rawFrame, timeline.duration, loop));
+  // Keep the playhead inside the same work area the engine evaluates.
+  setCurrentFrame(normalizeFrame(rawFrame, timeline.duration, loop, timeline.workStart ?? 0, timeline.workEnd ?? timeline.duration));
   playbackRaf = requestAnimationFrame(tickPlayback);
 }
 
@@ -1437,7 +1536,9 @@ function playAnimation(options = {}) {
     .find((candidate) => candidate.timelineId === activeTimelineId);
   if (!state) {
     playbackLoopMode = options.loop ?? timeline.loop;
-    if (currentFrame >= timeline.duration && playbackLoopMode === 'none') currentFrame = 0;
+    if (currentFrame >= (timeline.workEnd ?? timeline.duration) && playbackLoopMode === 'none') {
+      currentFrame = timeline.workStart ?? 0;
+    }
     animationPlayback.stop();
     animationPlayback.play(activeTimelineId, options);
     state = animationPlayback.getActiveStates()
@@ -1524,12 +1625,12 @@ function renderAll(reason = 'change') {
   undoButton.disabled = !store.canUndo;
   redoButton.disabled = !store.canRedo;
   saveState.textContent = store.revision === savedRevision ? 'Saved' : 'Modified';
-  artboardFrame.style.aspectRatio = `${store.document.artboard.width} / ${store.document.artboard.height}`;
 
   if (!animationPlayback) animationPlayback = new AnimationPlayback(store.document);
   else if (animationPlayback.document !== store.document) animationPlayback.setDocument(store.document);
 
   evaluateCurrentFrame();
+  syncArtboardFrame();
   renderHierarchy();
   renderInspector();
   renderTimeline();
@@ -1557,6 +1658,63 @@ store.subscribe((_current, reason) => {
   renderAll(reason);
   scheduleAutosave(reason);
 });
+
+function addPathVertex(node) {
+  const vertices = node.geometry.vertices;
+  const last = vertices.at(-1);
+  const previous = vertices.at(-2) || last;
+  const next = {
+    id: createId('vertex'),
+    x: (last.x + previous.x) / 2 + 24,
+    y: (last.y + previous.y) / 2 + 24,
+    inX: 0, inY: 0, outX: 0, outY: 0,
+  };
+  store.execute(`Add ${node.name} vertex`, (documentModel) => {
+    nodeById(documentModel, node.id).geometry.vertices.push(next);
+  });
+  setTool('vertex', false);
+}
+
+function removePathVertex(node) {
+  if (node.geometry.vertices.length <= 2) {
+    showToast('A path needs at least two vertices', true);
+    return;
+  }
+  store.execute(`Remove ${node.name} vertex`, (documentModel) => {
+    nodeById(documentModel, node.id).geometry.vertices.pop();
+  });
+  setTool('vertex', false);
+}
+
+function commitDraftPath() {
+  if (draftPathPoints.length < 2) {
+    showToast('Place at least two points before committing a path', true);
+    return;
+  }
+  const node = createNode('path', {
+    name: 'Drawn Path',
+    transform: { x: 0, y: 0 },
+    paint: { fill: 'none', stroke: '#ec4899', strokeWidth: 4 },
+    geometry: {
+      closed: false,
+      vertices: draftPathPoints.map((point) => ({ x: point.x, y: point.y, inX: 0, inY: 0, outX: 0, outY: 0 })),
+    },
+  });
+  store.execute('Draw path', (documentModel) => documentModel.nodes.push(node));
+  store.select(createNodeRef(node.id));
+  draftPathPoints = [];
+  renderer.setDraftPath([]);
+  setTool('vertex', false);
+  showToast('Path created — drag cyan vertices to edit');
+}
+
+function cancelDraftPath() {
+  if (!draftPathPoints.length) return false;
+  draftPathPoints = [];
+  renderer.setDraftPath([]);
+  showToast('Path drawing cancelled');
+  return true;
+}
 
 function addNode(type) {
   const selected = store.selectedNode;
@@ -1842,15 +2000,99 @@ durationInput.onchange = () => {
   const duration = parseInt(durationInput.value, 10);
   if (!duration || duration < 1 || duration > 100000) {
     showToast('Duration must be between 1 and 100000 frames', true);
+    renderTimeline();
     return;
   }
   try {
     store.updateTimeline(activeTimelineId, { duration }, 'Change duration');
-    renderTimeline();
   } catch (error) {
     showToast(error.message || String(error), true);
   }
+  renderTimeline();
 };
+
+function beginWorkAreaDrag(event, mode, initialStart, initialEnd) {
+  const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
+  if (!timeline) return;
+  event.preventDefault();
+  const element = event.currentTarget;
+  const startX = event.clientX;
+  const span = initialEnd - initialStart;
+  const clampFrame = (value) => Math.max(0, Math.min(Math.round(value), timeline.duration));
+  const apply = (nextStart, nextEnd) => {
+    workStartInput.value = String(nextStart);
+    workEndInput.value = String(nextEnd);
+    const band = timelineGrid.querySelector('.workAreaBand');
+    if (band) {
+      band.style.left = `${nextStart * timelinePxPerFrame}px`;
+      band.style.width = `${Math.max(1, (nextEnd - nextStart) * timelinePxPerFrame)}px`;
+    }
+  };
+  element.setPointerCapture?.(event.pointerId);
+  element.classList.add('isDragging');
+  const onMove = (nextEvent) => {
+    const delta = Math.round((nextEvent.clientX - startX) / timelinePxPerFrame);
+    let nextStart = initialStart;
+    let nextEnd = initialEnd;
+    if (mode === 'move') {
+      nextStart = clampFrame(initialStart + delta);
+      nextEnd = nextStart + span;
+      if (nextEnd > timeline.duration) {
+        nextEnd = timeline.duration;
+        nextStart = clampFrame(nextEnd - span);
+      }
+    } else if (mode === 'start') {
+      nextStart = clampFrame(initialStart + delta);
+      nextStart = Math.min(nextStart, initialEnd - 1);
+    } else {
+      nextEnd = clampFrame(initialEnd + delta);
+      nextEnd = Math.max(nextEnd, initialStart + 1);
+    }
+    apply(nextStart, nextEnd);
+  };
+  const onEnd = (nextEvent) => {
+    element.removeEventListener('pointermove', onMove);
+    element.removeEventListener('pointerup', onEnd);
+    element.removeEventListener('pointercancel', onEnd);
+    element.classList.remove('isDragging');
+    const nextStart = Number(workStartInput.value);
+    const nextEnd = Number(workEndInput.value);
+    if (nextStart === initialStart && nextEnd === initialEnd) return;
+    if (!Number.isInteger(nextStart) || !Number.isInteger(nextEnd)) {
+      renderTimeline();
+      return;
+    }
+    try {
+      store.updateTimeline(activeTimelineId, { workStart: nextStart, workEnd: nextEnd }, 'Adjust work area');
+      setStatus(`Work area ${nextStart}–${nextEnd}`);
+    } catch (error) {
+      showToast(error.message || String(error), true);
+    }
+    renderTimeline();
+  };
+  element.addEventListener('pointermove', onMove);
+  element.addEventListener('pointerup', onEnd);
+  element.addEventListener('pointercancel', onEnd);
+}
+
+function updateWorkArea(field, input, label) {
+  if (!activeTimelineId) return;
+  const value = Number(input.value);
+  if (!Number.isInteger(value)) {
+    showToast(`${label} must be a whole frame`, true);
+    renderTimeline();
+    return;
+  }
+  try {
+    store.updateTimeline(activeTimelineId, { [field]: value }, `Set timeline ${label.toLowerCase()} point`);
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+  renderTimeline();
+}
+
+workStartInput.onchange = () => updateWorkArea('workStart', workStartInput, 'In');
+workEndInput.onchange = () => updateWorkArea('workEnd', workEndInput, 'Out');
 
 timelineRuler.addEventListener('click', (event) => {
   const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
@@ -1884,15 +2126,29 @@ function updateZoomLabel() {
   zoomValue.textContent = zoomValue.value;
 }
 
+function syncArtboardFrame() {
+  const artboard = store.document.artboard;
+  const topLeft = renderer.worldToClient(0, 0);
+  const bottomRight = renderer.worldToClient(artboard.width, artboard.height);
+  if (!topLeft || !bottomRight) return;
+  const viewportRect = stageViewport.getBoundingClientRect();
+  artboardFrame.style.left = `${topLeft.x - viewportRect.left}px`;
+  artboardFrame.style.top = `${topLeft.y - viewportRect.top}px`;
+  artboardFrame.style.width = `${Math.max(1, bottomRight.x - topLeft.x)}px`;
+  artboardFrame.style.height = `${Math.max(1, bottomRight.y - topLeft.y)}px`;
+}
+
 function setZoom(next, anchor = null) {
   zoom = renderer.setZoom(next, anchor);
   evaluateCurrentFrame();
+  syncArtboardFrame();
   updateZoomLabel();
 }
 
 function fitCanvas() {
   zoom = renderer.resetView();
   evaluateCurrentFrame();
+  syncArtboardFrame();
   updateZoomLabel();
   setStatus('Canvas fitted');
 }
@@ -1912,8 +2168,10 @@ stageViewport.addEventListener('wheel', (event) => {
   }
   const horizontal = event.shiftKey ? event.deltaY + event.deltaX : event.deltaX;
   const vertical = event.shiftKey ? 0 : event.deltaY;
-  const worldPerPixel = store.document.artboard.width / Math.max(1, zoom * canvas.clientWidth);
+  const matrix = canvas.getScreenCTM();
+  const worldPerPixel = matrix ? 1 / matrix.a : store.document.artboard.width / Math.max(1, zoom * canvas.clientWidth);
   renderer.panBy(horizontal * worldPerPixel, vertical * worldPerPixel);
+  syncArtboardFrame();
   setStatus(event.shiftKey ? 'Canvas panned horizontally' : 'Canvas panned');
 }, { passive: false });
 
@@ -1933,6 +2191,7 @@ stageViewport.addEventListener('pointermove', (event) => {
   const before = renderer.clientPoint(panGesture.clientX, panGesture.clientY);
   const after = renderer.clientPoint(event.clientX, event.clientY);
   renderer.panBy(before.x - after.x, before.y - after.y);
+  syncArtboardFrame();
   panGesture.clientX = event.clientX;
   panGesture.clientY = event.clientY;
 });
@@ -1942,10 +2201,67 @@ const finishPan = (event) => {
   stageViewport.releasePointerCapture?.(event.pointerId);
   panGesture = null;
   stageViewport.classList.remove('isPanning');
+  syncArtboardFrame();
   setStatus('Canvas panned');
 };
 stageViewport.addEventListener('pointerup', finishPan);
 stageViewport.addEventListener('pointercancel', finishPan);
+
+new ResizeObserver(() => syncArtboardFrame()).observe(stageViewport);
+
+// Artboard handles: the top/left border strips pan the canvas (drag the
+// artboard), while the right/bottom strips and corner resize the artboard.
+artboardFrame.addEventListener('pointerdown', (event) => {
+  const handle = event.target instanceof Element ? event.target.closest('.artboardHandle') : null;
+  if (!handle || event.button !== 0) return;
+  const mode = handle.dataset.mode;
+  event.preventDefault();
+  event.stopPropagation();
+  const start = { x: event.clientX, y: event.clientY };
+  const startArtboard = { width: store.document.artboard.width, height: store.document.artboard.height };
+  const matrix = canvas.getScreenCTM();
+  const scaleX = matrix ? 1 / matrix.a : 1;
+  const scaleY = matrix ? 1 / matrix.d : 1;
+  let moved = false;
+  let resizing = false;
+  handle.setPointerCapture?.(event.pointerId);
+  const onMove = (nextEvent) => {
+    if (!moved && Math.hypot(nextEvent.clientX - start.x, nextEvent.clientY - start.y) < 2) return;
+    moved = true;
+    const dx = (nextEvent.clientX - start.x) * scaleX;
+    const dy = (nextEvent.clientY - start.y) * scaleY;
+    if (mode === 'pan') {
+      renderer.panBy(-dx, -dy);
+      syncArtboardFrame();
+      return;
+    }
+    resizing = true;
+    store.begin('Resize artboard');
+    const width = Math.max(1, Math.round(startArtboard.width + (mode === 'resize' || mode === 'resize-x' ? dx : 0)));
+    const height = Math.max(1, Math.round(startArtboard.height + (mode === 'resize' || mode === 'resize-y' ? dy : 0)));
+    store.mutate((documentModel) => {
+      documentModel.artboard.width = width;
+      documentModel.artboard.height = height;
+    }, 'drag');
+    setStatus(`Artboard ${width} × ${height}`);
+  };
+  const onEnd = (nextEvent) => {
+    artboardFrame.removeEventListener('pointermove', onMove);
+    artboardFrame.removeEventListener('pointerup', onEnd);
+    artboardFrame.removeEventListener('pointercancel', onEnd);
+    handle.releasePointerCapture?.(nextEvent.pointerId);
+    if (resizing) {
+      try { store.commit(); }
+      catch { store.cancel(); renderAll('validation-error'); }
+    } else if (mode === 'pan' && moved) {
+      setStatus('Canvas panned');
+    }
+  };
+  artboardFrame.addEventListener('pointermove', onMove);
+  artboardFrame.addEventListener('pointerup', onEnd);
+  artboardFrame.addEventListener('pointercancel', onEnd);
+});
+
 const toggleInspectorButton = $('toggleInspector');
 toggleInspectorButton.onclick = () => {
   const expanded = inspectorPanel.classList.toggle('isCollapsed') === false;
@@ -1981,9 +2297,12 @@ window.addEventListener('keydown', (event) => {
   } else if (!editing && commandKey && key === 'y') {
     event.preventDefault();
     store.redo();
-  } else if (!editing && !commandKey && !event.altKey && ['v', 'b', 'm', 'c', 'k', 'h'].includes(key)) {
+  } else if (!editing && !commandKey && !event.altKey && ['v', 'e', 'p', 'b', 'm', 'c', 'k', 'h'].includes(key)) {
     event.preventDefault();
-    setTool({ v: 'select', b: 'bone', m: 'mesh', c: 'control', k: 'constraint', h: 'pan' }[key]);
+    setTool({ v: 'select', e: 'vertex', p: 'pencil', b: 'bone', m: 'mesh', c: 'control', k: 'constraint', h: 'pan' }[key]);
+  } else if (!editing && currentTool === 'pencil' && event.key === 'Enter') {
+    event.preventDefault();
+    commitDraftPath();
   } else if (!editing && event.key === ' ') {
     event.preventDefault();
     playAnimation();
@@ -1996,6 +2315,12 @@ window.addEventListener('keydown', (event) => {
       store.removeSelection();
     }
   } else if (!editing && event.key === 'Escape') {
+    if (currentTool === 'pencil') {
+      cancelDraftPath();
+      setTool('select', false);
+      return;
+    }
+    if (currentTool === 'vertex') setTool('select', false);
     if (selectedKeyframe) {
       selectedKeyframe = null;
       renderTimeline();

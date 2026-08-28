@@ -20,7 +20,8 @@ authored document.
 ## Timeline records
 
 A timeline has a stable `id`, human-readable `name`, integer `duration` in
-frames, integer `fps`, a `loop` mode, and ordered `tracks`:
+frames, integer `fps`, a `loop` mode, inclusive integer work-area markers
+`workStart`/`workEnd`, and ordered `tracks`:
 
 ```json
 {
@@ -29,16 +30,32 @@ frames, integer `fps`, a `loop` mode, and ordered `tracks`:
   "duration": 60,
   "fps": 30,
   "loop": "none",
+  "workStart": 0,
+  "workEnd": 60,
   "tracks": []
 }
 ```
 
 `duration` is between 1 and 1,000,000 frames. `fps` is between 1 and 240.
-Supported loop modes are:
+`workStart` and `workEnd` are inclusive frame markers; the active work range
+is `[workStart, workEnd]`, constrained to
+`0 <= workStart < workEnd <= duration`. Legacy documents omitting both
+fields default to `workStart = 0` and `workEnd = duration`, so older
+documents keep their playback exactly as before. The work area is
+additive: it changes which frames ordinary playback and evaluation reach,
+but it never deletes or retimes keyframes outside the range — they remain
+serialized and editable, and direct `evaluateTrack` calls stay raw-track
+evaluation.
+
+Supported loop modes are all applied within the work area, which keeps the
+existing endpoint convention: the end of the range is an inspectable,
+scrubbable boundary and never a repeated loop sample.
 
 - `none`: clamp to the work range and stop at the end;
-- `loop`: wrap modulo the duration;
-- `pingpong`: alternate forward and backward across a two-duration cycle.
+- `loop`: wrap modulo the work span, so a frame at `workEnd` samples
+  `workStart` exactly as frame `duration` samples `0` without a work area;
+- `pingpong`: alternate forward and backward across a two-span cycle,
+  reaching `workEnd` at the turn just like frame `duration`.
 
 Documents may contain multiple timelines. IDs must be unique within the root
 registry.
@@ -103,7 +120,19 @@ Interpolation rules are deterministic:
 
 ## Playback and scrubbing
 
-Core playback uses wall-clock seconds and active states keyed by timeline ID.
+Core playback measures time in seconds and keeps active states keyed by
+timeline ID. The wall clock is the default, and playback accepts an
+injectable clock for deterministic testing. Each active timeline carries its
+own accumulated local clock: the effective rate is the global speed
+multiplied by the per-timeline speed, applied exactly once, and timelines may
+start at staggered wall-clock instants. Pause freezes every active timeline in
+place, and resume continues each one exactly where it stopped. Speed changes
+are never retroactive: the old rate is folded into the elapsed total before
+the new rate takes effect. A per-play `loop` option overrides the authored loop
+mode for evaluation without modifying the authored document. An effective
+`none` loop auto-finishes when its local time passes `workEnd / fps`, which
+for the default full-length work area equals `duration / fps`.
+
 The editor transport schedules visual updates with `requestAnimationFrame`,
 reads the state for `activeTimelineId`, and derives the playhead frame from the
 wall-clock delta. It does not assume that the first active state is the visible

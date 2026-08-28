@@ -70,7 +70,9 @@ The normative shipped contract is [`VEYRA_ANIMATION.md`](VEYRA_ANIMATION.md).
 - Animation priority and mixing weights
 - Wall-clock playback and explicit frame scrubbing
 
-Remaining extension: work-area in/out markers.
+Work-area in/out markers (`workStart`/`workEnd`) are implemented in the core
+model, validation, evaluation, and auto-finishing playback; on-canvas/timeline
+UI handles for them remain a future editor-surface extension.
 
 #### 1.3 Timeline UI — ✅ Core shipped
 - Collapsible horizontal panel below the canvas

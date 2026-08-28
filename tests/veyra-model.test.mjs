@@ -8,6 +8,7 @@ import {
   createRadialGradient,
   createSemanticRecord,
   createStarterDocument,
+  createTimeline,
   normalizeDocument,
 } from '../src/veyra/model.js';
 import { pathData, renderSvgString, starPoints } from '../src/veyra/geometry.js';
@@ -145,5 +146,73 @@ assert.throws(
 assert.equal(safeFilename('Veyra: Bloom'), 'Veyra- Bloom.veyra');
 assert.equal(safeFilename('mark.svg', '.svg'), 'mark.svg');
 assert.throws(() => parseVeyra('{broken'), /Invalid Veyra JSON/);
+
+// Test: timeline work area (workStart/workEnd) schema
+{
+  // The factory defaults keep the legacy full-duration playback range.
+  const created = createTimeline({ duration: 60 });
+  assert.equal(created.workStart, 0);
+  assert.equal(created.workEnd, 60);
+
+  // A v3 timeline omitting both fields normalizes to the legacy range.
+  const legacy = normalizeDocument(createDocument({
+    timelines: [{ id: 'tl_legacy_work', name: 'Legacy Work', duration: 60, fps: 30, loop: 'none', tracks: [] }],
+  }));
+  assert.equal(legacy.timelines[0].workStart, 0);
+  assert.equal(legacy.timelines[0].workEnd, 60);
+
+  // Explicit valid values survive normalization and canonical serialization.
+  const explicit = normalizeDocument(createDocument({
+    timelines: [createTimeline({ id: 'tl_explicit_work', duration: 60, workStart: 10, workEnd: 20 })],
+  }));
+  assert.equal(explicit.timelines[0].workStart, 10);
+  assert.equal(explicit.timelines[0].workEnd, 20);
+  assert.deepEqual(parseVeyra(serializeVeyra(explicit)).timelines[0], explicit.timelines[0]);
+
+  // The factory rejects invalid supplied work areas immediately.
+  assert.throws(() => createTimeline({ duration: 60, workStart: 90 }), /workStart/);
+  assert.throws(() => createTimeline({ duration: 60, workStart: 10, workEnd: 10 }), /workEnd/);
+}
+
+// Test: invalid work areas are rejected during normalization
+{
+  const invalidTimeline = (changes) => ({
+    id: 'tl_invalid_work',
+    name: 'Invalid Work',
+    duration: 60,
+    fps: 30,
+    loop: 'none',
+    tracks: [],
+    ...changes,
+  });
+  assert.throws(() => normalizeDocument(createDocument({ timelines: [invalidTimeline({ workStart: -1 })] })), /timelines\[0\]\.workStart/);
+  assert.throws(() => normalizeDocument(createDocument({ timelines: [invalidTimeline({ workStart: 10.5 })] })), /timelines\[0\]\.workStart/);
+  assert.throws(() => normalizeDocument(createDocument({ timelines: [invalidTimeline({ workEnd: Number.NaN })] })), /timelines\[0\]\.workEnd/);
+  assert.throws(() => normalizeDocument(createDocument({ timelines: [invalidTimeline({ workEnd: 61 })] })), /timelines\[0\]\.workEnd/);
+  assert.throws(() => normalizeDocument(createDocument({ timelines: [invalidTimeline({ workStart: 20, workEnd: 20 })] })), /workEnd/);
+  assert.throws(() => normalizeDocument(createDocument({ timelines: [invalidTimeline({ workStart: 30, workEnd: 20 })] })), /timelines\[0\]\.workEnd/);
+}
+
+// Test: store.updateTimeline persists work area markers atomically
+{
+  const documentWithTimeline = normalizeDocument(createDocument({
+    timelines: [createTimeline({ id: 'tl_store_work', name: 'Store Work', duration: 60, fps: 30 })],
+  }));
+  const workStore = new VeyraStore(documentWithTimeline);
+  workStore.updateTimeline('tl_store_work', { workStart: 10, workEnd: 20 }, 'Set work area');
+  assert.equal(workStore.document.timelines[0].workStart, 10);
+  assert.equal(workStore.document.timelines[0].workEnd, 20);
+
+  assert.throws(
+    () => workStore.updateTimeline('tl_store_work', { workStart: 25, workEnd: 15 }, 'Invalid work area'),
+    /timelines\[0\]\.workEnd/,
+  );
+  // The rejected update must roll back atomically to the previous state.
+  assert.equal(workStore.document.timelines[0].workStart, 10);
+  assert.equal(workStore.document.timelines[0].workEnd, 20);
+  workStore.undo();
+  assert.equal(workStore.document.timelines[0].workStart, 0);
+  assert.equal(workStore.document.timelines[0].workEnd, 60);
+}
 
 console.log('veyra model tests passed');

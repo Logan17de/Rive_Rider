@@ -471,4 +471,531 @@ console.log('Testing Veyra animation system...');
   console.log('✓ keyframes are sorted by frame');
 }
 
+// Test: playback speed applies exactly once
+{
+  const node = createNode('rectangle', { name: 'Speed Once Box' });
+  const timeline = createTimeline({
+    id: 'rt_speed_once',
+    name: 'Speed Once',
+    duration: 30,
+    fps: 30,
+    loop: 'loop',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 30, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  let t = 0;
+  const playback = new AnimationPlayback(doc, { now: () => t });
+  playback.setSpeed(2);
+  playback.play('rt_speed_once', { speed: 2 });
+
+  t = 0.4;
+  const states = playback.getActiveStates();
+  assert.strictEqual(states.length, 1);
+  assert.strictEqual(states[0].timelineId, 'rt_speed_once');
+  // 0.4s of wall time x 2 (global) x 2 (timeline) = 1.6s of local time,
+  // applied exactly once instead of being shared across a global clock.
+  assert.strictEqual(states[0].time, 1.6);
+
+  console.log('✓ playback speed applies exactly once');
+}
+
+// Test: setSpeed is not retroactive
+{
+  const node = createNode('rectangle', { name: 'Set Speed Box' });
+  const timeline = createTimeline({
+    id: 'rt_set_speed',
+    name: 'Set Speed',
+    duration: 60,
+    fps: 30,
+    loop: 'loop',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: 60, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  let t = 0;
+  const playback = new AnimationPlayback(doc, { now: () => t });
+  playback.play('rt_set_speed');
+
+  t = 0.4;
+  assert.strictEqual(playback.getCurrentTime(), 0.4);
+
+  playback.setSpeed(4);
+  // The new rate only affects future wall time; the clock must not jump.
+  assert.strictEqual(playback.getCurrentTime(), 0.4);
+
+  t = 0.5;
+  // 0.4 + 0.1s x 4; one ulp of float error is within the tight epsilon.
+  assert(Math.abs(playback.getCurrentTime() - 0.8) < 1e-12);
+
+  console.log('✓ setSpeed is not retroactive');
+}
+
+// Test: pause and resume preserve staggered timeline clocks
+{
+  const node = createNode('rectangle', { name: 'Stagger Box' });
+  const tl1 = createTimeline({
+    id: 'rt_stagger_1',
+    name: 'Stagger One',
+    duration: 60,
+    fps: 30,
+    loop: 'loop',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: 60, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+  const tl2 = createTimeline({
+    id: 'rt_stagger_2',
+    name: 'Stagger Two',
+    duration: 60,
+    fps: 30,
+    loop: 'loop',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/y'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: 60, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [tl1, tl2] });
+  let t = 0;
+  const playback = new AnimationPlayback(doc, { now: () => t });
+
+  playback.play('rt_stagger_1');
+  t = 0.3;
+  playback.play('rt_stagger_2');
+  t = 0.5;
+
+  let states = playback.getActiveStates();
+  const t1AtHalf = states.find((s) => s.timelineId === 'rt_stagger_1');
+  const t2AtHalf = states.find((s) => s.timelineId === 'rt_stagger_2');
+  assert.strictEqual(t1AtHalf.time, 0.5);
+  assert.strictEqual(t2AtHalf.time, 0.2);
+
+  playback.pause();
+  t = 0.9; // A 0.4s pause must not advance either clock.
+  playback.resume();
+  t = 0.95;
+
+  states = playback.getActiveStates();
+  const t1AtEnd = states.find((s) => s.timelineId === 'rt_stagger_1');
+  const t2AtEnd = states.find((s) => s.timelineId === 'rt_stagger_2');
+  // 0.5 + 0.05 and 0.2 + 0.05; one ulp of float error is within epsilon.
+  assert(Math.abs(t1AtEnd.time - 0.55) < 1e-12);
+  assert(Math.abs(t2AtEnd.time - 0.25) < 1e-12);
+
+  console.log('✓ pause and resume preserve staggered timeline clocks');
+}
+
+// Test: play loop option overrides the authored loop mode
+{
+  const node = createNode('rectangle', { name: 'Loop Override Box' });
+  const timeline = createTimeline({
+    id: 'rt_loop_override',
+    name: 'Loop Override',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 30, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const address = nodePropertyAddress(node.id, 'transform/x');
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+
+  // Two-argument call honors the authored 'none' mode: 45 frames clamp to 30.
+  assert.strictEqual(evaluateTimeline(timeline, 1.5)[address], 30);
+  // An explicit loop option wraps 45 frames back to frame 15.
+  assert.strictEqual(evaluateTimeline(timeline, 1.5, { loop: 'loop' })[address], 15);
+  // evaluateTimelines honors the loop carried on each active state.
+  assert.strictEqual(
+    evaluateTimelines(doc, [{ timelineId: 'rt_loop_override', time: 1.5, weight: 1, loop: 'loop' }])[address],
+    15
+  );
+  // Invalid explicit loop modes are rejected.
+  let threw = false;
+  try {
+    evaluateTimeline(timeline, 1.5, { loop: 'bogus' });
+  } catch (error) {
+    threw = error instanceof TypeError;
+  }
+  assert(threw, 'Should throw a TypeError for an invalid explicit loop mode');
+
+  console.log('✓ play loop option overrides the authored loop mode');
+}
+
+// Test: getActiveStates exposes the effective loop mode
+{
+  const node = createNode('rectangle', { name: 'Loop State Box' });
+  const timeline = createTimeline({
+    id: 'rt_loop_state',
+    name: 'Loop State',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 30, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  let t = 0;
+  const playback = new AnimationPlayback(doc, { now: () => t });
+  playback.play('rt_loop_state', { loop: 'loop' });
+
+  const states = playback.getActiveStates();
+  assert.strictEqual(states.length, 1);
+  assert.strictEqual(states[0].timelineId, 'rt_loop_state');
+  // The effective mode is the per-play option, not the authored 'none'.
+  assert.strictEqual(states[0].loop, 'loop');
+
+  console.log('✓ getActiveStates exposes the effective loop mode');
+}
+
+// Test: auto-finished timeline does not corrupt a co-running timeline
+{
+  const node = createNode('rectangle', { name: 'Finish Box' });
+  const noneTl = createTimeline({
+    id: 'rt_finish_none',
+    name: 'Finish None',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 30, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+  const loopTl = createTimeline({
+    id: 'rt_finish_loop',
+    name: 'Finish Loop',
+    duration: 30,
+    fps: 30,
+    loop: 'loop',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/y'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 30, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [noneTl, loopTl] });
+  let t = 0;
+  const playback = new AnimationPlayback(doc, { now: () => t });
+  playback.play('rt_finish_none');
+  playback.play('rt_finish_loop');
+
+  t = 2.0; // Past the 30/30 = 1s duration of the 'none' timeline.
+  const states = playback.getActiveStates();
+  assert.strictEqual(states.length, 1);
+  assert.strictEqual(states[0].timelineId, 'rt_finish_loop');
+  assert.strictEqual(states[0].time, 2.0);
+  assert.strictEqual(playback.isPlaying, true);
+
+  playback.stop();
+  assert.strictEqual(playback.getCurrentTime(), 0);
+  assert.strictEqual(playback.isPlaying, false);
+
+  console.log('✓ auto-finished timeline does not corrupt a co-running timeline');
+}
+
+// Test: single timeline mixing weight blends against the authored value
+{
+  const node = createNode('rectangle', { name: 'Mix Weight Box', transform: { x: 100 } });
+  const address = nodePropertyAddress(node.id, 'transform/x');
+  const timeline = createTimeline({
+    id: 'mw_single',
+    name: 'Mix Weight Single',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(address, {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 300, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  const valueAt = (weight) => evaluateTimelines(doc, [{ timelineId: 'mw_single', time: 1.0, weight }])[address];
+
+  // All four blends are exactly representable in IEEE754 (measured in node),
+  // so strictEqual is safe instead of an epsilon.
+  assert.strictEqual(valueAt(1), 300);
+  assert.strictEqual(valueAt(0.5), 200);
+  assert.strictEqual(valueAt(0.25), 150);
+  assert.strictEqual(valueAt(0), 100); // Weight 0 must leave the property authored.
+
+  console.log('\u2713 single timeline mixing weight blends against the authored value');
+}
+
+// Test: later timelines keep blending against accumulated animation values
+{
+  const node = createNode('rectangle', { name: 'Mix Weight Pair Box' });
+  const address = nodePropertyAddress(node.id, 'transform/x');
+  const timelineA = createTimeline({
+    id: 'mw_pair_a',
+    name: 'Mix Weight Pair A',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(address, {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 300, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+  const timelineB = createTimeline({
+    id: 'mw_pair_b',
+    name: 'Mix Weight Pair B',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(address, {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 600, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timelineA, timelineB] });
+  // Timeline A at weight 1 writes the accumulated 300; B blends against it.
+  const valueAt = (weight) => evaluateTimelines(doc, [
+    { timelineId: 'mw_pair_a', time: 1.0, weight: 1 },
+    { timelineId: 'mw_pair_b', time: 1.0, weight },
+  ])[address];
+
+  // Exact IEEE754 blends (measured in node), so strictEqual is safe.
+  assert.strictEqual(valueAt(0), 300);
+  assert.strictEqual(valueAt(0.5), 450);
+  assert.strictEqual(valueAt(1), 600);
+
+  console.log('\u2713 later timelines keep blending against accumulated animation values');
+}
+
+// Test: a timeline targeting a missing node does not throw
+{
+  const node = createNode('rectangle', { name: 'Missing Target Box' });
+  // The address is well-formed but references a node that is not in the document.
+  const address = nodePropertyAddress('mw_missing_node', 'transform/x');
+  const timeline = createTimeline({
+    id: 'mw_missing',
+    name: 'Missing Target',
+    duration: 30,
+    fps: 30,
+    loop: 'none',
+    tracks: [
+      createTrack(address, {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 300, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  assert.doesNotThrow(() => evaluateTimelines(doc, [{ timelineId: 'mw_missing', time: 1.0, weight: 0.5 }]));
+  // The authored base cannot be read, so the animated value is assigned directly.
+  const combined = evaluateTimelines(doc, [{ timelineId: 'mw_missing', time: 1.0, weight: 0.5 }]);
+  assert.strictEqual(combined[address], 300);
+
+  console.log('\u2713 a timeline targeting a missing node does not throw');
+}
+
+// Test: normalizeFrame honors the work area
+{
+  // Legacy three-argument calls keep the endpoint convention exactly.
+  assert.strictEqual(normalizeFrame(10, 60, 'none'), 10);
+  assert.strictEqual(normalizeFrame(70, 60, 'none'), 60);
+  assert.strictEqual(normalizeFrame(60, 60, 'loop'), 0);
+  assert.strictEqual(normalizeFrame(60, 60, 'pingpong'), 60);
+
+  // Work range [10, 20]: 'none' clamps to the inclusive work area.
+  assert.strictEqual(normalizeFrame(5, 60, 'none', 10, 20), 10);
+  assert.strictEqual(normalizeFrame(25, 60, 'none', 10, 20), 20);
+  assert.strictEqual(normalizeFrame(15, 60, 'none', 10, 20), 15);
+
+  // 'loop' wraps within the span; workEnd is a boundary, not a repeat sample.
+  assert.strictEqual(normalizeFrame(10, 60, 'loop', 10, 20), 10);
+  assert.strictEqual(normalizeFrame(19.9, 60, 'loop', 10, 20), 19.9);
+  assert.strictEqual(normalizeFrame(20, 60, 'loop', 10, 20), 10);
+  assert.strictEqual(normalizeFrame(25, 60, 'loop', 10, 20), 15);
+  assert.strictEqual(normalizeFrame(-1, 60, 'loop', 10, 20), 19);
+
+  // 'pingpong' reflects within the same span; workEnd is reachable at the turn.
+  assert.strictEqual(normalizeFrame(10, 60, 'pingpong', 10, 20), 10);
+  assert.strictEqual(normalizeFrame(20, 60, 'pingpong', 10, 20), 20);
+  assert.strictEqual(normalizeFrame(25, 60, 'pingpong', 10, 20), 15);
+  assert.strictEqual(normalizeFrame(30, 60, 'pingpong', 10, 20), 10);
+  assert.strictEqual(normalizeFrame(35, 60, 'pingpong', 10, 20), 15);
+  assert.strictEqual(normalizeFrame(40, 60, 'pingpong', 10, 20), 20);
+  assert.strictEqual(normalizeFrame(-1, 60, 'pingpong', 10, 20), 19);
+
+  console.log('\u2713 normalizeFrame honors the work area');
+}
+
+// Test: evaluateTimeline evaluates within the work area
+{
+  const node = createNode('rectangle', { name: 'Work Area Box' });
+  const address = nodePropertyAddress(node.id, 'transform/x');
+  const timeline = createTimeline({
+    id: 'wa_eval',
+    name: 'Work Area Eval',
+    duration: 60,
+    fps: 30,
+    loop: 'none',
+    workStart: 10,
+    workEnd: 20,
+    tracks: [
+      createTrack(address, {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 10, value: 100, easing: 'linear' }),
+          createKeyframe({ frame: 20, value: 200, easing: 'linear' }),
+          createKeyframe({ frame: 30, value: 300, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  // Frame 0 (time 0) clamps to the work start: frame 10 -> 100.
+  assert.strictEqual(evaluateTimeline(timeline, 0)[address], 100);
+  // Frame 15 (time 0.5) evaluates normally inside the work area: 150.
+  assert.strictEqual(evaluateTimeline(timeline, 0.5)[address], 150);
+  // Frame 30 (time 1) clamps to the work end: frame 20 -> 200.
+  assert.strictEqual(evaluateTimeline(timeline, 1)[address], 200);
+
+  // A loop override wraps inside the work area: frame 45 -> frame 15 -> 150.
+  assert.strictEqual(evaluateTimeline(timeline, 1.5, { loop: 'loop' })[address], 150);
+  // A pingpong override reflects inside the work area: frame 30 -> frame 10 -> 100.
+  assert.strictEqual(evaluateTimeline(timeline, 1, { loop: 'pingpong' })[address], 100);
+
+  const doc = createDocument({ nodes: [node], timelines: [timeline] });
+  // evaluateTimelines honors the loop carried on each active state.
+  assert.strictEqual(
+    evaluateTimelines(doc, [{ timelineId: 'wa_eval', time: 1.5, weight: 1, loop: 'loop' }])[address],
+    150,
+  );
+
+  console.log('\u2713 evaluateTimeline evaluates within the work area');
+}
+
+// Test: auto-finish honors the work area end
+{
+  const node = createNode('rectangle', { name: 'Work Finish Box' });
+  const noneTl = createTimeline({
+    id: 'wa_finish_none',
+    name: 'Work Finish None',
+    duration: 60,
+    fps: 30,
+    loop: 'none',
+    workStart: 10,
+    workEnd: 20,
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/x'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: 60, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+  const loopTl = createTimeline({
+    id: 'wa_finish_loop',
+    name: 'Work Finish Loop',
+    duration: 60,
+    fps: 30,
+    loop: 'loop',
+    tracks: [
+      createTrack(nodePropertyAddress(node.id, 'transform/y'), {
+        keyframes: [
+          createKeyframe({ frame: 0, value: 0, easing: 'linear' }),
+          createKeyframe({ frame: 60, value: 60, easing: 'linear' }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = createDocument({ nodes: [node], timelines: [noneTl, loopTl] });
+  let t = 0;
+  const playback = new AnimationPlayback(doc, { now: () => t });
+  playback.play('wa_finish_none');
+  playback.play('wa_finish_loop');
+
+  t = 0.6; // 18 frames: still inside the [10, 20] work area.
+  let states = playback.getActiveStates();
+  assert.strictEqual(states.length, 2);
+  assert.strictEqual(playback.isPlaying, true);
+
+  t = 0.7; // 21 frames: past workEnd 20/30, well before duration 60/30.
+  states = playback.getActiveStates();
+  assert.strictEqual(states.length, 1);
+  assert.strictEqual(states[0].timelineId, 'wa_finish_loop');
+  assert.strictEqual(states[0].time, 0.7);
+  assert.strictEqual(playback.isPlaying, true);
+
+  playback.stop();
+  assert.strictEqual(playback.getCurrentTime(), 0);
+  assert.strictEqual(playback.isPlaying, false);
+
+  // A play() loop override keeps the timeline alive past the work end.
+  playback.play('wa_finish_none', { loop: 'loop' });
+  states = playback.getActiveStates();
+  assert.strictEqual(states.length, 1);
+  assert.strictEqual(states[0].loop, 'loop');
+  playback.stop();
+
+  console.log('\u2713 auto-finish honors the work area end');
+}
+
 console.log('\n✅ All Veyra animation tests passed!');

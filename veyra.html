@@ -66,6 +66,9 @@
       </div>
 
       <nav class="topActions" aria-label="Document actions">
+        <label class="themeField" for="themeSelect"><span>Theme</span><select id="themeSelect" aria-label="Editor color theme">
+          <option value="magenta">Magenta</option><option value="blue">Blue</option><option value="green">Green</option><option value="orange">Orange</option><option value="yellow">Yellow</option>
+        </select></label>
         <button class="iconButton" id="newDocument" title="New document" aria-label="New document"><svg><use href="#i-new"/></svg></button>
         <button class="iconButton" id="openDocument" title="Open .veyra" aria-label="Open Veyra document"><svg><use href="#i-open"/></svg></button>
         <input id="openFile" type="file" accept=".veyra,application/vnd.veyra+json,application/json" hidden>
@@ -122,13 +125,15 @@
           <div class="canvasToolCluster">
             <div class="toolGroup" role="toolbar" aria-label="Editor tools">
               <button class="toolButton isActive" data-tool="select" aria-label="Select" aria-pressed="true" title="Select and move artwork (V)"><svg><use href="#i-select"/></svg><span>Select</span></button>
+              <button class="toolButton" data-tool="vertex" aria-label="Edit path vertices" aria-pressed="false" title="Edit Path vertices (E)"><svg><use href="#i-path"/></svg><span>Vertices</span></button>
+              <button class="toolButton" data-tool="pencil" aria-label="Draw path" aria-pressed="false" title="Draw Path (P)"><svg><use href="#i-path"/></svg><span>Draw Path</span></button>
               <button class="toolButton" data-tool="bone" aria-label="Bones" aria-pressed="false" title="Pose bones (B)"><svg><use href="#i-bone"/></svg><span>Bones</span></button>
               <button class="toolButton" data-tool="mesh" aria-label="Weights" aria-pressed="false" title="Edit mesh weights (M)"><svg><use href="#i-mesh"/></svg><span>Weights</span></button>
               <button class="toolButton" data-tool="control" aria-label="Controls" aria-pressed="false" title="Move rig controls (C)"><svg><use href="#i-control"/></svg><span>Controls</span></button>
               <button class="toolButton" data-tool="constraint" aria-label="Constraints" aria-pressed="false" title="Inspect constraints (K)"><svg><use href="#i-constraint"/></svg><span>Constraints</span></button>
               <button class="toolButton" data-tool="pan" aria-label="Pan" aria-pressed="false" title="Pan canvas (H or Alt+drag)"><svg><use href="#i-hand"/></svg><span>Pan</span></button>
             </div>
-            <span class="selectionHint" id="toolHint">Select artwork, vertices, bones, meshes, or controls.</span>
+            <span class="selectionHint" id="toolHint">Select artwork. Select a Path to reveal and drag its vertices.</span>
           </div>
           <div class="zoomControls">
             <button id="zoomOut" aria-label="Zoom canvas out" title="Zoom canvas out (Ctrl+-)"><svg><use href="#i-minus"/></svg></button>
@@ -144,8 +149,14 @@
           <span><kbd>Shift</kbd> + bone drag snap</span>
         </div>
         <div class="stageViewport" id="stageViewport">
+          <svg id="veyraCanvas" xmlns="http://www.w3.org/2000/svg" role="application" aria-label="Veyra artboard"></svg>
           <div class="artboardFrame" id="artboardFrame">
-            <svg id="veyraCanvas" xmlns="http://www.w3.org/2000/svg" role="application" aria-label="Veyra artboard"></svg>
+            <span class="artboardLabel" aria-hidden="true">Artboard</span>
+            <div class="artboardHandle" data-mode="pan" data-side="top" title="Drag the border to pan the canvas"></div>
+            <div class="artboardHandle" data-mode="pan" data-side="left" title="Drag the border to pan the canvas"></div>
+            <div class="artboardHandle" data-mode="resize-x" title="Drag to resize artboard width"></div>
+            <div class="artboardHandle" data-mode="resize-y" title="Drag to resize artboard height"></div>
+            <div class="artboardHandle" data-mode="resize" title="Drag to resize the artboard"></div>
           </div>
         </div>
         <div class="statusbar">
@@ -180,6 +191,8 @@
               </label>
               <label class="timelineField"><span>FPS</span><input type="number" id="fpsInput" min="1" max="240" step="1" value="30"></label>
               <label class="timelineField"><span>Frames</span><input type="number" id="durationInput" min="1" max="100000" step="1" value="60"></label>
+              <label class="timelineField"><span>In</span><input type="number" id="workStartInput" min="0" step="1" value="0"></label>
+              <label class="timelineField"><span>Out</span><input type="number" id="workEndInput" min="1" step="1" value="60"></label>
             </div>
           </div>
           <div class="keyframeBar" id="keyframeBar" hidden></div>

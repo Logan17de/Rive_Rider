@@ -343,12 +343,20 @@ export function createKeyframe(overrides = {}) {
 export function createTimeline(overrides = {}) {
   const loop = overrides.loop || 'none';
   if (!VEYRA_LOOP_MODES.includes(loop)) throw new TypeError(`Unsupported loop mode: ${loop}`);
+  const duration = overrides.duration ?? 60;
+  const workStart = integer(overrides.workStart ?? 0, 'timeline.workStart', 0, duration);
+  const workEnd = integer(overrides.workEnd ?? duration, 'timeline.workEnd', workStart, duration);
+  if (workEnd === workStart) {
+    throw new RangeError('timeline.workEnd must be greater than timeline.workStart.');
+  }
   return {
     id: overrides.id || createId('timeline'),
     name: String(overrides.name || 'Timeline'),
-    duration: overrides.duration ?? 60,
+    duration,
     fps: overrides.fps ?? 30,
     loop,
+    workStart,
+    workEnd,
     tracks: cloneValue(overrides.tracks || []),
   };
 }
@@ -884,13 +892,18 @@ function normalizeTimeline(timeline, index, inputVersion) {
   if (!VEYRA_LOOP_MODES.includes(loop)) {
     throw new TypeError(`timelines[${index}].loop must be a valid loop mode.`);
   }
+  const workStart = integer(timeline?.workStart ?? 0, `timelines[${index}].workStart`, 0, duration);
+  const workEnd = integer(timeline?.workEnd ?? duration, `timelines[${index}].workEnd`, workStart, duration);
+  if (workEnd === workStart) {
+    throw new RangeError(`timelines[${index}].workEnd must be greater than timelines[${index}].workStart.`);
+  }
   if (!Array.isArray(timeline?.tracks)) {
     throw new TypeError(`timelines[${index}].tracks must be an array.`);
   }
   const tracks = timeline.tracks.map((track, trackIndex) =>
     normalizeTrack(track, `timelines[${index}]`, trackIndex, inputVersion)
   );
-  return { id, name, duration, fps, loop, tracks };
+  return { id, name, duration, fps, loop, workStart, workEnd, tracks };
 }
 
 export function normalizeDocument(input) {
