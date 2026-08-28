@@ -79,6 +79,7 @@
       }
     }
   ],
+  "stateMachines": [],
   "timelines": [
     {
       "duration": 60,

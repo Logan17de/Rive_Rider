@@ -17,6 +17,7 @@ import {
   createStarterDocument,
   createTimeline,
   descendantIds,
+  machineById,
   meshById,
   nodeById,
   semanticFor,
@@ -36,10 +37,20 @@ import { evaluateDocument } from './src/veyra/evaluation.js';
 import { AnimationPlayback, evaluateTimeline, normalizeFrame } from './src/veyra/animation.js';
 import { parseVeyra, downloadSvg, downloadVeyra, serializeVeyra } from './src/veyra/io.js';
 import { isAnimatableProperty, nodePropertyAddress, readProperty, rigPropertyAddress, writeProperty } from './src/veyra/properties.js';
-import { createBoneRef, createControlRef, createMeshVertexRef, createNodeRef, referenceId } from './src/veyra/references.js';
+import {
+  createBoneRef,
+  createControlRef,
+  createMachineInputRef,
+  createMachineStateRef,
+  createMeshVertexRef,
+  createNodeRef,
+  createTimelineRef,
+  referenceId,
+} from './src/veyra/references.js';
 import { VeyraRenderer } from './src/veyra/renderer.js';
 import { mirrorMeshWeights, normalizeMeshWeights } from './src/veyra/rigging.js';
 import { VeyraStore } from './src/veyra/store.js';
+import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
 
 const $ = (id) => document.getElementById(id);
@@ -2334,6 +2345,22 @@ window.addEventListener('beforeunload', () => {
   try { localStorage.setItem(AUTOSAVE_KEY, serializeVeyra(store.document)); } catch {}
 });
 
+const machineRuntimes = new Map();
+
+function machineRuntime(machineId) {
+  const machine = machineById(store.document, machineId);
+  if (!machine) {
+    machineRuntimes.delete(machineId);
+    throw new TypeError(`State machine ${machineId} does not exist.`);
+  }
+  let runtime = machineRuntimes.get(machineId);
+  if (!runtime) {
+    runtime = createMachineRuntime(() => store.document, machineId);
+    machineRuntimes.set(machineId, runtime);
+  }
+  return runtime;
+}
+
 globalThis.veyra = Object.freeze({
   getSceneSummary: (options = {}) => createSceneSummary(store.document, options),
   getDocument: () => cloneValue(store.document),
@@ -2380,6 +2407,57 @@ globalThis.veyra = Object.freeze({
     return true;
   },
   getCommandHistory: () => store.commandHistory,
+  getMachines: () => cloneValue(store.document.stateMachines || []),
+  getMachine: (machineId) => cloneValue(machineById(store.document, machineId)),
+  createMachine: ({ name = 'State Machine', inputs = [], states = [], transitions = [], initial } = {}) => {
+    return store.addStateMachine({ name, inputs, states, transitions, initial }, {
+      label: `Create state machine ${name}`,
+      source: 'script',
+    });
+  },
+  deleteMachine: (machineId) => {
+    const machine = machineById(store.document, machineId);
+    if (!machine) return false;
+    machineRuntimes.delete(machineId);
+    return store.removeStateMachine(machineId, { label: `Delete state machine ${machine.name}`, source: 'script' });
+  },
+  addMachineInput: (machineId, { name = 'Value', type = 'number', value }) => {
+    return store.addMachineInput(machineId, { name, type, value }, {
+      label: `Add machine input ${name}`,
+      source: 'script',
+    });
+  },
+  addMachineState: (machineId, { name = 'State', timelineId, type = 'animation' }) => {
+    return store.addMachineState(machineId, { name, type, timeline: createTimelineRef(timelineId) }, {
+      label: `Add state ${name}`,
+      source: 'script',
+    });
+  },
+  removeMachineState: (machineId, stateId) => {
+    return store.removeMachineState(machineId, stateId, { label: 'Delete machine state', source: 'script' });
+  },
+  addMachineTransition: (machineId, { from, to, duration = 0, after, conditions = [] }) => {
+    return store.addMachineTransition(machineId, {
+      from: createMachineStateRef(from),
+      to: createMachineStateRef(to),
+      duration,
+      after,
+      conditions: conditions.map((condition) => ({
+        input: createMachineInputRef(condition.input),
+        op: condition.op,
+        value: condition.value,
+      })),
+    }, { label: 'Add machine transition', source: 'script' });
+  },
+  removeMachineTransition: (machineId, transitionId) => {
+    return store.removeMachineTransition(machineId, transitionId, { label: 'Delete machine transition', source: 'script' });
+  },
+  setMachineInput: (machineId, nameOrId, value) => machineRuntime(machineId).setInput(nameOrId, value),
+  fireMachineInput: (machineId, nameOrId) => machineRuntime(machineId).fire(nameOrId),
+  stepMachine: (machineId, deltaSeconds = 1 / 30) => machineRuntime(machineId).step(deltaSeconds),
+  getMachineState: (machineId) => cloneValue(machineRuntime(machineId).evaluate()),
+  resetMachine: (machineId) => machineRuntime(machineId).reset(),
+  scrubMachine: (machineId, seconds) => machineRuntime(machineId).scrub(seconds),
 });
 
 setTool('select', false);

@@ -7,6 +7,9 @@ export const VEYRA_REFERENCE_KINDS = Object.freeze([
   'mesh',
   'meshVertex',
   'control',
+  'timeline',
+  'machineState',
+  'machineInput',
 ]);
 
 export function createReference(kind, id) {
@@ -42,6 +45,18 @@ export function createConstraintRef(id) {
 
 export function createControlRef(id) {
   return createReference('control', id);
+}
+
+export function createTimelineRef(id) {
+  return createReference('timeline', id);
+}
+
+export function createMachineStateRef(id) {
+  return createReference('machineState', id);
+}
+
+export function createMachineInputRef(id) {
+  return createReference('machineInput', id);
 }
 
 export function normalizeReference(value, expectedKind, path = 'reference') {

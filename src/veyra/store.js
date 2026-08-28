@@ -6,10 +6,15 @@ import {
   createDocument,
   createId,
   createKeyframe,
+  createMachineInput,
+  createMachineState,
+  createMachineTransition,
+  createStateMachine,
   createNode,
   createTimeline,
   createTrack,
   descendantIds,
+  machineById,
   nodeById,
   meshById,
   normalizeDocument,
@@ -306,6 +311,16 @@ export class VeyraStore {
   removeTimeline(timelineId, commandDescriptor = {}) {
     const timeline = timelineById(this.document, timelineId);
     if (!timeline) return false;
+    const stateUsers = (this.document.stateMachines || [])
+      .flatMap((machine) => machine.states
+        .filter((state) => referenceId(state.timeline, 'timeline') === timelineId)
+        .map((state) => `${machine.name || machine.id}/${state.name || state.id}`));
+    if (stateUsers.length) {
+      throw new TypeError(
+        `Timeline ${timeline.name} is used by state machine state(s): ${stateUsers.join(', ')}. ` +
+        'Re-point or remove those states before deleting the timeline.'
+      );
+    }
     const descriptor = typeof commandDescriptor === 'string'
       ? { label: commandDescriptor }
       : { label: `Delete timeline ${timeline.name}`, source: 'user', ...commandDescriptor };
@@ -387,6 +402,118 @@ export class VeyraStore {
       targetTrack.keyframes = targetTrack.keyframes.filter((candidate) => candidate.frame !== toFrame || candidate === moved);
       moved.frame = toFrame;
       targetTrack.keyframes.sort((a, b) => a.frame - b.frame);
+    });
+    return true;
+  }
+
+  addStateMachine(overrides = {}, commandDescriptor = {}) {
+    const machine = createStateMachine(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add state machine ${machine.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.stateMachines.push(machine);
+    });
+    return machine.id;
+  }
+
+  removeStateMachine(machineId, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    if (!machine) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete state machine ${machine.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.stateMachines = document.stateMachines.filter((candidate) => candidate.id !== machineId);
+    });
+    return true;
+  }
+
+  updateStateMachine(machineId, changes = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    if (!machine) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update state machine ${machine.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId);
+      for (const key of ['name', 'initial']) {
+        if (changes[key] !== undefined) target[key] = changes[key];
+      }
+    });
+    return true;
+  }
+
+  addMachineInput(machineId, overrides = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    if (!machine) return null;
+    const input = createMachineInput(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add machine input ${input.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      machineById(document, machineId).inputs.push(input);
+    });
+    return input.id;
+  }
+
+  addMachineState(machineId, overrides = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    if (!machine) return null;
+    const state = createMachineState(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add state ${state.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      machineById(document, machineId).states.push(state);
+    });
+    return state.id;
+  }
+
+  removeMachineState(machineId, stateId, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const state = machine?.states.find((candidate) => candidate.id === stateId);
+    if (!state) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete state ${state.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId);
+      target.states = target.states.filter((candidate) => candidate.id !== stateId);
+      target.transitions = target.transitions.filter((transition) =>
+        referenceId(transition.from, 'machineState') !== stateId
+        && referenceId(transition.to, 'machineState') !== stateId
+      );
+      if (target.initial && referenceId(target.initial, 'machineState') === stateId) {
+        target.initial = null;
+      }
+    });
+    return true;
+  }
+
+  addMachineTransition(machineId, overrides = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    if (!machine) return null;
+    const transition = createMachineTransition(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: 'Add machine transition', source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      machineById(document, machineId).transitions.push(transition);
+    });
+    return transition.id;
+  }
+
+  removeMachineTransition(machineId, transitionId, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const transition = machine?.transitions.find((candidate) => candidate.id === transitionId);
+    if (!transition) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: 'Delete machine transition', source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId);
+      target.transitions = target.transitions.filter((candidate) => candidate.id !== transitionId);
     });
     return true;
   }

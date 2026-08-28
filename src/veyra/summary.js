@@ -1,5 +1,6 @@
 import { nodeCapabilities, rigCapabilities } from './capabilities.js';
 import { cloneValue, semanticFor } from './model.js';
+import { referenceId } from './references.js';
 
 export function createSceneSummary(document, options = {}) {
   const includeGeometry = Boolean(options.includeGeometry);
@@ -71,5 +72,39 @@ export function createSceneSummary(document, options = {}) {
         capabilities: rigCapabilities('constraint', constraint),
       })),
     },
+    stateMachines: (document.stateMachines || []).map((machine) => ({
+      ref: { kind: 'machine', id: machine.id },
+      name: machine.name,
+      initial: machine.initial
+        ? { kind: 'machineState', id: referenceId(machine.initial, 'machineState') }
+        : null,
+      inputs: machine.inputs.map((input) => ({
+        ref: { kind: 'machineInput', id: input.id },
+        name: input.name,
+        type: input.type,
+        value: input.value,
+      })),
+      states: machine.states.map((state) => ({
+        ref: { kind: 'machineState', id: state.id },
+        name: state.name,
+        type: state.type,
+        timeline: state.timeline
+          ? { kind: 'timeline', id: referenceId(state.timeline, 'timeline') }
+          : null,
+      })),
+      transitions: machine.transitions.map((transition) => ({
+        ref: { kind: 'machineTransition', id: transition.id },
+        from: { kind: 'machineState', id: referenceId(transition.from, 'machineState') },
+        to: { kind: 'machineState', id: referenceId(transition.to, 'machineState') },
+        duration: transition.duration,
+        after: transition.after,
+        conditions: transition.conditions.map((condition) => ({
+          id: condition.id,
+          input: { kind: 'machineInput', id: referenceId(condition.input, 'machineInput') },
+          op: condition.op,
+          ...(condition.value !== undefined ? { value: condition.value } : {}),
+        })),
+      })),
+    })),
   };
 }

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check app.js && node --check deep.js && node --check veyra.js && node --check src/veyra/model.js && node --check src/veyra/contracts.js && node --check src/veyra/references.js && node --check src/veyra/properties.js && node --check src/veyra/capabilities.js && node --check src/veyra/evaluation.js && node --check src/veyra/animation.js && node --check src/veyra/rigging.js && node --check src/veyra/summary.js && node --check src/veyra/geometry.js && node --check src/veyra/store.js && node --check src/veyra/io.js && node --check src/veyra/renderer.js",
-    "test": "node tests/architecture-modules.test.mjs && node tests/veyra-model.test.mjs && node tests/veyra-foundation.test.mjs && node tests/veyra-rigging.test.mjs && node tests/veyra-animation.test.mjs && node tests/veyra-golden.test.mjs"
+    "check": "node --check app.js && node --check deep.js && node --check veyra.js && node --check src/veyra/model.js && node --check src/veyra/contracts.js && node --check src/veyra/references.js && node --check src/veyra/properties.js && node --check src/veyra/capabilities.js && node --check src/veyra/evaluation.js && node --check src/veyra/animation.js && node --check src/veyra/rigging.js && node --check src/veyra/summary.js && node --check src/veyra/geometry.js && node --check src/veyra/store.js && node --check src/veyra/io.js && node --check src/veyra/renderer.js && node --check src/veyra/stateMachine.js",
+    "test": "node tests/architecture-modules.test.mjs && node tests/veyra-model.test.mjs && node tests/veyra-foundation.test.mjs && node tests/veyra-rigging.test.mjs && node tests/veyra-animation.test.mjs && node tests/veyra-statemachine.test.mjs && node tests/veyra-golden.test.mjs"
   }
 }

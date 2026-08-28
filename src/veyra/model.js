@@ -7,8 +7,11 @@ import {
 import {
   createBoneRef,
   createControlRef,
+  createMachineInputRef,
+  createMachineStateRef,
   createMeshVertexRef,
   createNodeRef,
+  createTimelineRef,
   normalizeReference,
   referenceId,
 } from './references.js';
@@ -44,6 +47,18 @@ export const VEYRA_EASING_TYPES = Object.freeze([
 ]);
 export const VEYRA_LOOP_MODES = Object.freeze(['none', 'loop', 'pingpong']);
 export const VEYRA_FILL_TYPES = Object.freeze(['solid', 'linearGradient', 'radialGradient']);
+export const VEYRA_MACHINE_INPUT_TYPES = Object.freeze(['number', 'bool', 'trigger']);
+export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['animation']);
+export const VEYRA_CONDITION_OPS = Object.freeze([
+  '<',
+  '<=',
+  '>',
+  '>=',
+  '==',
+  '!=',
+  'fired',
+  '!fired',
+]);
 
 let fallbackId = 0;
 
@@ -369,6 +384,86 @@ export function createTrack(address, overrides = {}) {
   };
 }
 
+export function createMachineInput(overrides = {}) {
+  const type = overrides.type || 'number';
+  if (!VEYRA_MACHINE_INPUT_TYPES.includes(type)) throw new TypeError(`Unsupported machine input type: ${type}`);
+  const value = type === 'number' ? Number(overrides.value ?? 0) : type === 'bool' ? Boolean(overrides.value) : false;
+  return {
+    id: overrides.id || createId('machineInput'),
+    name: String(overrides.name || (type === 'trigger' ? 'Trigger' : type === 'bool' ? 'Flag' : 'Value')),
+    type,
+    value,
+  };
+}
+
+export function createMachineCondition(overrides = {}) {
+  const op = String(overrides.op || '');
+  if (!VEYRA_CONDITION_OPS.includes(op)) throw new TypeError(`Unsupported condition operator: ${op}`);
+  const input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'condition.input');
+  if (!input) throw new TypeError('condition.input is required.');
+  const condition = {
+    id: overrides.id || createId('machineCondition'),
+    input,
+    op,
+  };
+  if (op !== 'fired' && op !== '!fired') {
+    if (overrides.value === undefined) throw new TypeError(`condition.value is required for operator ${op}.`);
+    condition.value = cloneValue(overrides.value);
+  }
+  return condition;
+}
+
+export function createMachineState(overrides = {}) {
+  const type = overrides.type || 'animation';
+  if (!VEYRA_MACHINE_STATE_TYPES.includes(type)) throw new TypeError(`Unsupported machine state type: ${type}`);
+  const timeline = overrides.timeline
+    ? normalizeReference(overrides.timeline, 'timeline', 'state.timeline')
+    : overrides.timelineId
+      ? createTimelineRef(overrides.timelineId)
+      : null;
+  if (type === 'animation' && !timeline) throw new TypeError('animation states require a timeline reference.');
+  return {
+    id: overrides.id || createId('machineState'),
+    name: String(overrides.name || 'State'),
+    type,
+    timeline,
+  };
+}
+
+export function createMachineTransition(overrides = {}) {
+  const from = normalizeReference(overrides.from, 'machineState', 'transition.from');
+  const to = normalizeReference(overrides.to, 'machineState', 'transition.to');
+  if (!from || !to) throw new TypeError('transitions require from and to state references.');
+  if (from.id === to.id) throw new TypeError('transitions cannot target the same state.');
+  const duration = finite(overrides.duration ?? 0, 'transition.duration');
+  if (duration < 0) throw new RangeError('transition.duration must be zero or positive.');
+  const transition = {
+    id: overrides.id || createId('machineTransition'),
+    from,
+    to,
+    duration,
+    after: overrides.after == null ? null : finite(overrides.after, 'transition.after'),
+    conditions: (overrides.conditions || []).map((condition) => createMachineCondition(condition)),
+  };
+  if (transition.after !== null && transition.after < 0) {
+    throw new RangeError('transition.after must be zero or positive.');
+  }
+  return transition;
+}
+
+export function createStateMachine(overrides = {}) {
+  return {
+    id: overrides.id || createId('machine'),
+    name: String(overrides.name || 'State Machine'),
+    initial: overrides.initial == null
+      ? null
+      : normalizeReference(overrides.initial, 'machineState', 'machine.initial'),
+    inputs: (overrides.inputs || []).map((input) => createMachineInput(input)),
+    states: (overrides.states || []).map((state) => createMachineState(state)),
+    transitions: (overrides.transitions || []).map((transition) => createMachineTransition(transition)),
+  };
+}
+
 export function createDocument(overrides = {}) {
   const now = new Date().toISOString();
   return {
@@ -396,6 +491,7 @@ export function createDocument(overrides = {}) {
     controls: cloneValue(overrides.controls || []),
     constraints: cloneValue(overrides.constraints || []),
     timelines: cloneValue(overrides.timelines || []),
+    stateMachines: cloneValue(overrides.stateMachines || []),
   };
 }
 
@@ -906,6 +1002,133 @@ function normalizeTimeline(timeline, index, inputVersion) {
   return { id, name, duration, fps, loop, workStart, workEnd, tracks };
 }
 
+function normalizeMachineInput(input, index, machinePath) {
+  const path = `${machinePath}.inputs[${index}]`;
+  const type = String(input?.type || '');
+  if (!VEYRA_MACHINE_INPUT_TYPES.includes(type)) {
+    throw new TypeError(`${path}.type must be a valid machine input type.`);
+  }
+  const id = String(input.id || '');
+  if (!id) throw new TypeError(`${path}.id is required.`);
+  const value = type === 'number' ? finite(input.value, `${path}.value`) : Boolean(input.value);
+  return { id, name: String(input.name || ''), type, value };
+}
+
+function normalizeMachineCondition(condition, path, inputsById) {
+  const id = String(condition?.id || createId('machineCondition'));
+  const inputRef = requiredReference(condition?.input ?? condition?.inputId, 'machineInput', `${path}.input`);
+  const inputKey = referenceId(inputRef, 'machineInput');
+  // Inputs are addressed by stable id, but a unique input name is also
+  // accepted so authored documents and AI commands can use the friendlier
+  // form; both normalize to the stable id reference.
+  const input = inputsById.get(inputKey)
+    || [...inputsById.values()].find((candidate) => candidate.name === inputKey)
+    || null;
+  if (!input) throw new TypeError(`${path}.input references missing machine input ${inputKey}.`);
+  const op = String(condition?.op || '');
+  if (!VEYRA_CONDITION_OPS.includes(op)) {
+    throw new TypeError(`${path}.op must be a valid condition operator.`);
+  }
+  const resolvedInput = { kind: 'machineInput', id: input.id };
+  if (op === 'fired' || op === '!fired') {
+    if (input.type !== 'trigger') {
+      throw new TypeError(`${path}.op ${op} requires a trigger input, got ${input.type}.`);
+    }
+    return { id, input: resolvedInput, op };
+  }
+  if (condition.value === undefined) {
+    throw new TypeError(`${path}.value is required for operator ${op}.`);
+  }
+  const value = input.type === 'number' ? finite(condition.value, `${path}.value`) : Boolean(condition.value);
+  return { id, input: resolvedInput, op, value };
+}
+
+function normalizeMachineState(state, index, machinePath, timelineIds) {
+  const path = `${machinePath}.states[${index}]`;
+  const id = String(state?.id || '');
+  if (!id) throw new TypeError(`${path}.id is required.`);
+  const type = String(state?.type || 'animation');
+  if (!VEYRA_MACHINE_STATE_TYPES.includes(type)) {
+    throw new TypeError(`${path}.type must be a valid machine state type.`);
+  }
+  const timeline = requiredReference(state?.timeline ?? state?.timelineId, 'timeline', `${path}.timeline`);
+  if (!timelineIds.has(referenceId(timeline, 'timeline'))) {
+    throw new TypeError(`${path}.timeline references missing timeline ${referenceId(timeline, 'timeline')}.`);
+  }
+  return { id, name: String(state.name || ''), type, timeline };
+}
+
+function normalizeMachineTransition(transition, index, machinePath, stateIds, inputsById) {
+  const path = `${machinePath}.transitions[${index}]`;
+  const id = String(transition?.id || '');
+  if (!id) throw new TypeError(`${path}.id is required.`);
+  const from = requiredReference(transition?.from, 'machineState', `${path}.from`);
+  const to = requiredReference(transition?.to, 'machineState', `${path}.to`);
+  for (const reference of [from, to]) {
+    if (!stateIds.has(referenceId(reference, 'machineState'))) {
+      throw new TypeError(`${path} references missing machine state ${referenceId(reference, 'machineState')}.`);
+    }
+  }
+  if (from.id === to.id) throw new TypeError(`${path} cannot target the same state.`);
+  const duration = bounded(transition.duration ?? 0, `${path}.duration`, 0, 10000);
+  let after = null;
+  if (transition.after != null) {
+    after = bounded(transition.after, `${path}.after`, 0, 100000);
+  }
+  const conditions = (Array.isArray(transition.conditions) ? transition.conditions : []).map(
+    (condition, conditionIndex) =>
+      normalizeMachineCondition(condition, `${path}.conditions[${conditionIndex}]`, inputsById)
+  );
+  return { id, from, to, duration, after, conditions };
+}
+
+function normalizeStateMachine(machine, index, timelineIds) {
+  const machinePath = `stateMachines[${index}]`;
+  const id = String(machine?.id || '');
+  if (!id) throw new TypeError(`${machinePath}.id is required.`);
+  const inputs = (Array.isArray(machine?.inputs) ? machine.inputs : []).map(
+    (input, inputIndex) => normalizeMachineInput(input, inputIndex, machinePath)
+  );
+  const inputsById = new Map();
+  const inputNames = new Set();
+  for (const input of inputs) {
+    if (inputsById.has(input.id)) throw new TypeError(`Duplicate machine input id ${input.id} in ${machinePath}.`);
+    if (input.name && inputNames.has(input.name)) {
+      throw new TypeError(`Duplicate machine input name "${input.name}" in ${machinePath}.`);
+    }
+    inputsById.set(input.id, input);
+    if (input.name) inputNames.add(input.name);
+  }
+  const states = (Array.isArray(machine?.states) ? machine.states : []).map(
+    (state, stateIndex) => normalizeMachineState(state, stateIndex, machinePath, timelineIds)
+  );
+  const stateIds = new Set();
+  for (const state of states) {
+    if (stateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${machinePath}.`);
+    stateIds.add(state.id);
+  }
+  const transitions = (Array.isArray(machine?.transitions) ? machine.transitions : []).map(
+    (transition, transitionIndex) => normalizeMachineTransition(transition, transitionIndex, machinePath, stateIds, inputsById)
+  );
+  const transitionIds = new Set();
+  for (const transition of transitions) {
+    if (transitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
+    transitionIds.add(transition.id);
+  }
+  const initial = normalizeReference(machine?.initial, 'machineState', `${machinePath}.initial`);
+  if (initial && !stateIds.has(referenceId(initial, 'machineState'))) {
+    throw new TypeError(`${machinePath}.initial references missing machine state ${referenceId(initial, 'machineState')}.`);
+  }
+  return {
+    id,
+    name: String(machine.name || ''),
+    initial,
+    inputs,
+    states,
+    transitions,
+  };
+}
+
 export function normalizeDocument(input) {
   if (!input || typeof input !== 'object') throw new TypeError('Veyra document must be an object.');
   if (input.format !== VEYRA_FORMAT) throw new TypeError(`Expected format "${VEYRA_FORMAT}".`);
@@ -980,6 +1203,15 @@ export function normalizeDocument(input) {
     timelineIds.add(timeline.id);
   }
 
+  const stateMachines = Array.isArray(input.stateMachines)
+    ? input.stateMachines.map((machine, index) => normalizeStateMachine(machine, index, timelineIds))
+    : [];
+  const machineIds = new Set();
+  for (const machine of stateMachines) {
+    if (machineIds.has(machine.id)) throw new TypeError(`Duplicate state machine id ${machine.id}.`);
+    machineIds.add(machine.id);
+  }
+
   return {
     format: VEYRA_FORMAT,
     version: VEYRA_VERSION,
@@ -1001,6 +1233,7 @@ export function normalizeDocument(input) {
     controls,
     constraints,
     timelines,
+    stateMachines,
   };
 }
 
@@ -1051,6 +1284,24 @@ export function descendantIds(document, nodeId) {
 
 export function timelineById(document, timelineId) {
   return document.timelines.find((timeline) => timeline.id === timelineId) || null;
+}
+
+export function machineById(document, machineId) {
+  return (document.stateMachines || []).find((machine) => machine.id === machineId) || null;
+}
+
+export function machineStateById(document, machineId, stateId) {
+  return machineById(document, machineId)?.states.find((state) => state.id === stateId) || null;
+}
+
+export function machineInputById(document, machineId, inputId) {
+  return machineById(document, machineId)?.inputs.find((input) => input.id === inputId) || null;
+}
+
+export function machineTransitionsFrom(document, machineId, stateId) {
+  return (machineById(document, machineId)?.transitions || []).filter(
+    (transition) => referenceId(transition.from, 'machineState') === stateId
+  );
 }
 
 export function trackByAddress(timeline, address) {

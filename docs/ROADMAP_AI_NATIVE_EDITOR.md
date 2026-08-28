@@ -25,13 +25,14 @@ structured API that mirrors every editor capability.
 - **Rig diagnostics** — weight normalization, symmetry, deformation preview
 - **Animation model and evaluation** — multiple timelines, property-addressed tracks, keyframes, seven easing modes, color/numeric interpolation, looping, mixing, and authored → animation → constraints evaluation
 - **Timeline editor** — inspector diamonds, Auto-key, scrubbing, playback, keyframe selection/drag/delete, easing and cubic Bezier controls, and timeline zoom
-- **AI API** — `globalThis.veyra` exposes scene/property/rig commands plus `createTimeline()`, `setKeyframe()`, `removeKeyframe()`, `getTimelines()`, `playTimeline()`, and `stopPlayback()`
+- **AI API** — `globalThis.veyra` exposes scene/property/rig commands plus `createTimeline()`, `setKeyframe()`, `removeKeyframe()`, `getTimelines()`, `playTimeline()`, `stopPlayback()`, and the state-machine suite (`createMachine()`, `addMachineState()`, `addMachineTransition()`, `setMachineInput()`, `fireMachineInput()`, `stepMachine()`, `getMachineState()`, `scrubMachine()`, …)
+- **State machines (core)** — root `stateMachines` registry with number/bool/trigger inputs, animation states over timelines, condition transitions with blend durations and `after` gates, single-shot triggers, crossfade blending, a deterministic `MachineRuntime`, scene-summary exposure, transactional store commands, and the script API
 - **Design system** — dark creative workspace, magenta/cyan palette, responsive layout
 - **Foundation contracts** — canonical coordinates, property addresses, typed references, evaluation pipeline, deterministic serialization
 - **Tests** — comprehensive Node.js tests for model, foundation, rigging, animation, fixture round-trips, and golden renders
 
 ### ❌ Missing (Gap vs Rive)
-1. **State machines** — no visual state graph, no transitions, no conditions
+1. **State machine editor UI** — core model, runtime, and AI API exist; the visual state-graph panel, condition builder, input panel, and per-state preview are not built
 2. **Blend modes** — not exposed in editor
 4. **Clipping/masking** — no clip path support
 5. **Trim/dash path effects** — not implemented
@@ -46,7 +47,7 @@ structured API that mirrors every editor capability.
 14. **Runtime player** — no embeddable lightweight player
 15. **Export formats** — SVG only, no Lottie/compact binary
 16. **Real-time collaboration** — single user only
-17. **AI autonomy** — AI can edit and animate properties, but cannot yet generate complete scenes or build state machines from scratch
+17. **AI autonomy** — AI can now build and drive state machines from scratch, but cannot yet generate complete scenes (artwork + rig + animation + interactions) from a natural-language description
 
 ---
 
@@ -142,11 +143,22 @@ The normative schema and migration rules are in [`VEYRA_PAINT.md`](VEYRA_PAINT.m
 ### Phase 3: State Machines & Interactivity
 **Goal**: Reactive, interactive animations — the core of what makes Rive special.
 
-#### 3.1 State Machine Data Model
-- State machine records: name, layers, inputs (number/bool/trigger)
-- States: animation state, entry, exit, any-state
-- Transitions: conditions, blend duration, exit time
-- Layers: additive/override mixing
+#### 3.1 State Machine Data Model — ✅ Core shipped
+The normative shipped contract is [`VEYRA_STATE_MACHINES.md`](VEYRA_STATE_MACHINES.md).
+
+Shipped:
+- State machine records in a root `stateMachines` registry (additive, version 3)
+- Inputs: number / bool / trigger, unique names, stable ids
+- States: `animation` states referencing timelines (entry/exit/any reserved)
+- Transitions: all-of input conditions, blend `duration` (seconds), `after` gate
+- `MachineRuntime`: deterministic step, single-shot triggers, crossfade blend,
+  `evaluate()` overrides that plug into `evaluateDocument`
+- Scene-summary exposure + transactional store commands (undo/redo, sources)
+
+Remaining:
+- Layers (additive/override mixing)
+- Entry / exit / any states
+- "During transition" transition sampling
 
 #### 3.2 State Machine Editor
 - Visual node graph for states and transitions
@@ -270,7 +282,8 @@ veyra.generateScene({
 |----------|------|-----|
 | ✅ Shipped | Animation timeline + keyframes | Milestone 3A core is implemented and specified |
 | ✅ Shipped | Gradients (v3 paint schema) | Tagged solid/linear/radial fill with v1/v2 migration is implemented and specified |
-| 🔴 P0 | State machines + interactions | Additive layer built on the shipped timeline model |
+| ✅ Shipped | State machines (core) | Root `stateMachines` registry, deterministic runtime, and AI API are implemented and specified |
+| 🔴 P0 | State machine editor UI + interactive inputs | Visual state graph, condition builder, and pointer listeners driving machine inputs |
 | 🟡 P1 | Text and images | Visual completeness |
 | 🟡 P1 | Deep AI scene generation API | Your differentiator |
 | 🟢 P2 | Canvas renderer + runtime player | Distribution |
@@ -293,12 +306,16 @@ veyra.generateScene({
 
 ## Next Steps
 
-Milestone 3A's model, evaluation, core timeline UI, and script API are shipped,
-and the **version 3 paint-schema migration with tagged gradients** (Phase 2.1)
-is now complete: `paint.fill` is a tagged solid/linear/radial union, with
-v1/v2 migration, stable stop addresses, deterministic SVG paint servers, and
-the inspector stop editor.
+Milestone 3A's model, evaluation, core timeline UI, and script API are shipped;
+the **version 3 paint-schema migration with tagged gradients** (Phase 2.1) is
+complete; and the **Phase 3.1 state-machine core** now ships as an additive
+root `stateMachines` registry over the existing timelines — inputs, animation
+states, condition transitions with blend durations, a deterministic runtime,
+scene-summary exposure, and the full AI script API. The normative contract is
+[`VEYRA_STATE_MACHINES.md`](VEYRA_STATE_MACHINES.md).
 
-Next, build **Phase 3 state machines** as an additive root registry referencing
-the timelines already in place. Blend modes (Phase 2.2) slot into the same
-`paint` object once state machines land.
+Next, build the **Phase 3.2 state machine editor** (visual state graph,
+condition builder, input panel, per-state preview) on top of the shipped
+runtime, then **Phase 3.3 interactive inputs** (pointer listeners driving
+machine inputs) so a hover/press actually reaches `fire()`/`setInput()`.
+Blend modes (Phase 2.2) slot into the same `paint` object alongside.
