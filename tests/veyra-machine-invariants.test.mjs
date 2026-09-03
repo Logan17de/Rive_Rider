@@ -38,6 +38,7 @@ import {
   createSolidFill, createStarterDocument, machineById, normalizeDocument,
 } from '../src/veyra/model.js';
 import { VeyraStore } from '../src/veyra/store.js';
+import { evaluateDocument } from '../src/veyra/evaluation.js';
 import { createMachineRuntime } from '../src/veyra/stateMachine.js';
 
 // --------------------------------------------------------------------------
@@ -631,6 +632,70 @@ check('GUARD', 'runtime and document agree at every revision of an interleaved s
     assert.ok(Number.isFinite(evaluated.stateTime) && evaluated.stateTime >= 0,
       `revision ${index}: state time is ${evaluated.stateTime}`);
   });
+});
+
+// ==========================================================================
+// GROUP VI — store transaction discipline (3B-2 gate G4).
+// The store has exactly ONE transaction slot and `begin()` returns early when
+// one is already open, so a second descriptor is discarded rather than
+// rejected. Two overlapping drags then merge into a single undo entry carrying
+// the first command's label — pure-Node observable behaviour today, and
+// precisely what a panel adds a second drag source to create.
+// ==========================================================================
+
+check('DEFECT', 'a second concurrent transaction is never silently absorbed', () => {
+  const h = harness();
+  const historyBefore = h.store.commandHistory.length;
+  let rejected = false;
+  try {
+    h.store.begin({ label: 'Drag state', source: 'user' });
+    h.store.begin({ label: 'Rename input', source: 'user' });
+  } catch (error) {
+    rejected = true;
+    assert.match(error.message, /transaction|open/i,
+      `a nested begin must explain itself, got: ${error.message}`);
+  }
+  h.store.mutate((document) => {
+    machineById(document, h.machineId).name = 'Nested Transaction Probe';
+  });
+  h.store.commit();
+  if (!rejected) {
+    const labels = h.store.commandHistory.slice(historyBefore).map((entry) => entry.label);
+    assert.ok(labels.some((label) => /Rename input/.test(String(label))),
+      'the second begin() was discarded: two unrelated edits are now one undo entry labelled '
+      + JSON.stringify(labels));
+  }
+  assert.doesNotThrow(() => h.store.execute({ label: 'Leak probe', source: 'user' }, () => {}),
+    'a leaked open transaction must not block every later command');
+});
+
+check('GUARD', 'an abandoned drag can always be cancelled back to a clean store', () => {
+  // A pointerup landing outside the window must never wedge the editor:
+  // cancel() has to be total, and a mutate outside a transaction must fail
+  // loudly rather than apply to the live document.
+  const h = harness();
+  const before = JSON.stringify(h.store.document);
+  assert.throws(() => h.store.mutate(() => {}), /transaction/i,
+    'mutate() without an open transaction must be refused');
+  h.store.begin({ label: 'Abandoned drag', source: 'user' });
+  assert.equal(h.store.cancel(), true, 'cancel() must report that it closed a transaction');
+  assert.equal(JSON.stringify(h.store.document), before, 'cancel() must restore the pre-drag document');
+  assert.doesNotThrow(() => h.store.execute({ label: 'After abandonment', source: 'user' }, () => {}),
+    'the store must be usable again after an abandoned transaction');
+});
+
+check('GUARD', 'a stale override address raises rather than silently doing nothing', () => {
+  // 3B-2 must decide this explicitly: does the preview controller catch-and-
+  // report around evaluateDocument, or guarantee validity by construction?
+  // applyLayer throws on a non-animatable address, so override staleness is a
+  // render-loop exception, not a degraded frame. Do not let it be discovered.
+  const h = harness({ starter: true });
+  const ghost = `${h.store.document.nodes[0].id}/ghost/x`;
+  assert.throws(
+    () => evaluateDocument(h.store.document, { animation: { [ghost]: 1 } }),
+    /property/i,
+    'a stale override must be reported, never dropped',
+  );
 });
 
 // ==========================================================================

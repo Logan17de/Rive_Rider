@@ -1029,6 +1029,38 @@ function normalizeMachineInput(input, index, machinePath) {
   return { id, name: String(input.name || ''), type, value };
 }
 
+// Single source of truth for the condition operator/type matrix, per
+// docs/VEYRA_INTERACTION_SURFACE.md "Operator/type integrity": ordering ops
+// gate numbers only, equality ops gate numbers or bools with a strictly
+// type-matched value (never a silently coerced one), fired/!fired are
+// trigger-only, and no comparison may gate a trigger. `normalizeMachineCondition`
+// enforces it at load; the store's edit commands pre-flight type changes with
+// the same function, so loader and editor can never drift. Returns a violation
+// phrase, or null when the condition is legal.
+export const VEYRA_MACHINE_ORDERING_OPS = Object.freeze(['<', '<=', '>', '>=']);
+
+export function machineConditionViolation(op, value, inputType) {
+  if (op === 'fired' || op === '!fired') {
+    return inputType === 'trigger' ? null : 'requires a trigger input';
+  }
+  if (value === undefined) {
+    return 'requires a comparison value for operator';
+  }
+  if (inputType === 'trigger') {
+    return 'is a comparison operator and cannot gate a trigger input';
+  }
+  if (VEYRA_MACHINE_ORDERING_OPS.includes(op) && inputType !== 'number') {
+    return 'requires a number input';
+  }
+  if (inputType === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) {
+    return 'requires a finite number value';
+  }
+  if (inputType === 'bool' && typeof value !== 'boolean') {
+    return 'requires a boolean value';
+  }
+  return null;
+}
+
 function normalizeMachineCondition(condition, path, inputsById) {
   const id = String(condition?.id || createId('machineCondition'));
   const inputRef = requiredReference(condition?.input ?? condition?.inputId, 'machineInput', `${path}.input`);
@@ -1044,18 +1076,18 @@ function normalizeMachineCondition(condition, path, inputsById) {
   if (!VEYRA_CONDITION_OPS.includes(op)) {
     throw new TypeError(`${path}.op must be a valid condition operator.`);
   }
+  const violation = machineConditionViolation(op, condition?.value, input.type);
+  if (violation) {
+    throw new TypeError(
+      `${path}.op '${op}' ${violation} (input ${JSON.stringify(input.name || input.id)} is ${input.type}).`,
+    );
+  }
   const resolvedInput = { kind: 'machineInput', id: input.id };
   if (op === 'fired' || op === '!fired') {
-    if (input.type !== 'trigger') {
-      throw new TypeError(`${path}.op ${op} requires a trigger input, got ${input.type}.`);
-    }
     return { id, input: resolvedInput, op };
   }
-  if (condition.value === undefined) {
-    throw new TypeError(`${path}.value is required for operator ${op}.`);
-  }
-  const value = input.type === 'number' ? finite(condition.value, `${path}.value`) : Boolean(condition.value);
-  return { id, input: resolvedInput, op, value };
+  // No coercion: a surviving value is the authored value, type and all.
+  return { id, input: resolvedInput, op, value: cloneValue(condition.value) };
 }
 
 function normalizeMachineState(state, index, machinePath, timelineIds) {
@@ -1089,6 +1121,14 @@ function normalizeMachineTransition(transition, index, machinePath, stateIds, in
   let after = null;
   if (transition.after != null) {
     after = bounded(transition.after, `${path}.after`, 0, 100000);
+  }
+  if (transition.conditions !== undefined && transition.conditions !== null
+    && !Array.isArray(transition.conditions)) {
+    // A malformed conditions field must never empty out to `[]`: that turns a
+    // gated transition into an unconditional one — firing EARLIER than
+    // authored, with no trace. Same silently-discard family as the operator
+    // matrix; refuse rather than repair.
+    throw new TypeError(`${path}.conditions must be an array of conditions.`);
   }
   const conditions = (Array.isArray(transition.conditions) ? transition.conditions : []).map(
     (condition, conditionIndex) =>
