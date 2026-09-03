@@ -15,7 +15,13 @@ try {
   assert(document.querySelectorAll('[data-node-id]').length === 9, 'Scene node count mismatch.');
   assert(document.querySelectorAll('.sceneShape').length === 8, 'Rendered shape count mismatch.');
   assert(document.querySelectorAll('.vertexPoint').length === 3, 'Path vertex handles missing.');
-  assert(document.querySelectorAll('.bezierHandle').length === 4, 'Bezier handles missing.');
+  // Corrected from a stale `4` when this suite was first run headless (3B-2
+  // gate (i)). `renderer.js:438-466` emits BOTH `in` and `out` handle circles
+  // for EVERY vertex unconditionally — the offset test at :444 gates only the
+  // `handleLine`, not the handle itself. Three vertices therefore always yield
+  // six handles, and `4` could not have matched this renderer. The stale value
+  // survived because this file was never in `npm test`.
+  assert(document.querySelectorAll('.bezierHandle').length === 6, 'Bezier handles missing.');
   assert(document.querySelector('.selectionBox'), 'Selection bounds missing.');
   assert(document.querySelectorAll('[data-bone-id]').length === 2, 'Rig bone overlays missing.');
   assert(document.querySelectorAll('.boneEnd').length === 2, 'Direct bone pose handles missing.');

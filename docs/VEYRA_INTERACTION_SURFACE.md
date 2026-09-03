@@ -290,11 +290,36 @@ readers for documents containing no listeners at all.
 non-empty; otherwise keep v3. Files that use the feature are protected by a loud
 error; files that don't stay universally readable.
 
-**Ordering safeguard (the trap this decision depends on):** the presence of an
-authored `listeners` registry must be detected **before** normalization. Normalize
-would otherwise discard the unknown key, after which the document would be
-stamped v3 — defeating the entire protection. Malformed listener data is
-**rejected, never discarded-and-downgraded**.
+**Ordering safeguard (the trap this decision depends on).** Determine v4 from the
+**raw authored presence of the `listeners` key** — including malformed or
+non-empty raw input — and only **then** validate and reject malformed entries.
+
+The subtlety, and the hole in a weaker phrasing of this rule: "detect before
+normalization" is not enough. If validation runs first and *strips* invalid
+listeners, the registry ends up empty, the document is stamped v3, and **the
+silent-loss bug returns through the back door**. Presence must be read from the
+raw key, never from the post-validation result.
+
+Corollaries:
+
+- A conditional downgrade to v3 is safe **only** after an intentional command
+  removes the final listener — never as a side effect of validation.
+- A raw `listeners` key with an invalid shape **throws**; the key must never
+  vanish silently.
+- v3↔v4 movement is **not** nondeterminism — it is a deterministic feature
+  projection. Document the intentional downgrade, and test
+  `serialize(normalize(doc))` twice for byte-stable output across add/remove
+  transitions.
+
+**Cross-version acceptance:** fixture a listener-bearing v4 and assert the
+current parser preserves listeners; simulate the old reader's verified `[1,2,3]`
+accept-list and assert it **rejects v4 before normalization**, so the lossy
+projection is never invoked; fixture a plain v3 and assert the old reader still
+accepts and preserves it.
+
+**Honesty constraint:** a simulated old reader does **not** prove the behaviour
+of arbitrary old binaries. State the contract explicitly rather than
+overclaiming.
 
 Cross-version acceptance: prove an old accept-list reader **rejects** v4 *before*
 lossy normalization, and that ordinary v3 documents remain compatible.
@@ -334,12 +359,67 @@ single `selectedId` does not model it cleanly.
 **Shape:** `MachinePreviewController` accepts a **set** of machine ids, today
 always of size one. Single-machine *policy*, multi-machine-capable *structure*.
 
-**The seam that matters:** the merge step implements a documented, tested
-address-collision policy **even while the set is size one** (where it trivially
-finds none). When two machines eventually drive the same property address, the
-collision surfaces as a diagnostic instead of silent last-writer-wins.
-Multi-machine conflict resolution for the Phase 5 runtime player is recorded here
-as a **named open question**, not decided by omission.
+**The seam that matters — and it is NOT vacuous at size one.**
+
+*Correcting a leader error.* An earlier revision of this document claimed the
+collision policy "trivially finds none" at set size one, and the requirement was
+briefly withdrawn on the strength of an argument attributed to a debater who had
+argued the **opposite**. The withdrawal was wrong. Recorded here because the
+mistake is instructive: the collision does not need two *machines* to occur.
+
+**The collision is live today.** Verified at `evaluation.js:61-65`:
+
+```js
+let animationLayer = layers.animation || {};
+if (animationPlayback && typeof animationPlayback.evaluate === 'function') {
+  const playbackOverrides = animationPlayback.evaluate();
+  animationLayer = { ...animationLayer, ...playbackOverrides };  // silent
+}
+```
+
+Machine overrides travel through `layers.animation`; `AnimationPlayback`
+overrides spread **over** them. Any shared property address is resolved by
+silent last-writer-wins, playback winning, with **no diagnostic**. This is
+reachable from the script API right now — `veyra.playTimeline(...)` together
+with `veyra.stepMachine(...)` — and becomes UI-reachable the instant 3B-2 lands,
+because `Space` → `playAnimation()` (`veyra.js:2306`) will coexist with machine
+preview.
+
+Requirements:
+
+1. **The documented policy lives at that merge**, not in the controller.
+2. **Report provenance and conflicts rather than spreading silently.** The
+   vocabulary already exists — `sources[address]` (`evaluation.js:28, 104`)
+   surfaced through `propertySource()` (`:108-111`) and already visible in the
+   evaluated scene. Collision reporting therefore gets **AI parity for free**
+   instead of needing a new channel.
+3. **Decide explicitly what `Space` does while a machine previews** — stop
+   preview, refuse playback, or pause-and-resume. Pick one; do not leave it to
+   implementation.
+4. **Test at the function boundary, not the product boundary.** Call the merge
+   directly with two synthetic layers sharing an address. A size-one set that
+   "tests a collision" by asserting none occurred proves nothing and reads as
+   coverage.
+
+Multi-*machine* conflict resolution for the Phase 5 runtime player remains a
+**named open question**, not decided by omission.
+
+### Override staleness is an exception, not a degraded frame
+
+`applyLayer` **throws** on a non-animatable address
+(`evaluation.js:24-26`), and machine overrides pass through it at `:67`. So any
+staleness in the override map is a **render-loop exception**, not a soft
+failure. The brief must state which discipline applies: the preview controller
+either catches and reports around `evaluateDocument`, or guarantees validity by
+construction. Do not leave this to implementation.
+
+### Frame budget
+
+`evaluateDocument` re-normalizes the document **three times per call**
+(`:57, :72, :81`). Per-frame machine preview inherits that cost. This is already
+true for timeline playback and is not a blocker, but measure `evaluateDocument`
+on a large fixture in Node and record a number, so "preview stutters" arrives as
+a budget rather than a bug report.
 
 The controller steps on **explicit deltas, never wall-clock `rAF`**, so the
 identical script runs headless in Node and in the browser.
