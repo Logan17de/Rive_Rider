@@ -7,6 +7,30 @@ export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
   'transition-end',
 ]);
 
+// The one machine capability surface, shared by `manifest.js`, `summary.js`,
+// and the browser API so the catalogs cannot drift (contract §Surface:
+// manifest + scene summary in the same change that exposes a command).
+// `graph` names edit operations 1:1 with Store commands; `runtime` names
+// operations 1:1 with `MachineRuntime` methods.
+export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
+  inputTypes: Object.freeze(['number', 'bool', 'trigger']),
+  stateTypes: Object.freeze(['animation']),
+  graph: Object.freeze([
+    'set-name',
+    'set-initial',
+    'add-input',
+    'remove-input',
+    'update-input',
+    'add-state',
+    'update-state',
+    'remove-state',
+    'add-transition',
+    'update-transition',
+    'remove-transition',
+  ]),
+  runtime: Object.freeze(['set-input', 'fire', 'step', 'scrub', 'reset', 'evaluate']),
+});
+
 // Emitted through `onInvalidate` when reconciliation finds that the machine
 // record this runtime tracks changed in a way that resets its position (or
 // that the machine disappeared or came back). One event per effective change.

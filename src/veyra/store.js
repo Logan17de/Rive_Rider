@@ -10,6 +10,7 @@ import {
   createDocument,
   createId,
   createKeyframe,
+  createMachineCondition,
   createMachineInput,
   createMachineState,
   createMachineTransition,
@@ -20,14 +21,16 @@ import {
   createTrack,
   descendantIds,
   machineById,
+  machineConditionViolation,
   meshById,
   nodeById,
   normalizeDocument,
   timelineById,
   trackByAddress,
+  VEYRA_MACHINE_INPUT_TYPES,
 } from './model.js';
 import { isAnimatableProperty, readProperty, writeProperty } from './properties.js';
-import { createBoneRef, createConstraintRef, createControlRef, createMeshRef, createReference, referenceId } from './references.js';
+import { createBoneRef, createConstraintRef, createControlRef, createMeshRef, createReference, createTimelineRef, referenceId } from './references.js';
 
 export const VEYRA_COMMAND_SOURCES = Object.freeze(['user', 'ai', 'script', 'import']);
 
@@ -131,7 +134,17 @@ export class VeyraStore {
   }
 
   begin(commandDescriptor) {
-    if (this.#transaction) return;
+    if (this.#transaction) {
+      // One transaction slot: a second begin() must never be silently
+      // absorbed — that merges two unrelated edits into one undo entry
+      // carrying the first command's label. Reject with the state of the
+      // open transaction so the caller (UI drag, AI command, script) can
+      // commit/cancel first or route through execute() instead.
+      const open = this.#transaction.command;
+      throw new TypeError(
+        `A transaction is already open (${open.label}); commit or cancel it before beginning another.`,
+      );
+    }
     this.#transaction = { command: normalizeCommand(commandDescriptor), document: cloneValue(this.document) };
   }
 
@@ -650,6 +663,129 @@ export class VeyraStore {
     this.execute(descriptor, (document) => {
       const target = machineById(document, machineId);
       target.transitions = target.transitions.filter((candidate) => candidate.id !== transitionId);
+    });
+    return true;
+  }
+
+  // In-place machine edit commands (Milestone 3B-1). All mutate by id and
+  // never rewrite stable ids or endpoints, so a live `MachineRuntime` keeps
+  // its position across cosmetic edits and reconciliation resets only on
+  // genuinely structural change. Dependent-condition violations are refused
+  // with a named blocker list in `removeTimeline`'s style — never silently
+  // repaired. `execute()` guarantees rejected commands leave the document,
+  // revision, and history untouched.
+
+  updateMachineState(machineId, stateId, changes = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const state = machine?.states.find((candidate) => candidate.id === stateId);
+    if (!state) return false;
+    if (changes.timelineId !== undefined && !timelineById(this.document, changes.timelineId)) {
+      throw new TypeError(`Timeline ${changes.timelineId} does not exist.`);
+    }
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update state ${state.name || state.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId).states.find((candidate) => candidate.id === stateId);
+      if (changes.name !== undefined) target.name = changes.name;
+      if (changes.timelineId !== undefined) target.timeline = createTimelineRef(changes.timelineId);
+    });
+    return true;
+  }
+
+  updateMachineInput(machineId, inputId, changes = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const input = machine?.inputs.find((candidate) => candidate.id === inputId);
+    if (!input) return false;
+    if (changes.name !== undefined) {
+      const name = String(changes.name);
+      if (machine.inputs.some((candidate) => candidate.id !== inputId && candidate.name === name)) {
+        throw new TypeError(`Machine input name "${name}" is already used in ${machine.name || machineId}.`);
+      }
+    }
+    if (changes.type !== undefined) {
+      if (!VEYRA_MACHINE_INPUT_TYPES.includes(changes.type)) {
+        throw new TypeError(`Machine input type ${changes.type} is not supported.`);
+      }
+      const blockers = [];
+      for (const transition of machine.transitions) {
+        for (const condition of transition.conditions) {
+          if (referenceId(condition.input, 'machineInput') !== inputId) continue;
+          const violation = machineConditionViolation(condition.op, condition.value, changes.type);
+          if (violation) {
+            blockers.push(`condition ${condition.id} on transition ${transition.id} (op '${condition.op}' ${violation})`);
+          }
+        }
+      }
+      if (blockers.length) {
+        throw new TypeError(
+          `Machine input "${input.name || inputId}" cannot change type to ${changes.type}: `
+          + `${blockers.join('; ')} would be illegal. `
+          + 'Fix or remove the listed conditions first.',
+        );
+      }
+    }
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update machine input ${input.name || input.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId).inputs.find((candidate) => candidate.id === inputId);
+      for (const key of ['name', 'type', 'value']) {
+        if (changes[key] !== undefined) target[key] = changes[key];
+      }
+    });
+    return true;
+  }
+
+  removeMachineInput(machineId, inputId, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const input = machine?.inputs.find((candidate) => candidate.id === inputId);
+    if (!input) return false;
+    const blockers = [];
+    for (const transition of machine.transitions) {
+      for (const condition of transition.conditions) {
+        if (referenceId(condition.input, 'machineInput') === inputId) {
+          blockers.push(`condition ${condition.id} on transition ${transition.id} (op '${condition.op}')`);
+        }
+      }
+    }
+    if (blockers.length) {
+      throw new TypeError(
+        `Machine input "${input.name || inputId}" is still referenced by ${blockers.join('; ')}. `
+        + 'Remove or re-point those conditions first — deleting the input would silently make those '
+        + 'transitions fire more easily than authored.',
+      );
+    }
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete machine input ${input.name || input.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId);
+      target.inputs = target.inputs.filter((candidate) => candidate.id !== inputId);
+    });
+    return true;
+  }
+
+  updateMachineTransition(machineId, transitionId, changes = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const transition = machine?.transitions.find((candidate) => candidate.id === transitionId);
+    if (!transition) return false;
+    if (changes.from !== undefined || changes.to !== undefined) {
+      throw new TypeError(
+        `Cannot change from/to on transition ${transitionId}; endpoints are immutable. `
+        + 'Remove and re-add the transition to re-point it.',
+      );
+    }
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update machine transition ${transitionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId).transitions.find((candidate) => candidate.id === transitionId);
+      if (changes.duration !== undefined) target.duration = changes.duration;
+      if (changes.after !== undefined) target.after = changes.after;
+      if (changes.conditions !== undefined) {
+        target.conditions = changes.conditions.map((condition) => createMachineCondition(condition));
+      }
     });
     return true;
   }

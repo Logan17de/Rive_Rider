@@ -261,6 +261,26 @@ const COMMAND_TABLE = {
     params: [param('machineId', 'string', true), param('transitionId', 'string', true)],
     run: (store, args, command) => store.removeMachineTransition(args.machineId, args.transitionId, command ?? {}),
   },
+  updateMachineState: {
+    summary: 'Update a machine state name or timeline retarget. Ids and endpoints are immutable; unknown states return false.',
+    params: [param('machineId', 'string', true), param('stateId', 'string', true), param('changes', 'object', false)],
+    run: (store, args, command) => store.updateMachineState(args.machineId, args.stateId, args.changes ?? {}, command ?? {}),
+  },
+  updateMachineInput: {
+    summary: 'Update a machine input name, type, or authored value. Type changes that would make a dependent condition illegal are refused with a named blocker list.',
+    params: [param('machineId', 'string', true), param('inputId', 'string', true), param('changes', 'object', false)],
+    run: (store, args, command) => store.updateMachineInput(args.machineId, args.inputId, args.changes ?? {}, command ?? {}),
+  },
+  removeMachineInput: {
+    summary: 'Delete a machine input. Refused while any transition condition still references it (remove those conditions first).',
+    params: [param('machineId', 'string', true), param('inputId', 'string', true)],
+    run: (store, args, command) => store.removeMachineInput(args.machineId, args.inputId, command ?? {}),
+  },
+  updateMachineTransition: {
+    summary: 'Update a transition duration, after gate, or conditions. Conditions are replaced wholesale and validated against the operator/type matrix; endpoints are immutable.',
+    params: [param('machineId', 'string', true), param('transitionId', 'string', true), param('changes', 'object', false)],
+    run: (store, args, command) => store.updateMachineTransition(args.machineId, args.transitionId, args.changes ?? {}, command ?? {}),
+  },
   addBone: {
     summary: 'Add a bone (createBone overrides) and select it.',
     params: [param('overrides', 'object', false)],

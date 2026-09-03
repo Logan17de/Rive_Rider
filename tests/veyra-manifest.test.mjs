@@ -257,7 +257,9 @@ assert.equal(machine.inputs[0].type, 'trigger');
 assert.deepEqual(machine.states[0].timeline, { kind: 'timeline', id: 'timeline_bob' });
 assert.deepEqual(machine.capabilities.inputTypes, [...VEYRA_MACHINE_INPUT_TYPES]);
 assert.deepEqual(machine.capabilities.graph, [
-  'set-name', 'set-initial', 'add-input', 'add-state', 'remove-state', 'add-transition', 'remove-transition',
+  'set-name', 'set-initial', 'add-input', 'remove-input', 'update-input',
+  'add-state', 'update-state', 'remove-state',
+  'add-transition', 'update-transition', 'remove-transition',
 ]);
 assert.deepEqual(machine.capabilities.runtime, ['set-input', 'fire', 'step', 'scrub', 'reset', 'evaluate']);
 assert.deepEqual(
@@ -292,6 +294,12 @@ for (const item of actions) {
   }
   assert.ok(Array.isArray(item.capabilities) && item.capabilities.length > 0, `${item.ref.id} needs capabilities.`);
   assert.ok(item.capabilities.every((capability) => typeof capability === 'string'));
+  if (!item.capabilities.includes('non-mutating')) {
+    assert.ok(
+      item.capabilities.includes('undoable') || item.capabilities.includes('runtime-only'),
+      `${item.ref.id} must be tagged 'undoable' (document command) or 'runtime-only' (preview state).`,
+    );
+  }
 }
 
 const writeProperty = actions.find((item) => item.ref.id === 'write-property');
@@ -306,6 +314,15 @@ const createTimelineAction = actions.find((item) => item.ref.id === 'create-time
 assert.deepEqual(createTimelineAction.parameters.find((parameter) => parameter.name === 'loop').enum, [...VEYRA_LOOP_MODES]);
 const removeTimelineAction = actions.find((item) => item.ref.id === 'remove-timeline');
 assert.ok(removeTimelineAction.capabilities.includes('blocked-while-used-by-machines'));
+for (const id of ['update-machine-input', 'remove-machine-input', 'update-machine-state', 'update-machine-transition']) {
+  const item = actions.find((action) => action.ref.id === id);
+  assert.ok(item, `3B-1 edit command ${id} must be exposed in the manifest action catalog.`);
+  assert.ok(item.capabilities.includes('undoable'), `${id} is a document command and must be tagged undoable.`);
+}
+assert.ok(
+  actions.find((item) => item.ref.id === 'remove-machine-input').capabilities.includes('blocked-while-referenced-by-conditions'),
+  'remove-machine-input must advertise its refusal semantics.',
+);
 const runtimeActions = actions.filter((item) => item.capabilities.includes('runtime-only'));
 assert.deepEqual(
   runtimeActions.map((item) => item.ref.id).sort(),

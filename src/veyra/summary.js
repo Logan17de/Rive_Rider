@@ -1,5 +1,6 @@
 import { nodeCapabilities, rigCapabilities } from './capabilities.js';
 import { cloneValue, semanticFor } from './model.js';
+import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
 import { referenceId } from './references.js';
 
 export function createSceneSummary(document, options = {}) {
@@ -75,6 +76,7 @@ export function createSceneSummary(document, options = {}) {
     stateMachines: (document.stateMachines || []).map((machine) => ({
       ref: { kind: 'machine', id: machine.id },
       name: machine.name,
+      capabilities: cloneValue(VEYRA_MACHINE_CAPABILITIES),
       initial: machine.initial
         ? { kind: 'machineState', id: referenceId(machine.initial, 'machineState') }
         : null,

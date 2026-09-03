@@ -3,10 +3,10 @@ import {
   VEYRA_EASING_TYPES,
   VEYRA_LOOP_MODES,
   VEYRA_MACHINE_INPUT_TYPES,
-  VEYRA_MACHINE_STATE_TYPES,
   VEYRA_NODE_TYPES,
   VEYRA_PROPERTY_BOUNDS,
 } from './model.js';
+import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
 import { VEYRA_PROPERTY_TARGET_KINDS } from './properties.js';
 import { VEYRA_REFERENCE_KINDS } from './references.js';
 import { createSceneSummary } from './summary.js';
@@ -137,25 +137,10 @@ function summarizeTimeline(timeline, options) {
   };
 }
 
-const MACHINE_CAPABILITIES = Object.freeze({
-  inputTypes: [...VEYRA_MACHINE_INPUT_TYPES],
-  stateTypes: [...VEYRA_MACHINE_STATE_TYPES],
-  graph: [
-    'set-name',
-    'set-initial',
-    'add-input',
-    'add-state',
-    'remove-state',
-    'add-transition',
-    'remove-transition',
-  ],
-  runtime: ['set-input', 'fire', 'step', 'scrub', 'reset', 'evaluate'],
-});
-
 function summarizeStateMachines(sceneSummary) {
   return sceneSummary.stateMachines.map((machine) => ({
     ...machine,
-    capabilities: cloneValue(MACHINE_CAPABILITIES),
+    capabilities: cloneValue(VEYRA_MACHINE_CAPABILITIES),
   }));
 }
 
@@ -277,6 +262,30 @@ function projectActions() {
     action('remove-machine-transition', 'Remove machine transition', 'Delete a transition.', 'machineTransition', [
       parameter('machineId', 'string', true, 'Id of the machine.'),
       parameter('transitionId', 'string', true, 'Id of the transition.'),
+    ], ['transactional', 'undoable']),
+    action('update-machine-input', 'Update machine input', 'Update an input name, type, or authored value in place. Renames must stay unique within the machine; a type change is refused, naming every dependent condition, unless the operator/type matrix stays satisfied.', 'machineInput', [
+      parameter('machineId', 'string', true, 'Id of the machine.'),
+      parameter('inputId', 'string', true, 'Id of the input.'),
+      parameter('name', 'string', false, 'New unique name.'),
+      parameter('type', 'enum', false, 'New type; refused when dependent conditions would become illegal.', { enum: [...VEYRA_MACHINE_INPUT_TYPES] }),
+      parameter('value', 'any', false, 'New authored value.'),
+    ], ['transactional', 'undoable']),
+    action('remove-machine-input', 'Remove machine input', 'Delete an input. Refused while any transition condition references it — remove those conditions first.', 'machineInput', [
+      parameter('machineId', 'string', true, 'Id of the machine.'),
+      parameter('inputId', 'string', true, 'Id of the input.'),
+    ], ['blocked-while-referenced-by-conditions', 'transactional', 'undoable']),
+    action('update-machine-state', 'Update machine state', 'Rename a state or retarget its timeline, in place; the state id is immutable.', 'machineState', [
+      parameter('machineId', 'string', true, 'Id of the machine.'),
+      parameter('stateId', 'string', true, 'Id of the state.'),
+      parameter('name', 'string', false, 'New name.'),
+      parameter('timelineId', 'string', false, 'Id of a timeline to retarget.'),
+    ], ['transactional', 'undoable']),
+    action('update-machine-transition', 'Update machine transition', 'Update duration, after gate, or conditions (replaced wholesale, validated against the operator/type matrix). Endpoints are immutable — re-add the transition to re-point.', 'machineTransition', [
+      parameter('machineId', 'string', true, 'Id of the machine.'),
+      parameter('transitionId', 'string', true, 'Id of the transition.'),
+      parameter('duration', 'number', false, 'New blend duration in seconds.', { bounds: { ...VEYRA_PROPERTY_BOUNDS['machineTransition.duration'] } }),
+      parameter('after', 'number', false, 'New after gate; null clears it.', { bounds: { ...VEYRA_PROPERTY_BOUNDS['machineTransition.after'] } }),
+      parameter('conditions', 'array', false, 'Replacement condition list.'),
     ], ['transactional', 'undoable']),
     action('set-machine-input', 'Set machine input', 'Set a number or bool input on the machine runtime. Triggers must use fire-machine-input.', 'machineInput', [
       parameter('machineId', 'string', true, 'Id of the machine.'),

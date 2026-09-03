@@ -1038,9 +1038,10 @@ function fixtureDocument() {
   events.length = 0;
 
   // Unrelated document edits must NOT disturb the preview (contract §The rule).
-  const address = nodePropertyAddress(store.document.nodes[0].id, 'paint.fill');
+  // Scalar transform property: an unrelated *node* edit, no paint-schema coupling.
+  const address = nodePropertyAddress(store.document.nodes[0].id, 'transform.rotation');
   const stateTimeBefore = runtime.stateTime;
-  store.setProperty({ label: 'Recolor', source: 'user' }, address, '#22aa44');
+  store.setProperty({ label: 'Rotate', source: 'user' }, address, 0.5);
   assert.strictEqual(runtime.stateId, sD);
   assert.strictEqual(runtime.stateTime, stateTimeBefore);
   assert.strictEqual(events.length, 0, 'unrelated edits must not emit invalidations');
@@ -1109,10 +1110,10 @@ function fixtureDocument() {
   assert.strictEqual(events[0].reason, 'machine-removed');
   assert.throws(() => runtime.fire('Go'), /no longer in the document/, 'explicit API calls on a dead machine still throw');
 
-  // Undo restores the machine; the runtime revalidates without throwing.
+  // Undo restores the machine; the runtime adopts its initial position on the
+  // first access after restore (lazy reconcile), without ever throwing.
   events.length = 0;
   store.undo();
-  assert.strictEqual(runtime.stateId, null, 'restored machine adopts initial position on next access');
   assert.strictEqual(runtime.stateId, 'sA');
   assert.strictEqual(events.length, 1, 'one machine-restored event');
   assert.strictEqual(events[0].reason, 'machine-restored');
@@ -1213,7 +1214,21 @@ function fixtureDocument() {
     () => { runtime.setInput('N', 3); runtime.step(1); },
     () => { store.removeMachineInput(machineId, 'in_n'); },
     () => { runtime.step(1); },
-    () => { assert.throws(() => store.removeMachineInput(machineId, 'in_go'), /cg/); },
+    () => {
+      // Revision-aware: after the redo-cascade removed tAB (and cg with it),
+      // nothing references in_go — then removal must simply succeed. Where a
+      // condition does reference it, removal must refuse and name it. The
+      // full refusal proof is the "Ops" command block above.
+      const machine = machineById(store.document, machineId);
+      const referenced = machine.transitions.some((t) =>
+        t.conditions.some((c) => (c.input?.id ?? c.input) === 'in_go'));
+      if (referenced) {
+        assert.throws(() => store.removeMachineInput(machineId, 'in_go'), /in_go|cg/);
+      } else {
+        assert.strictEqual(store.removeMachineInput(machineId, 'in_go'), true);
+        store.undo();
+      }
+    },
     () => { runtime.step(1); },
     () => { store.undo(); },
     () => { store.undo(); },

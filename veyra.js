@@ -2441,6 +2441,18 @@ globalThis.veyra = Object.freeze({
   removeMachineTransition: (machineId, transitionId) => {
     return store.removeMachineTransition(machineId, transitionId, { label: 'Delete machine transition', source: 'script' });
   },
+  updateMachineState: (machineId, stateId, changes) => {
+    return store.updateMachineState(machineId, stateId, changes, { label: `Update machine state ${stateId}`, source: 'script' });
+  },
+  updateMachineInput: (machineId, inputId, changes) => {
+    return store.updateMachineInput(machineId, inputId, changes, { label: `Update machine input ${inputId}`, source: 'script' });
+  },
+  removeMachineInput: (machineId, inputId) => {
+    return store.removeMachineInput(machineId, inputId, { label: `Delete machine input ${inputId}`, source: 'script' });
+  },
+  updateMachineTransition: (machineId, transitionId, changes) => {
+    return store.updateMachineTransition(machineId, transitionId, changes, { label: `Update machine transition ${transitionId}`, source: 'script' });
+  },
   setMachineInput: (machineId, nameOrId, value) => machineRuntime(machineId).setInput(nameOrId, value),
   fireMachineInput: (machineId, nameOrId) => machineRuntime(machineId).fire(nameOrId),
   stepMachine: (machineId, deltaSeconds = 1 / 30) => machineRuntime(machineId).step(deltaSeconds),
