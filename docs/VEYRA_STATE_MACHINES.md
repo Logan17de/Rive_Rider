@@ -299,3 +299,9 @@ reach them.
 - The editor UI surface (state graph panel, input panel, per-state preview)
   is not built yet — the machine is fully addressable through the API and
   summary before that surface exists.
+- Listeners/pointers (the `event → intent → command` layer for canvas input)
+  are **not** in the schema or runtime yet: there is no `listeners` registry,
+  no hit-testing contract, and no v4 stamping. The 3B-2 contract for them is
+  specified in `docs/VEYRA_INTERACTION_SURFACE.md`; until it lands, an AI
+  asking the platform "what happens when the user clicks this?" gets no
+  answer from the document.
