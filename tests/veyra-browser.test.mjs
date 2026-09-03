@@ -66,8 +66,78 @@ console.log('Veyra headless browser suite (fake DOM seam)\n');
     assert.equal(document.querySelectorAll('circle.sceneShape').length, 0);
   });
 
-  check('[SEAM] combinator selectors fail loudly instead of silently', () => {
+  check('[SEAM] unsupported combinators fail loudly instead of silently', () => {
     assert.throws(() => document.querySelectorAll('div .child'), /not supported/);
+  });
+
+  // NEGATIVE CONTROLS. A selector engine that can only ever return what the
+  // caller expects is not evidence. These prove the seam can report absence
+  // and can distinguish scopes — i.e. that it is capable of failing.
+  check('[SEAM] negative control — absent selectors return empty, not a match', () => {
+    assert.equal(document.querySelectorAll('.definitelyNotPresent').length, 0);
+    assert.equal(document.querySelector('.definitelyNotPresent'), null);
+    assert.equal(document.querySelectorAll('[data-not-a-real-attribute]').length, 0);
+  });
+
+  check('[SEAM] :scope > is CHILD-only and differs from the descendant form', () => {
+    const root = document.createElement('g');
+    const directChild = document.createElement('g');
+    directChild.setAttribute('class', 'target');
+    const nested = document.createElement('g');
+    const deepChild = document.createElement('g');
+    deepChild.setAttribute('class', 'target');
+    nested.appendChild(deepChild);
+    root.appendChild(directChild);
+    root.appendChild(nested);
+    document.body.appendChild(root);
+
+    // Descendant form finds both; child-only form finds exactly the direct one.
+    assert.equal(root.querySelectorAll('.target').length, 2, 'descendant form');
+    assert.equal(root.querySelectorAll(':scope > .target').length, 1, 'child-only form');
+    assert.equal(root.querySelector(':scope > .target'), directChild);
+    // If :scope > were implemented as descendant-match, these would be equal.
+    assert.notEqual(
+      root.querySelectorAll('.target').length,
+      root.querySelectorAll(':scope > .target').length,
+      ':scope > must not degrade into a descendant match',
+    );
+  });
+
+  check('[SEAM] CSS.escape is a real implementation, not a passthrough', () => {
+    assert.equal(typeof globalThis.CSS.escape, 'function');
+    // A passthrough would return these unchanged.
+    assert.notEqual(globalThis.CSS.escape('a.b'), 'a.b');
+    assert.equal(globalThis.CSS.escape('a.b'), 'a\\.b');
+    // Veyra ids are alphanumeric/underscore, so escaping is identity there —
+    // stated rather than hidden.
+    assert.equal(globalThis.CSS.escape('node_123'), 'node_123');
+  });
+
+  check('[SEAM] escaped attribute selectors still match the raw value', () => {
+    const el = document.createElement('g');
+    el.setAttribute('data-node-id', 'node_1');
+    document.body.appendChild(el);
+    const found = document.querySelector(`[data-node-id="${globalThis.CSS.escape('node_1')}"]`);
+    assert.equal(found, el);
+  });
+
+  check('[SEAM] replaceWith swaps a node in place, preserving sibling order', () => {
+    const parent = document.createElement('g');
+    const a = document.createElement('g');
+    a.setAttribute('class', 'a');
+    const b = document.createElement('g');
+    b.setAttribute('class', 'b');
+    const c = document.createElement('g');
+    c.setAttribute('class', 'c');
+    parent.append(a, b, c);
+    const replacement = document.createElement('g');
+    replacement.setAttribute('class', 'replaced');
+    b.replaceWith(replacement);
+    assert.deepEqual(
+      parent.children.map((el) => el.getAttribute('class')),
+      ['a', 'replaced', 'c'],
+    );
+    assert.equal(b.parentNode, null);
   });
 
   check('[SEAM] dataset round-trips through data-* attributes', () => {

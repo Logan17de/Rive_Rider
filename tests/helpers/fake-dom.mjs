@@ -31,7 +31,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
  * loud failure.
  * ------------------------------------------------------------------ */
 
-const SIMPLE_TOKEN = /([.#]?[A-Za-z0-9_-]+|\[[^\]]+\])/g;
+const SIMPLE_TOKEN = /([.#]?[A-Za-z0-9_\\-]+|\[[^\]]+\])/g;
 
 function parseCompound(selector) {
   const raw = selector.trim();
@@ -39,7 +39,7 @@ function parseCompound(selector) {
   if (/[\s>+~]/.test(raw)) {
     throw new Error(
       `fake-dom: combinator selectors are not supported ("${raw}"). `
-      + 'Use a single compound selector, or extend this helper deliberately.',
+      + 'Only ":scope > X" is implemented. Extend this helper deliberately.',
     );
   }
   const tests = [];
@@ -59,7 +59,11 @@ function parseCompound(selector) {
         tests.push((el) => el.hasAttribute(name));
       } else {
         const name = body.slice(0, eq).trim();
-        const value = body.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+        // Undo CSS.escape's backslashes so an escaped id still matches the
+        // raw attribute value the renderer wrote.
+        const value = body.slice(eq + 1).trim()
+          .replace(/^["']|["']$/g, '')
+          .replace(/\\(.)/g, '$1');
         tests.push((el) => el.getAttribute(name) === value);
       }
     } else {
@@ -71,10 +75,63 @@ function parseCompound(selector) {
   return (el) => tests.every((test) => test(el));
 }
 
+const SCOPE_CHILD = /^:scope\s*>\s*/;
+
+/**
+ * Compile a selector list into { directChild, match } parts.
+ *
+ * `:scope > X` is CHILD-ONLY and must stay that way. `renderer.js` uses it at
+ * :147, :148, :734 and :738 to find a direct child group; implementing it as a
+ * descendant match would make the seam *lie* — it would find matches nested
+ * anywhere and pass for the wrong reason. That failure mode is silent, which is
+ * exactly the kind this seam exists to prevent.
+ */
+function compileSelector(selector) {
+  return String(selector)
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (SCOPE_CHILD.test(part)
+      ? { directChild: true, match: parseCompound(part.replace(SCOPE_CHILD, '')) }
+      : { directChild: false, match: parseCompound(part) }))
+    .filter((part) => part.match);
+}
+
 function parseSelector(selector) {
-  const parts = String(selector).split(',').map(parseCompound).filter(Boolean);
+  const parts = compileSelector(selector);
   if (!parts.length) return () => false;
-  return (el) => parts.some((match) => match(el));
+  return (el) => parts.some((part) => part.match(el));
+}
+
+/**
+ * Real `CSS.escape`, not a passthrough. A passthrough would make every
+ * `[data-node-id="..."]` query pass while escaping was never exercised —
+ * green for a reason unrelated to correctness.
+ */
+export function cssEscape(value) {
+  const str = String(value);
+  let out = '';
+  for (let i = 0; i < str.length; i += 1) {
+    const ch = str[i];
+    const code = str.charCodeAt(i);
+    if (code === 0) { out += '\uFFFD'; continue; }
+    if ((code >= 0x01 && code <= 0x1f) || code === 0x7f
+      || (i === 0 && code >= 0x30 && code <= 0x39)
+      || (i === 1 && code >= 0x30 && code <= 0x39 && str.charCodeAt(0) === 0x2d)) {
+      out += `\\${code.toString(16)} `;
+      continue;
+    }
+    if (i === 0 && code === 0x2d && str.length === 1) { out += `\\${ch}`; continue; }
+    if (code >= 0x80 || code === 0x2d || code === 0x5f
+      || (code >= 0x30 && code <= 0x39)
+      || (code >= 0x41 && code <= 0x5a)
+      || (code >= 0x61 && code <= 0x7a)) {
+      out += ch;
+      continue;
+    }
+    out += `\\${ch}`;
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ *
@@ -229,6 +286,20 @@ export class FakeElement {
 
   remove() { if (this.parentNode) this.parentNode.removeChild(this); }
 
+  /** `renderer.js:147-148` uses this for partial re-render of rig overlays. */
+  replaceWith(...nodes) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const index = parent.childNodes.indexOf(this);
+    const built = nodes.map((n) => (typeof n === 'string' ? new FakeText(n) : n));
+    for (const node of built) {
+      if (node.parentNode) node.parentNode.removeChild(node);
+      node.parentNode = parent;
+    }
+    parent.childNodes.splice(index, 1, ...built);
+    this.parentNode = null;
+  }
+
   /** Walk ancestors (self first), as the real `closest` does. */
   closest(selector) {
     const match = parseSelector(selector);
@@ -259,9 +330,19 @@ export class FakeElement {
   }
 
   querySelectorAll(selector) {
-    const match = parseSelector(selector);
+    const parts = compileSelector(selector);
+    if (!parts.length) return [];
+    const direct = parts.filter((p) => p.directChild);
+    const descendant = parts.filter((p) => !p.directChild);
     const out = [];
-    this._walk((el) => { if (match(el)) out.push(el); });
+    if (direct.length) {
+      for (const child of this.children) {
+        if (direct.some((p) => p.match(child))) out.push(child);
+      }
+    }
+    if (descendant.length) {
+      this._walk((el) => { if (descendant.some((p) => p.match(el))) out.push(el); });
+    }
     return out;
   }
 
@@ -363,12 +444,18 @@ export function installFakeDom() {
   const previousWindow = globalThis.window;
   const previousElement = globalThis.Element;
   const previousSVGElement = globalThis.SVGElement;
+  const previousCSS = globalThis.CSS;
   const doc = new FakeDocument();
 
   // `renderer.js:45` does `svg instanceof SVGElement`. These globals are part
-  // of the seam's contract, not conveniences.
+  // of the seam's contract, not conveniences. The class installed here MUST be
+  // the same object `createElementNS` builds from, or the guard throws.
   globalThis.Element = FakeElement;
   globalThis.SVGElement = FakeSVGElement;
+  // `renderer.js:556` and `:733` call CSS.escape when building attribute
+  // selectors. Without this they throw; with a passthrough they would pass
+  // while escaping was never exercised.
+  globalThis.CSS = globalThis.CSS || { escape: cssEscape };
   globalThis.document = doc;
   globalThis.window = globalThis.window || {
     devicePixelRatio: 1,
@@ -383,6 +470,7 @@ export function installFakeDom() {
       globalThis.window = previousWindow;
       globalThis.Element = previousElement;
       globalThis.SVGElement = previousSVGElement;
+      globalThis.CSS = previousCSS;
     },
   };
 }
