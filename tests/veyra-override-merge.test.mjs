@@ -216,6 +216,63 @@ check('GUARD', 'the documented layer order is exported and stable', () => {
     + 'array length rather than precedence. Fix the assertion, not the enum.');
 });
 
+check('GUARD', 'the published layer order matches the order the evaluator actually applies', () => {
+  // `VEYRA_EVALUATION_ORDER` is a literal that nothing verifies against the
+  // `applyLayer` call sequence in `evaluateDocument`. The two can drift apart
+  // silently — and the manifest publishes that array as the AI-facing
+  // description of the pipeline, so a drift means an AI is handed a wrong model
+  // of its own tool. This derives precedence from BEHAVIOUR and compares it to
+  // the documented order, so the description cannot separate from the mechanism.
+  const scene = evaluateDocument(doc, {}, null);
+  const documented = [...scene.evaluationOrder];
+
+  // Pairwise: give one address to two contributors and see which one lands.
+  const measured = (() => {
+    const wins = (lower, higher) => {
+      const layered = evaluateDocument(doc, { [lower]: { [ADDR]: 1 }, [higher]: { [ADDR]: 2 } }, null);
+      const landed = readNode(layered, target.id, 'x');
+      const source = propertySource(layered, ADDR);
+      assert.equal(landed, 2, `${higher} did not beat ${lower} on a shared address`);
+      assert.equal(source, higher, `${higher} won but attributed as '${source}'`);
+      return higher;
+    };
+    // Chain the observed winners: each step must strictly outrank the last.
+    const animation = 'animation';
+    wins(animation, 'constraints');
+    wins('constraints', 'interactive');
+    return [animation, 'constraints', 'interactive'];
+  })();
+
+  const positions = measured.map((layer) => documented.indexOf(layer));
+  assert.ok(positions.every((position) => position >= 0),
+    `measured layers missing from the published order: ${JSON.stringify(documented)}`);
+  for (let index = 1; index < positions.length; index += 1) {
+    assert.ok(positions[index] > positions[index - 1],
+      `documented order contradicts measured precedence: ${measured.join(' < ')} but published as `
+      + `[${documented.join(', ')}] — an AI reading the manifest gets a wrong pipeline model`);
+  }
+
+  // Playback is the one contributor the merge used to swallow, and 3B-3 made it
+  // a first-class layer (`evaluation.js:10`, applied at `:82`). Asserted
+  // unconditionally on purpose: the earlier `if (playbackRank >= 0)` form would
+  // have passed silently if someone deleted 'playback' from the published order
+  // while still applying it — a conditional guard cannot detect the absence of
+  // the thing it conditions on.
+  const playbackRank = documented.indexOf('playback');
+  assert.ok(playbackRank >= 0,
+    `'playback' is missing from the published order [${documented.join(', ')}]. It is a real layer, so `
+    + 'an AI reading the manifest would meet an undocumented source value in scene.sources.');
+  // Measure the rank as well as reading it: playback must actually outrank the
+  // machine layer, so the array cannot quietly disagree with the mechanism.
+  const contested = evaluateDocument(doc, { animation: { [ADDR]: 1 } }, playback({ [ADDR]: 2 }));
+  assert.equal(readNode(contested, target.id, 'x'), 2, 'playback does not outrank the machine layer');
+  assert.equal(propertySource(contested, ADDR), 'playback',
+    'playback won the address but did not attribute as playback');
+  assert.ok(playbackRank > documented.indexOf('animation'),
+    `'playback' is published BEFORE 'animation' (${documented.join(', ')}) but wins in practice — `
+    + 'the documented pipeline now contradicts the mechanism. Put the higher-precedence layer later.');
+});
+
 /* ==================================================================
  * GROUP C — staleness is an exception, not a degraded frame
  * 3B-2 must choose: catch-and-report, or guarantee-by-construction.
