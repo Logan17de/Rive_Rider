@@ -469,8 +469,67 @@ constraint to design around.
 **single-owner, frozen** for the duration of the task that holds them. 3B-1 and
 3B-2 are split by layer, not by feature, so their file scopes are disjoint.
 
+## Known defects (named, with owners required before action)
+
+Recorded here rather than in test comments, which disappear the next time
+someone touches the file.
+
+### KD-1 — zero-offset vertices expose live drag targets
+
+`renderer.js:436-465` iterates `vertices × ['in','out']` and appends a
+`bezierHandle` circle **unconditionally**; the `Math.abs(offset) >= 0.0001`
+guard at `:444` wraps only the `handleLine`, not the handle. Handle count is
+structurally `vertices * 2`.
+
+Consequence: a three-point path with **no authored bezier data** still gets six
+`pointerdown` targets (`:463` binds `#startHandleDrag`), each sitting exactly on
+top of its vertex and invisible. Grabbing one silently converts a corner into a
+curve.
+
+Surfaced by counting the DOM under the headless seam — not visible by looking at
+a canvas. The stale `.bezierHandle === 4` assertion that revealed it had been
+wrong for as long as the file went unrun.
+
+**Status: unowned.** `renderer.js` is in no one's file scope, and this is a
+behaviour change to how every path edits. It needs an assigned decision, not an
+opportunistic fix. The test pins current behaviour (`6`) and explicitly does not
+bless it.
+
+### KD-2 — the headless browser suite exercises first render only (gate i-b)
+
+`renderer.js` uses `:scope >` partial-update paths at `:147`, `:148`, `:734`,
+`:738` (`replaceWith` of `.rigMeshes` / `.rigOverlay`, and lookups of
+`.sceneShape` / `.vertexControls` during node update). The seam now supports
+them, but `tests/veyra-browser.js` performs a single `render()` and never
+re-renders, so **those paths are supported but unexercised**.
+
+A suite that reads as "browser coverage" while proving only first render is the
+same class of trap as an unwired suite. The `pointerEvent` export plus those four
+call sites are the seed of a drag-and-live-update test — the one thing that would
+catch this bug class, and which the state graph panel will depend on.
+
+**Gate (i-b): partial re-render and pointer-drag coverage must exist before the
+panel is dispatched.**
+
+## Definition of done for gate (i)
+
+Building the seam is not closing the gate. `package.json:6-7` are hardcoded
+lists, and an unwired suite is exactly how `veyra-browser.js` asserted a handle
+count the renderer could not produce, undetected. Gate (i) is closed only when
+`tests/veyra-browser.test.mjs` **and** `tests/veyra-machine-invariants.test.mjs`
+are green **inside `npm test`**, not when they pass by hand.
+
+Ordering constraint: the arbiter carries intentional reds until §A0 lands, so
+both files are wired in **one edit, by the `package.json` owner, as the last step
+of §A0**. Two agents editing the same `"test"` string is how one addition is
+lost silently.
+
 ## Open questions
 
 1. Multi-machine property-address conflict resolution (deferred to Phase 5).
 2. Whether `reject` or `cascade` is right for input type change if a case emerges
    where refusing blocks a legitimate workflow.
+3. **Whether any Veyra build exists outside this tree.** This sets the real cost
+   of the version decision — with no external readers, conditional v4 stamping is
+   nearly free; with them, it is the difference between a loud rejection and
+   silent listener loss. This is a question for the human, not the team.
