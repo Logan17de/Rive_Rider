@@ -1,3 +1,7 @@
 .rive-wasm/
 __pycache__/
 .claude/worktrees/
+
+# throwaway probe/scratch files - never commit
+tests/tmp-*.mjs
+tests/*-probe*.mjs
