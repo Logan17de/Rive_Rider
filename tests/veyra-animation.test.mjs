@@ -375,10 +375,21 @@ console.log('Testing Veyra animation system...');
   const animatedNode = evaluated.nodes[0];
   const source = evaluated.sources[nodePropertyAddress(node.id, 'geometry/radius')];
 
-  // Note: Since playback starts at time 0, radius should still be 50
-  // but source should indicate animation
+  // Note: Since playback starts at time 0, radius should still be 50.
+  //
+  // CONTRACT CHANGE (3B-2 collision policy, leader-approved): this property is
+  // driven by AnimationPlayback, which is now attributed as 'playback' rather
+  // than 'animation'. The distinction is REQUIRED, not cosmetic: machine
+  // overrides and playback overrides both used to flatten into 'animation', so
+  // when they contested the same address it was impossible to report which
+  // contributor won. Reporting the collision at all depends on being able to
+  // name the two sides. See docs/VEYRA_INTERACTION_SURFACE.md, "Report
+  // provenance and conflicts rather than spreading silently".
+  //
+  // Precedence is unchanged — playback still wins. Only the attribution is now
+  // truthful.
   if (source) {
-    assert.strictEqual(source, 'animation');
+    assert.strictEqual(source, 'playback');
   }
 
   console.log('✓ integration with evaluateDocument');

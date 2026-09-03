@@ -1,12 +1,13 @@
 import { IDENTITY_MATRIX, multiplyMatrices, transformMatrix } from './contracts.js';
 import { cloneValue, normalizeDocument } from './model.js';
-import { isAnimatableProperty, writeProperty } from './properties.js';
+import { propertyTargetStatus, writeProperty } from './properties.js';
 import { referenceId } from './references.js';
 import { evaluateRig } from './rigging.js';
 
 export const VEYRA_EVALUATION_ORDER = Object.freeze([
   'authored',
   'animation',
+  'playback',
   'constraints',
   'interactive',
 ]);
@@ -21,7 +22,11 @@ function layerEntries(layer) {
 
 function applyLayer(document, layer, source, sources) {
   for (const [address, value] of layerEntries(layer)) {
-    if (!isAnimatableProperty(document, address)) {
+    const status = propertyTargetStatus(document, address);
+    if (status === 'missing-target') {
+      throw new TypeError(`${source} property target ${address} does not exist.`);
+    }
+    if (status !== 'animatable') {
       throw new TypeError(`${source} cannot drive non-animatable property ${address}.`);
     }
     writeProperty(document, address, value);
@@ -56,15 +61,25 @@ function evaluateNodes(document) {
 export function evaluateDocument(authoredDocument, layers = {}, animationPlayback = null) {
   let evaluatedDocument = normalizeDocument(authoredDocument);
   const sources = {};
+  const diagnostics = { collisions: [] };
 
-  // If animationPlayback is provided, evaluate it and merge into animation layer
-  let animationLayer = layers.animation || {};
+  // Apply machine animation first, then playback, preserving today's
+  // playback-wins precedence while retaining both contributors long enough to
+  // report contested addresses and attribute playback errors correctly.
+  const animationLayer = layers.animation || {};
+  let playbackOverrides = null;
   if (animationPlayback && typeof animationPlayback.evaluate === 'function') {
-    const playbackOverrides = animationPlayback.evaluate();
-    animationLayer = { ...animationLayer, ...playbackOverrides };
+    playbackOverrides = animationPlayback.evaluate();
+    const animationAddresses = new Set(layerEntries(animationLayer).map(([address]) => address));
+    for (const [address] of layerEntries(playbackOverrides)) {
+      if (animationAddresses.has(address)) {
+        diagnostics.collisions.push({ address, sources: ['animation', 'playback'] });
+      }
+    }
   }
 
   applyLayer(evaluatedDocument, animationLayer, 'animation', sources);
+  applyLayer(evaluatedDocument, playbackOverrides, 'playback', sources);
   applyLayer(evaluatedDocument, layers.constraints, 'constraints', sources);
   // Position controls need to reach the solver before it runs. The same
   // interactive layer is reapplied after solving so direct bone overrides win.
@@ -99,7 +114,13 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     meshes: cloneValue(rig.meshes),
     controls: cloneValue(rig.controls),
     constraints: cloneValue(rig.constraints),
-    diagnostics: cloneValue(rig.diagnostics),
+    diagnostics: cloneValue({
+      ...rig.diagnostics,
+      collisions: [
+        ...(rig.diagnostics?.collisions || []),
+        ...diagnostics.collisions,
+      ],
+    }),
     evaluationOrder: [...VEYRA_EVALUATION_ORDER],
     sources,
   };

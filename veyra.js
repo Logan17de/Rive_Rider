@@ -2235,8 +2235,13 @@ artboardFrame.addEventListener('pointerdown', (event) => {
       syncArtboardFrame();
       return;
     }
-    resizing = true;
-    store.begin('Resize artboard');
+    if (!resizing) {
+      // One transaction per gesture: begin() rejects concurrent transactions
+      // (G4), and this handler runs on EVERY pointermove — a bare begin here
+      // would throw from the second move onward and wedge the store.
+      resizing = true;
+      store.begin('Resize artboard');
+    }
     const width = Math.max(1, Math.round(startArtboard.width + (mode === 'resize' || mode === 'resize-x' ? dx : 0)));
     const height = Math.max(1, Math.round(startArtboard.height + (mode === 'resize' || mode === 'resize-y' ? dy : 0)));
     store.mutate((documentModel) => {

@@ -150,13 +150,28 @@ export function writeProperty(document, address, value) {
   return target.parsed;
 }
 
-export function isAnimatableProperty(document, address) {
+/**
+ * Classify an address before attempting to apply it. Missing targets and
+ * existing-but-undrivable properties have different remedies and therefore
+ * must not collapse into one boolean diagnostic.
+ */
+export function propertyTargetStatus(document, address) {
   const parsed = parsePropertyAddress(address);
   if (parsed.reference.kind !== 'node') {
     const finder = { bone: boneById, mesh: meshById, control: controlById, constraint: constraintById }[parsed.reference.kind];
     const object = finder?.(document, parsed.reference.id);
-    return Boolean(object && supportsRigProperty(parsed.reference.kind, object, parsed.path, 'animatable'));
+    if (!object) return 'missing-target';
+    return supportsRigProperty(parsed.reference.kind, object, parsed.path, 'animatable')
+      ? 'animatable'
+      : 'non-animatable';
   }
   const node = nodeById(document, parsed.reference.id);
-  return Boolean(node && supportsNodeProperty(node, nodePropertyPath(parsed.segments), 'animatable'));
+  if (!node) return 'missing-target';
+  return supportsNodeProperty(node, nodePropertyPath(parsed.segments), 'animatable')
+    ? 'animatable'
+    : 'non-animatable';
+}
+
+export function isAnimatableProperty(document, address) {
+  return propertyTargetStatus(document, address) === 'animatable';
 }

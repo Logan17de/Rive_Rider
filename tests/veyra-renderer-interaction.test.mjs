@@ -72,14 +72,23 @@ try {
 
   // Lost-pointerup is represented by pointercancel: capture is taken and the
   // renderer leaves dragging mode when the platform cancels the pointer.
-  const cancelRenderer = new VeyraRenderer(surface);
+  let cancelledMoves = 0;
+  const cancelRenderer = new VeyraRenderer(surface, {
+    moveVertex() { cancelledMoves += 1; },
+  });
   cancelRenderer.setTool('vertex');
   cancelRenderer.render(evaluated(), smile.id);
   const cancelTarget = surface.querySelector('.vertexPoint');
   cancelTarget.dispatchEvent(pointerEvent('pointerdown', { clientX: 0, clientY: 0 }));
-  assert.equal(surface.hasPointerCapture(1), true);
+  assert.equal(surface.hasPointerCapture(1), true, 'pointer capture taken before cancellation');
+  surface.dispatchEvent(pointerEvent('pointermove', { clientX: 5, clientY: 5 }));
+  assert.equal(cancelledMoves, 1, 'pointermove reaches the live callback before cancellation');
+  const movesBeforeCancel = cancelledMoves;
   surface.dispatchEvent(pointerEvent('pointercancel', { clientX: 0, clientY: 0 }));
-  assert.equal(surface.hasPointerCapture(1), true, 'pointercancel currently exposes unreleased capture defect');
+  assert.equal(cancelRenderer.dragging, false, 'cancel clears renderer drag state');
+  assert.equal(cancelRenderer.dragKind, null, 'cancel clears renderer drag kind');
+  surface.dispatchEvent(pointerEvent('pointermove', { clientX: 20, clientY: 20 }));
+  assert.equal(cancelledMoves, movesBeforeCancel, 'cancel removes the live pointermove handler');
 
   // KD-1: zero-offset handles are still live targets. A path with no authored
   // beziers gets six circles, and dragging one creates curvature in the model.

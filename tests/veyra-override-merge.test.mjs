@@ -194,8 +194,26 @@ check('GUARD', 'an untouched property reports as authored', () => {
 
 check('GUARD', 'the documented layer order is exported and stable', () => {
   const scene = evaluateDocument(doc, {}, null);
-  assert.deepEqual([...scene.evaluationOrder], ['authored', 'animation', 'constraints', 'interactive'],
-    'layer order changed; every precedence claim in the contract has to be re-derived');
+  // Relative precedence is the invariant. The exact list length is NOT — pinning
+  // the array verbatim would turn red any correct fix that introduces a new
+  // layer kind, which is precisely what the new `playback` source label needs.
+  const orderHasPrecedence = (order) => {
+    const at = (layer) => order.indexOf(layer);
+    return ['authored', 'animation', 'constraints', 'interactive'].every((layer) => at(layer) >= 0)
+      && at('authored') < at('animation')
+      && at('animation') < at('constraints')
+      && at('constraints') < at('interactive');
+  };
+  assert.ok(orderHasPrecedence(scene.evaluationOrder),
+    `layer precedence changed: [${scene.evaluationOrder.join(', ')}] — every precedence claim in the `
+    + 'contract has to be re-derived, and the manifest publishes this list as the AI-facing pipeline');
+  // Meta-check: prove the guard above tests precedence rather than today's shape.
+  // A fifth layer inserted WITHOUT disturbing relative order must still satisfy
+  // it. Without this line the assertion silently re-becomes an exact pin the
+  // next time the enum grows, and the person growing it gets a confusing red.
+  assert.ok(orderHasPrecedence(['authored', 'animation', 'playback', 'constraints', 'interactive']),
+    'this guard over-specifies: it rejects a legitimate additional layer kind, so it is pinning '
+    + 'array length rather than precedence. Fix the assertion, not the enum.');
 });
 
 /* ==================================================================
@@ -428,6 +446,40 @@ try {
  * Report
  * ================================================================== */
 
+/**
+ * KNOWN-DEBT RATCHET.
+ *
+ * The DEFECT checks in this file encode 3B-2 contract items that are not
+ * enforced yet, so the suite is red today. Wiring a permanently-red suite into
+ * `npm test` destroys the one signal the team just spent two commits earning —
+ * a green run that means something. Not wiring it at all is how
+ * `tests/veyra-browser.js` carried an assertion the renderer could not satisfy.
+ *
+ * So the exit code classifies instead of merely reporting:
+ *   - any GUARD regression            -> FAIL. Regressions are never expected.
+ *   - DEFECT reds > EXPECTED_RED_DEBT -> FAIL. New unenforced contract is a break.
+ *   - DEFECT reds == EXPECTED_RED_DEBT-> PASS with a loud banner. Known, capped,
+ *                                       tracked debt — not noise.
+ *   - DEFECT reds <  EXPECTED_RED_DEBT-> PASS and demand the cap be lowered.
+ *
+ * The cap is the whole point: debt is bounded and may only shrink, so "known
+ * red" can never absorb an additional surprise.
+ *
+ * HISTORY: this began at 5 — the collision-reporting contract items, 3B-2
+ * scope. Closed by 3B-3 in `evaluation.js` / `properties.js`: playback is now
+ * applied as its own layer under its own `playback` source label, shared
+ * addresses are recorded in `diagnostics.collisions` even when both contributors
+ * agree, and a missing target is distinguished from an un-animatable path. The
+ * ratchet announced the shrink ("only 0 of 5 recorded items are red") before the
+ * cap was lowered, which is the mechanism doing its job, not friction.
+ *
+ * 0 is terminal, but the machinery STAYS. It is now the team's required pattern
+ * for any suite carrying intentional reds (docs/VEYRA_INTERACTION_SURFACE.md),
+ * so a future contract item lands with a cap of 1 and a name rather than a
+ * permanently red build or a suite nobody runs. At 0, any red DEFECT blocks.
+ */
+const EXPECTED_RED_DEBT = 0;
+
 const failed = results.filter((result) => !result.ok);
 const redDefects = failed.filter((result) => result.kind === 'DEFECT');
 const redGuards = failed.filter((result) => result.kind === 'GUARD');
@@ -440,14 +492,23 @@ for (const result of results) {
 }
 console.log(`\nFRAME BUDGET\n${budgetReport}\n`);
 
-if (failed.length) {
-  if (redGuards.length) {
-    console.log('A GUARD is a regression against settled behaviour: fix the implementation, not the assertion.');
-  }
-  if (redDefects.length) {
-    console.log('DEFECT checks are the 3B contract not yet enforced (docs/VEYRA_INTERACTION_SURFACE.md).');
-  }
+const debt = redDefects.length;
+if (redGuards.length) {
+  console.log(`BLOCKING: ${redGuards.length} GUARD regression(s) — settled behaviour broke. `
+    + 'Fix the implementation, not the assertion.');
   process.exitCode = 1;
+} else if (debt > EXPECTED_RED_DEBT) {
+  console.log(`BLOCKING: ${debt} DEFECT reds exceed the recorded debt cap of ${EXPECTED_RED_DEBT}. `
+    + 'A new contract item went unenforced, or an assertion was weakened. Either way this is not the known state.');
+  process.exitCode = 1;
+} else if (debt > 0 && debt === EXPECTED_RED_DEBT) {
+  console.log(`KNOWN DEBT (capped at ${EXPECTED_RED_DEBT}): ${debt} unenforced contract item(s) from `
+    + 'docs/VEYRA_INTERACTION_SURFACE.md — the override-merge collision policy, 3B-2 scope. '
+    + 'This run passes by design. It stops passing the moment the count rises.');
+} else if (debt < EXPECTED_RED_DEBT) {
+  console.log(`DEBT SHRANK: only ${debt} of ${EXPECTED_RED_DEBT} recorded items are red. `
+    + 'Lower EXPECTED_RED_DEBT in this file so the remaining debt stays bounded.');
 } else {
-  console.log('All override-merge contract items enforced.');
+  console.log('All override-merge contract items enforced. EXPECTED_RED_DEBT is 0: any new red here '
+    + 'blocks the build. Keep the ratchet — it is the pattern for future intentional debt, not dead code.');
 }
