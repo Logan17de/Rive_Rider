@@ -407,9 +407,33 @@ Requirements:
 
    Found by the gate author while implementing against the brief, which is the
    correct time to discover an unimplementable requirement.
-3. **Decide explicitly what `Space` does while a machine previews** — stop
-   preview, refuse playback, or pause-and-resume. Pick one; do not leave it to
-   implementation.
+3. **What `Space` does while a machine previews — DECIDED.**
+
+   **`Space` controls the active transport. Machine preview and timeline
+   playback are mutually exclusive: starting either stops the other.**
+
+   Rejected alternatives and why:
+   - *Space starts timeline playback over a running preview* — incoherent, since
+     the machine is already driving those same timelines. Two playheads on one
+     timeline has no sensible meaning.
+   - *Refuse playback while previewing* — makes `Space` silently do nothing,
+     which reads as a broken key rather than a policy.
+
+   `Space` is the universal play/pause affordance, so while a preview is active
+   it toggles **that** preview. This matches the existing single-active-entity
+   pattern (`activeTimelineId`, `previewMachineId`) rather than inventing a
+   second concurrency model.
+
+   **Consequence for precedence:** at the *editor* level this dissolves the
+   collision — the two can no longer drive the same address concurrently.
+
+   **Reporting is still required**, and this is the important part: the **script
+   API can still do both**. `veyra.playTimeline(...)` and `veyra.stepMachine(...)`
+   remain independently callable, which is exactly the AI-facing path. So the
+   editor decision removes the *human* route into the collision while leaving the
+   *AI* route open — and under our core principle, a hazard an AI can reach and a
+   human cannot is the worse of the two. Merge-level reporting is therefore
+   defence in depth, not redundancy.
 
 ### Precedence ruling (leader decision)
 
