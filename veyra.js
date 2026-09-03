@@ -3,14 +3,10 @@ import {
   boneById,
   constraintById,
   controlById,
-  createBone,
-  createConstraint,
-  createControl,
   createDocument,
   createId,
   createGradientStop,
   createLinearGradient,
-  createMesh,
   createNode,
   createRadialGradient,
   createSolidFill,
@@ -1763,29 +1759,25 @@ function addRig(kind) {
   };
   if (kind === 'bone') {
     const parent = store.selectedBone;
-    const bone = createBone({
+    const boneId = store.addBone({
       name: parent ? `${parent.name} Child` : 'New Bone',
       parent: parent ? createBoneRef(parent.id) : null,
       rest: parent ? { x: parent.length, y: 0 } : center,
       length: parent ? Math.max(40, parent.length * 0.72) : 120,
-    });
-    store.execute('Add bone', (documentModel) => documentModel.bones.push(bone));
-    store.select(createBoneRef(bone.id));
+    }, 'Add bone');
     setTool('bone', false);
-    showToast(`${bone.name} added`);
+    showToast(`${boneById(store.document, boneId).name} added`);
     return;
   }
 
   if (kind === 'control') {
     const selectedBoneState = evaluatedScene?.bones.find((bone) => bone.id === store.selectedBone?.id);
-    const control = createControl({
+    const controlId = store.addControl({
       name: 'New Position Control',
       position: selectedBoneState?.end || center,
-    });
-    store.execute('Add control', (documentModel) => documentModel.controls.push(control));
-    store.select(createControlRef(control.id));
+    }, 'Add control');
     setTool('control', false);
-    showToast(`${control.name} added`);
+    showToast(`${controlById(store.document, controlId).name} added`);
     return;
   }
 
@@ -1798,18 +1790,16 @@ function addRig(kind) {
       { id: `meshVertex_${crypto.randomUUID()}`, x: center.x + 80, y: center.y + 45, weights: cloneValue(weights) },
       { id: `meshVertex_${crypto.randomUUID()}`, x: center.x - 80, y: center.y + 45, weights: cloneValue(weights) },
     ];
-    const mesh = createMesh({
+    const meshId = store.addMesh({
       name: 'New Weighted Mesh',
       vertices,
       triangles: [
         [vertices[0], vertices[1], vertices[2]].map((vertex) => createMeshVertexRef(vertex.id)),
         [vertices[0], vertices[2], vertices[3]].map((vertex) => createMeshVertexRef(vertex.id)),
       ],
-    });
-    store.execute('Add mesh', (documentModel) => documentModel.meshes.push(mesh));
-    store.select({ kind: 'mesh', id: mesh.id });
+    }, 'Add mesh');
     setTool('mesh', false);
-    showToast(sourceBone ? `${mesh.name} added and weighted to ${sourceBone.name}` : `${mesh.name} added without weights`);
+    showToast(sourceBone ? `${meshById(store.document, meshId).name} added and weighted to ${sourceBone.name}` : `${meshById(store.document, meshId).name} added without weights`);
     return;
   }
 
@@ -1854,15 +1844,14 @@ function addRig(kind) {
       }
       overrides = { bone: createBoneRef(bone.id), target: createBoneRef(targetBone.id) };
     }
-    const constraint = createConstraint(type, {
-      name: `${bone.name} ${type[0].toUpperCase()}${type.slice(1)}`,
+    const constraintName = `${bone.name} ${type[0].toUpperCase()}${type.slice(1)}`;
+    store.addConstraint(type, {
+      name: constraintName,
       ...overrides,
       order: store.document.constraints.length,
-    });
-    store.execute(`Add ${type} constraint`, (documentModel) => documentModel.constraints.push(constraint));
-    store.select({ kind: 'constraint', id: constraint.id });
+    }, `Add ${type} constraint`);
     setTool('constraint', false);
-    showToast(`${constraint.name} added`);
+    showToast(`${constraintName} added`);
   }
 }
 

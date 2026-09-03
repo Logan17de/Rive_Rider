@@ -8,3 +8,9 @@ export {
 } from './control/control-policy.js';
 export { SemanticMetadataStore } from './semantic/semantic-metadata.js';
 export { CommandSystem } from './commands/command-system.js';
+export {
+  VEYRA_MANIFEST_FORMAT,
+  VEYRA_MANIFEST_VERSION,
+  createProjectManifest,
+  serializeProjectManifest,
+} from './veyra/manifest.js';

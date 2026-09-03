@@ -7,6 +7,32 @@ export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
   'transition-end',
 ]);
 
+// Emitted through `onInvalidate` when reconciliation finds that the machine
+// record this runtime tracks changed in a way that resets its position (or
+// that the machine disappeared or came back). One event per effective change.
+export const VEYRA_MACHINE_INVALIDATION_EVENT = 'runtime-invalidated';
+
+// Structural identity of the machine — only the fields the runtime's position
+// is expressed in: input ids/types, state ids, transition ids/endpoints, and
+// the initial pointer. Names, authored values, durations, `after` gates, and
+// condition payloads are deliberately absent: changing them must NOT reset a
+// live preview (they are read fresh on every evaluation anyway).
+const NO_MACHINE = 'no-machine';
+
+function machineSignature(machine) {
+  if (!machine) return NO_MACHINE;
+  return JSON.stringify([
+    machine.initial ? referenceId(machine.initial, 'machineState') : null,
+    machine.inputs.map((input) => [input.id, input.type]),
+    machine.states.map((state) => state.id),
+    machine.transitions.map((transition) => [
+      transition.id,
+      referenceId(transition.from, 'machineState'),
+      referenceId(transition.to, 'machineState'),
+    ]),
+  ]);
+}
+
 function resolveDocument(documentOrGetter) {
   if (typeof documentOrGetter === 'function') {
     const document = documentOrGetter();
@@ -55,24 +81,44 @@ function transitionSatisfied(transition, stateTime, inputsById) {
  * Deterministic runtime for one Veyra state machine.
  *
  * The runtime owns per-machine *runtime state only* (current state, state
- * time, input values, active transition). Everything structural — states,
+ * time, input overrides, active transition). Everything structural — states,
  * transitions, inputs, timelines — is read from the document on every call,
  * so editor edits are picked up without re-creation. Pass a document getter
- * (`() => store.document`) to stay current across document normalization.
+ * (`() => store.document`) to stay current across edits, undo, and redo.
+ *
+ * Reconciliation runs before every public read and mutation, keyed strictly
+ * to THIS machine's structural signature:
+ * - an edit to any other part of the document never disturbs the preview;
+ * - a structural change to this machine (state/transition/input added or
+ *   removed, endpoint or type changed, `initial` re-pointed) resets the
+ *   runtime to a valid position derived from the current record — it never
+ *   throws, so a preview loop survives undo;
+ * - deleted inputs drop their overrides with the reset; authored-value
+ *   shadowing cannot occur because overrides only ever hold inputs that were
+ *   explicitly `setInput`/`fire`d since the last reset (`?? input.value`
+ *   therefore always surfaces live edits for clean inputs);
+ * - a change emits at most one `runtime-invalidated` event through
+ *   `onInvalidate(listener)` per effective (net) change observed, so
+ *   multi-part commands cannot flicker.
+ * Reconciliation never mutates the document.
  *
  * Time is measured in seconds. A transition's authored `duration` is in
  * seconds; `0` cuts immediately. Blending crossfades the outgoing and
  * incoming timeline contributions: addresses driven by both crossfade
  * linearly, outgoing-only addresses hold, incoming-only addresses ramp in
- * against their authored value.
+ * against their authored value. Active blends are captured as value
+ * snapshots, so deleting a blend's endpoints can never land the machine on a
+ * dangling state id.
  */
 export class MachineRuntime {
   #documentOrGetter = null;
   #machineId = null;
-  #inputValues = new Map();
+  #overrideValues = new Map();
   #stateId = null;
   #stateTime = 0;
   #transition = null;
+  #signature = NO_MACHINE;
+  #invalidateListeners = new Set();
 
   constructor(documentOrGetter, machineId) {
     this.#documentOrGetter = documentOrGetter;
@@ -96,49 +142,91 @@ export class MachineRuntime {
     return resolveDocument(this.#documentOrGetter);
   }
 
+  /**
+   * Subscribe to `runtime-invalidated` notifications. Returns an unsubscribe
+   * function, mirroring `VeyraStore.subscribe`.
+   */
+  onInvalidate(listener) {
+    this.#invalidateListeners.add(listener);
+    return () => this.#invalidateListeners.delete(listener);
+  }
+
   get stateId() {
-    return this.machine?.states.length ? this.#stateId : null;
+    this.#reconcile();
+    return this.#stateId;
   }
 
   get state() {
+    this.#reconcile();
     return this.machine?.states.find((state) => state.id === this.#stateId) || null;
   }
 
   get stateTime() {
+    this.#reconcile();
     return this.#stateTime;
   }
 
   get transition() {
+    this.#reconcile();
     if (!this.#transition) return null;
-    const { transition, fromId, toId, startedAt } = this.#transition;
+    const { transitionId, fromId, toId, duration, startedAt } = this.#transition;
     const elapsed = this.#stateTime - startedAt;
-    const progress = transition.duration > 0 ? Math.min(1, Math.max(0, elapsed / transition.duration)) : 1;
+    const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
     return {
-      id: transition.id,
+      id: transitionId,
       fromId,
       toId,
-      duration: transition.duration,
+      duration,
       progress,
     };
   }
 
   get inputs() {
+    this.#reconcile();
     return (this.machine?.inputs || []).map((input) => ({
       id: input.id,
       name: input.name,
       type: input.type,
-      value: this.#inputValues.get(input.id) ?? input.value,
+      value: this.#overrideValues.get(input.id) ?? input.value,
     }));
   }
 
   #resetRuntime(machine) {
-    this.#inputValues = new Map(machine.inputs.map((input) => [input.id, input.value]));
-    const initial = machine.initial
-      ? machine.states.find((state) => state.id === referenceId(machine.initial, 'machineState'))
-      : machine.states[0];
+    this.#overrideValues = new Map();
+    const states = machine ? machine.states : [];
+    const initial = machine
+      ? (machine.initial
+        ? states.find((state) => state.id === referenceId(machine.initial, 'machineState'))
+        : states[0])
+      : null;
     this.#stateId = initial?.id || null;
     this.#stateTime = 0;
     this.#transition = null;
+    this.#signature = machineSignature(machine);
+  }
+
+  /**
+   * Re-read the machine and, when its structural signature changed since the
+   * last observation, reset the runtime to a valid position derived from the
+   * current record and emit one invalidation event. Never throws on a
+   * machine change; a broken document getter surfaces as before (caller bug).
+   */
+  #reconcile() {
+    const machine = this.machine;
+    const signature = machineSignature(machine);
+    if (signature === this.#signature) return machine;
+    const previous = this.#signature;
+    this.#resetRuntime(machine);
+    const reason = !machine
+      ? 'machine-removed'
+      : (previous === NO_MACHINE ? 'machine-restored' : 'structural');
+    this.#notifyInvalidated(reason);
+    return machine;
+  }
+
+  #notifyInvalidated(reason) {
+    const event = { type: VEYRA_MACHINE_INVALIDATION_EVENT, machineId: this.#machineId, reason };
+    for (const listener of [...this.#invalidateListeners]) listener(event);
   }
 
   #inputsById() {
@@ -146,14 +234,14 @@ export class MachineRuntime {
   }
 
   #completeTransition(events) {
-    const { transition, fromId, toId, startedAt } = this.#transition;
+    const { transitionId, fromId, toId, startedAt } = this.#transition;
     // The incoming state kept running during the blend, so it owns the
     // elapsed time when the blend finishes and its timeline continues
     // seamlessly from there.
     this.#stateTime = this.#stateTime - startedAt;
     this.#stateId = toId;
     this.#transition = null;
-    events.push({ type: 'transition-end', transitionId: transition.id, fromId, toId });
+    events.push({ type: 'transition-end', transitionId, fromId, toId });
   }
 
   /**
@@ -167,7 +255,7 @@ export class MachineRuntime {
       throw new TypeError('step() requires a finite, non-negative delta in seconds.');
     }
     const events = [];
-    const machine = this.machine;
+    const machine = this.#reconcile();
     if (!machine || !machine.states.length) return events;
     if (delta === 0) {
       this.#clearTriggers();
@@ -177,7 +265,7 @@ export class MachineRuntime {
     const inputsById = this.#inputsById();
     if (this.#transition) {
       this.#stateTime += delta;
-      if (this.#stateTime - this.#transition.startedAt >= this.#transition.transition.duration - 1e-9) {
+      if (this.#stateTime - this.#transition.startedAt >= this.#transition.duration - 1e-9) {
         this.#completeTransition(events);
       }
     } else {
@@ -189,7 +277,13 @@ export class MachineRuntime {
         if (!transitionSatisfied(transition, this.#stateTime, inputsById)) continue;
         const toId = referenceId(transition.to, 'machineState');
         if (transition.duration > 0) {
-          this.#transition = { transition, fromId: this.#stateId, toId, startedAt: this.#stateTime };
+          this.#transition = {
+            transitionId: transition.id,
+            fromId: this.#stateId,
+            toId,
+            duration: transition.duration,
+            startedAt: this.#stateTime,
+          };
           events.push({
             type: 'transition-start',
             transitionId: transition.id,
@@ -214,14 +308,15 @@ export class MachineRuntime {
 
   #clearTriggers() {
     for (const input of this.machine?.inputs || []) {
-      if (input.type === 'trigger' && this.#inputValues.get(input.id)) {
-        this.#inputValues.set(input.id, false);
+      if (input.type === 'trigger' && (this.#overrideValues.get(input.id) ?? input.value)) {
+        this.#overrideValues.set(input.id, false);
       }
     }
   }
 
   /** Set a number or bool input. Triggers must use `fire()`. */
   setInput(nameOrId, value) {
+    this.#reconcile();
     const machine = this.machine;
     if (!machine) throw new TypeError(`State machine ${this.#machineId} is no longer in the document.`);
     const input = resolveInput(machine, nameOrId);
@@ -235,12 +330,13 @@ export class MachineRuntime {
     if (input.type === 'number' && !Number.isFinite(normalized)) {
       throw new TypeError(`Input "${input.name || input.id}" requires a finite number.`);
     }
-    this.#inputValues.set(input.id, normalized);
+    this.#overrideValues.set(input.id, normalized);
     return normalized;
   }
 
   /** Arm a trigger input; it stays true until the next step() consumes it. */
   fire(nameOrId) {
+    this.#reconcile();
     const machine = this.machine;
     if (!machine) throw new TypeError(`State machine ${this.#machineId} is no longer in the document.`);
     const input = resolveInput(machine, nameOrId);
@@ -248,7 +344,7 @@ export class MachineRuntime {
     if (input.type !== 'trigger') {
       throw new TypeError(`Input "${input.name || input.id}" is not a trigger; use setInput() for ${input.type} inputs.`);
     }
-    this.#inputValues.set(input.id, true);
+    this.#overrideValues.set(input.id, true);
     return true;
   }
 
@@ -259,11 +355,11 @@ export class MachineRuntime {
    * `evaluateDocument(document, { animation: overrides })`.
    */
   evaluate() {
-    const machine = this.machine;
+    const machine = this.#reconcile();
     const result = {
       machineId: this.#machineId,
-      stateId: this.stateId,
-      stateName: this.state?.name || null,
+      stateId: this.#stateId,
+      stateName: machine?.states.find((state) => state.id === this.#stateId)?.name || null,
       stateTime: this.#stateTime,
       transition: this.transition,
       inputs: cloneValue(this.inputs),
@@ -273,9 +369,9 @@ export class MachineRuntime {
 
     const timelineStates = [];
     if (this.#transition) {
-      const { transition, fromId, toId } = this.#transition;
-      const elapsed = this.#stateTime - this.#transition.startedAt;
-      const progress = transition.duration > 0 ? Math.min(1, Math.max(0, elapsed / transition.duration)) : 1;
+      const { fromId, toId, startedAt, duration } = this.#transition;
+      const elapsed = this.#stateTime - startedAt;
+      const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
       const outgoing = machine.states.find((state) => state.id === fromId);
       const incoming = machine.states.find((state) => state.id === toId);
       if (outgoing?.timeline) {
@@ -292,12 +388,15 @@ export class MachineRuntime {
           weight: progress,
         });
       }
-    } else if (this.state?.timeline) {
-      timelineStates.push({
-        timelineId: referenceId(this.state.timeline, 'timeline'),
-        time: this.#stateTime,
-        weight: 1,
-      });
+    } else {
+      const current = machine.states.find((state) => state.id === this.#stateId);
+      if (current?.timeline) {
+        timelineStates.push({
+          timelineId: referenceId(current.timeline, 'timeline'),
+          time: this.#stateTime,
+          weight: 1,
+        });
+      }
     }
     result.overrides = evaluateTimelines(this.#document, timelineStates);
     return result;
@@ -305,7 +404,7 @@ export class MachineRuntime {
 
   /** Return the machine to its initial state with authored input values. */
   reset() {
-    const machine = this.machine;
+    const machine = this.#reconcile();
     if (!machine) return;
     this.#resetRuntime(machine);
   }

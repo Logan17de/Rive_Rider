@@ -60,6 +60,21 @@ export const VEYRA_CONDITION_OPS = Object.freeze([
   '!fired',
 ]);
 
+// Shared bounds for the numeric properties that `normalizeDocument` validates.
+// Document validation and the AI-facing manifest action schemas both consume
+// this table so agents can see the legal range of every scalar parameter.
+// The manifest tests probe the validation boundaries to keep the table honest.
+export const VEYRA_PROPERTY_BOUNDS = Object.freeze({
+  'timeline.duration': Object.freeze({ min: 1, max: 1000000, integer: true }),
+  'timeline.fps': Object.freeze({ min: 1, max: 240, integer: true }),
+  'timeline.workStart': Object.freeze({ min: 0, max: 1000000, integer: true, note: 'must not exceed duration' }),
+  'timeline.workEnd': Object.freeze({ min: 1, max: 1000000, integer: true, note: 'must be greater than workStart and not exceed duration' }),
+  'keyframe.frame': Object.freeze({ min: 0, max: 100000, integer: true }),
+  'keyframe.easingParams.*': Object.freeze({ min: 0, max: 1 }),
+  'machineTransition.duration': Object.freeze({ min: 0, max: 10000 }),
+  'machineTransition.after': Object.freeze({ min: 0, max: 100000 }),
+});
+
 let fallbackId = 0;
 
 export function createId(prefix = 'node') {

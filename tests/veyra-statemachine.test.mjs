@@ -21,6 +21,7 @@ import { parseVeyra, serializeVeyra } from '../src/veyra/io.js';
 import { renderSvgString } from '../src/veyra/geometry.js';
 import { createSceneSummary } from '../src/veyra/summary.js';
 import { VeyraStore } from '../src/veyra/store.js';
+import { dispatchVeyraCommand, VEYRA_COMMAND_ACTIONS } from '../src/veyra/commands.js';
 
 console.log('Testing Veyra state machine system...');
 
@@ -773,6 +774,504 @@ function fixtureDocument() {
   assert.throws(() => empty.fire('Missing'), /was not found/);
 
   console.log('✓ unknown machine and empty-machine runtime safety');
+}
+
+// ===========================================================================
+// 3B-1 A: normalize rejects the illegal operator/type matrix
+// Contract: docs/VEYRA_INTERACTION_SURFACE.md "Operator/type integrity".
+{
+  const { doc, idle, active } = fixtureDocument();
+
+  function machineRaw(inputType, inputValue, condition) {
+    return normalizeDocument({
+      ...doc,
+      stateMachines: [{
+        id: 'm_matrix',
+        name: 'Matrix',
+        initial: null,
+        inputs: [{ id: 'in_gate', name: 'Gate', type: inputType, value: inputValue }],
+        states: [
+          { id: 'sA', name: 'A', type: 'animation', timeline: { kind: 'timeline', id: idle.id } },
+          { id: 'sB', name: 'B', type: 'animation', timeline: { kind: 'timeline', id: active.id } },
+        ],
+        transitions: [{
+          id: 't_gate',
+          from: { kind: 'machineState', id: 'sA' },
+          to: { kind: 'machineState', id: 'sB' },
+          duration: 0,
+          after: null,
+          conditions: [condition],
+        }],
+      }],
+    });
+  }
+
+  const gateRef = { kind: 'machineInput', id: 'in_gate' };
+
+  // The repro from the debate: bool gated by ordering op loaded clean and the
+  // loader silently rewrote an authored 0.5 into true. Must now throw.
+  assert.throws(() => machineRaw('bool', false, { id: 'c1', input: gateRef, op: '>', value: 0.5 }), /op '>/);
+  assert.throws(() => machineRaw('bool', false, { id: 'c1', input: gateRef, op: '>=', value: 1 }), /requires a number input/);
+  assert.throws(() => machineRaw('trigger', false, { id: 'c1', input: gateRef, op: '<', value: 1 }), /trigger/);
+  assert.throws(() => machineRaw('number', 0, { id: 'c1', input: gateRef, op: 'fired' }), /requires a trigger input/);
+  assert.throws(() => machineRaw('bool', false, { id: 'c1', input: gateRef, op: '!fired' }), /requires a trigger input/);
+  assert.throws(() => machineRaw('trigger', false, { id: 'c1', input: gateRef, op: '==', value: true }), /comparison operator/);
+  // No silent coercion: equality values must match the input's own type.
+  assert.throws(() => machineRaw('number', 0, { id: 'c1', input: gateRef, op: '==', value: true }), /number value/);
+  assert.throws(() => machineRaw('bool', false, { id: 'c1', input: gateRef, op: '!=', value: 1 }), /boolean value/);
+  assert.throws(() => machineRaw('number', 0, { id: 'c1', input: gateRef, op: '>' }), /value/);
+
+  // The legal matrix stays legal.
+  assert.doesNotThrow(() => machineRaw('number', 0, { id: 'c1', input: gateRef, op: '>', value: 0.5 }));
+  assert.doesNotThrow(() => machineRaw('number', 0, { id: 'c1', input: gateRef, op: '==', value: 2 }));
+  assert.doesNotThrow(() => machineRaw('bool', false, { id: 'c1', input: gateRef, op: '==', value: true }));
+  assert.doesNotThrow(() => machineRaw('bool', false, { id: 'c1', input: gateRef, op: '!=', value: false }));
+  assert.doesNotThrow(() => machineRaw('trigger', false, { id: 'c1', input: gateRef, op: 'fired' }));
+  assert.doesNotThrow(() => machineRaw('trigger', false, { id: 'c1', input: gateRef, op: '!fired' }));
+
+  console.log('✓ 3B-1 normalize enforces the operator/type matrix');
+}
+
+// 3B-1 A: in-place edit commands — undo/redo, uniqueness, ranges, cascade
+{
+  const { doc, idle, active } = fixtureDocument();
+  const store = new VeyraStore(doc);
+  const machineId = store.addStateMachine({
+    name: 'Ops',
+    inputs: [
+      { id: 'in_speed', name: 'Speed', type: 'number', value: 1 },
+      { id: 'in_tap', name: 'Tap', type: 'trigger' },
+    ],
+    states: [
+      { id: 'sA', name: 'A', timeline: idle.id },
+      { id: 'sB', name: 'B', timeline: idle.id },
+    ],
+    transitions: [{
+      id: 't1',
+      from: 'sA',
+      to: 'sB',
+      duration: 0.5,
+      after: 2,
+      conditions: [{ id: 'c1', input: 'in_speed', op: '>', value: 0.5 }],
+    }],
+  }, { label: 'Create machine', source: 'script' });
+  const stateOf = (id) => machineById(store.document, machineId).states.find((s) => s.id === id);
+  const transitionOf = (id) => machineById(store.document, machineId).transitions.find((t) => t.id === id);
+  const inputOf = (id) => machineById(store.document, machineId).inputs.find((i) => i.id === id);
+
+  // Missing ids return false like every other update*/remove* command.
+  assert.strictEqual(store.updateMachineState(machineId, 's_missing', { name: 'x' }), false);
+  assert.strictEqual(store.updateMachineInput(machineId, 'in_missing', { name: 'x' }), false);
+  assert.strictEqual(store.updateMachineTransition(machineId, 't_missing', { duration: 1 }), false);
+  assert.strictEqual(store.removeMachineInput(machineId, 'in_missing'), false);
+
+  // updateMachineState: rename + timeline retarget, undoable.
+  store.updateMachineState(machineId, 'sB', { name: 'Renamed', timelineId: active.id }, { label: 'Rename B', source: 'ai' });
+  assert.strictEqual(stateOf('sB').name, 'Renamed');
+  assert.strictEqual(stateOf('sB').timeline.id, active.id);
+  assert.throws(() => store.updateMachineState(machineId, 'sB', { timelineId: 'no_such_timeline' }), /does not exist/);
+  assert.strictEqual(stateOf('sB').timeline.id, active.id, 'a rejected retarget must leave the document untouched');
+  assert.strictEqual(store.undo(), true);
+  assert.strictEqual(stateOf('sB').name, 'B');
+  assert.strictEqual(stateOf('sB').timeline.id, idle.id);
+  assert.strictEqual(store.redo(), true);
+  assert.strictEqual(stateOf('sB').name, 'Renamed');
+  store.undo();
+
+  // updateMachineTransition: duration, after (null clears the gate), conditions.
+  store.updateMachineTransition(machineId, 't1', {
+    duration: 0.25,
+    after: null,
+    conditions: [{ id: 'c1', input: 'in_speed', op: '>=', value: 2 }],
+  }, { label: 'Tune t1', source: 'user' });
+  assert.strictEqual(transitionOf('t1').duration, 0.25);
+  assert.strictEqual(transitionOf('t1').after, null);
+  assert.strictEqual(transitionOf('t1').conditions[0].op, '>=');
+  assert.strictEqual(store.undo(), true);
+  assert.strictEqual(transitionOf('t1').duration, 0.5);
+  assert.strictEqual(transitionOf('t1').after, 2);
+  store.redo();
+
+  // Documented ranges are enforced by the model on commit (rollback atomic).
+  assert.throws(() => store.updateMachineTransition(machineId, 't1', { duration: 10001 }), /duration/);
+  assert.throws(() => store.updateMachineTransition(machineId, 't1', { after: 100001 }), /after/);
+  assert.throws(
+    () => store.updateMachineTransition(machineId, 't1', { conditions: [{ input: 'in_speed', op: 'fired' }] }),
+    /trigger/,
+  );
+  assert.strictEqual(transitionOf('t1').duration, 0.25, 'rejected updates must not mutate the document');
+
+  // updateMachineInput: rename with per-machine uniqueness.
+  store.updateMachineInput(machineId, 'in_speed', { name: 'Velocity' }, { label: 'Rename input', source: 'ai' });
+  assert.strictEqual(inputOf('in_speed').name, 'Velocity');
+  assert.throws(() => store.updateMachineInput(machineId, 'in_tap', { name: 'Velocity' }), /already used/);
+  assert.strictEqual(inputOf('in_tap').name, 'Tap');
+  assert.strictEqual(store.undo(), true);
+  assert.strictEqual(inputOf('in_speed').name, 'Speed');
+  store.redo();
+
+  // Type change that would invalidate dependent conditions: REJECT with a
+  // named, actionable blocker list (contract: removeTimeline precedent).
+  assert.throws(
+    () => store.updateMachineInput(machineId, 'in_speed', { type: 'bool' }, { label: 'Retype', source: 'user' }),
+    /t1/,
+  );
+  assert.throws(
+    () => store.updateMachineInput(machineId, 'in_speed', { type: 'bool' }),
+    /c1/,
+  );
+  assert.strictEqual(inputOf('in_speed').type, 'number', 'the rejected command must not mutate the input');
+  // Clear the blocker, then retry — the documented AI recovery path.
+  store.updateMachineTransition(machineId, 't1', { conditions: [] });
+  store.updateMachineInput(machineId, 'in_speed', { type: 'bool', value: false });
+  assert.strictEqual(inputOf('in_speed').type, 'bool');
+  store.updateMachineTransition(machineId, 't1', { conditions: [{ id: 'c1', input: 'in_speed', op: '==', value: false }] });
+  // ...and back the other way: equality conditions block a to-trigger change.
+  assert.throws(
+    () => store.updateMachineInput(machineId, 'in_speed', { type: 'trigger' }),
+    /c1/,
+  );
+  assert.throws(
+    () => store.updateMachineTransition(machineId, 't1', { conditions: [{ id: 'c1', input: 'in_speed', op: 'fired' }] }),
+    /trigger/,
+  );
+  assert.strictEqual(inputOf('in_speed').type, 'bool', 'failed condition edit must roll back atomically');
+  assert.strictEqual(transitionOf('t1').conditions[0].op, '==');
+
+  // Authored value edits.
+  store.updateMachineInput(machineId, 'in_speed', { value: true }, { label: 'Set authored', source: 'ai' });
+  assert.strictEqual(inputOf('in_speed').value, true);
+  assert.strictEqual(store.undo(), true);
+  assert.strictEqual(inputOf('in_speed').value, false);
+  store.redo();
+
+  // removeMachineInput: REFUSES while conditions depend on the input —
+  // pruning would leave the transition firing more easily than authored
+  // (amended contract). With the blocker cleared, removal proceeds, undoable.
+  assert.throws(() => store.removeMachineInput(machineId, 'in_speed'), /t1/);
+  assert.throws(() => store.removeMachineInput(machineId, 'in_speed'), /c1/);
+  assert.ok(inputOf('in_speed'), 'a refused removal must not touch the document');
+  store.updateMachineTransition(machineId, 't1', { conditions: [] });
+  assert.strictEqual(store.removeMachineInput(machineId, 'in_speed', { label: 'Delete input', source: 'user' }), true);
+  assert.strictEqual(inputOf('in_speed'), undefined);
+  store.undo();
+  assert.ok(inputOf('in_speed'), 'undo restores the input');
+  store.redo();
+  assert.strictEqual(inputOf('in_speed'), undefined);
+
+  console.log('✓ 3B-1 in-place machine edit commands');
+}
+
+// 3B-1 A: the new commands are registered on the serializable bus.
+{
+  const { doc, idle } = fixtureDocument();
+  const store = new VeyraStore(doc);
+  const machineId = store.addStateMachine({
+    name: 'Bus',
+    states: [{ id: 'sA', name: 'A', timeline: idle.id }],
+  });
+  for (const action of ['updateMachineState', 'updateMachineInput', 'updateMachineTransition', 'removeMachineInput']) {
+    assert.ok(VEYRA_COMMAND_ACTIONS.includes(action), `${action} must be in the command table`);
+  }
+  const result = dispatchVeyraCommand(store, {
+    action: 'updateMachineState',
+    args: { machineId, stateId: 'sA', changes: { name: 'ViaBus' } },
+    command: { label: 'Bus rename', source: 'ai' },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(machineById(store.document, machineId).states[0].name, 'ViaBus');
+  const failure = dispatchVeyraCommand(store, {
+    action: 'removeMachineInput',
+    args: { machineId },
+  });
+  assert.equal(failure.ok, false);
+  assert.match(failure.error, /inputId/);
+  const last = store.commandHistory[store.commandHistory.length - 1];
+  assert.equal(last.label, 'Bus rename');
+  assert.equal(last.source, 'ai');
+
+  console.log('✓ 3B-1 machine edit commands dispatch through the command bus');
+}
+
+// 3B-1 B: runtime reconciliation — never stale, never throws, never disturbed.
+{
+  const { doc, idle, active } = fixtureDocument();
+  const store = new VeyraStore(doc);
+  const machineId = store.addStateMachine({
+    name: 'Preview',
+    inputs: [
+      { id: 'in_go', name: 'Go', type: 'trigger' },
+      { id: 'in_amt', name: 'Amount', type: 'number', value: 1 },
+    ],
+    states: [
+      { id: 'sA', name: 'A', timeline: idle.id },
+      { id: 'sB', name: 'B', timeline: idle.id },
+      { id: 'sC', name: 'C', timeline: active.id },
+    ],
+    transitions: [
+      { id: 'tAB', from: 'sA', to: 'sB', duration: 0, conditions: [{ id: 'cGo', input: 'in_go', op: 'fired' }] },
+      { id: 'tBlend', from: 'sB', to: 'sC', duration: 1 },
+    ],
+  }, { label: 'Create machine', source: 'script' });
+  const runtime = createMachineRuntime(() => store.document, machineId);
+  const events = [];
+  const unsubscribe = runtime.onInvalidate((event) => events.push(event));
+
+  // Defect 1: removing the ACTIVE state must not leave a dangling pair.
+  runtime.fire('Go');
+  runtime.step(0.1);
+  assert.strictEqual(runtime.stateId, 'sB');
+  const eventsBefore = events.length;
+  store.removeMachineState(machineId, 'sB'); // cascades tAB and tBlend away too
+  assert.strictEqual(runtime.stateId, 'sA', 'runtime must land on a valid position, not a stale id');
+  assert.ok(runtime.state, 'stateId and state can no longer disagree');
+  assert.strictEqual(runtime.transition, null, 'a blend with deleted endpoints must be cleared');
+  assert.strictEqual(events.length, eventsBefore + 1, 'exactly one runtime-invalidated per effective change');
+  // The machine is not dead: add a new target and drive into it.
+  const sD = store.addMachineState(machineId, { id: 'sD', name: 'D', timeline: idle.id }, { label: 'Add D', source: 'script' });
+  store.addMachineTransition(machineId, {
+    id: 'tAD', from: 'sA', to: 'sD', duration: 0, conditions: [{ id: 'cD', input: 'in_go', op: 'fired' }],
+  }, { label: 'Add tAD', source: 'script' });
+  runtime.fire('Go');
+  runtime.step(0.1);
+  assert.strictEqual(runtime.stateId, sD, 'step() must not be permanently dead after a cascade');
+  events.length = 0;
+
+  // Unrelated document edits must NOT disturb the preview (contract §The rule).
+  const address = nodePropertyAddress(store.document.nodes[0].id, 'paint.fill');
+  const stateTimeBefore = runtime.stateTime;
+  store.setProperty({ label: 'Recolor', source: 'user' }, address, '#22aa44');
+  assert.strictEqual(runtime.stateId, sD);
+  assert.strictEqual(runtime.stateTime, stateTimeBefore);
+  assert.strictEqual(events.length, 0, 'unrelated edits must not emit invalidations');
+
+  // Defect 2: authored edits surface on clean inputs; overrides win when dirty.
+  const amountEntry = () => runtime.inputs.find((input) => input.id === 'in_amt');
+  assert.strictEqual(amountEntry().value, 1);
+  store.updateMachineInput(machineId, 'in_amt', { value: 9 }, { label: 'Authored 9', source: 'ai' });
+  assert.strictEqual(amountEntry().value, 9, 'authored edit must surface (no shadowing)');
+  runtime.setInput('Amount', 5);
+  assert.strictEqual(amountEntry().value, 5, 'dirty override wins over authored');
+  store.updateMachineInput(machineId, 'in_amt', { value: 12 }, { label: 'Authored 12', source: 'ai' });
+  assert.strictEqual(amountEntry().value, 5, 'dirty override survives authored edits');
+  runtime.reset();
+  assert.strictEqual(amountEntry().value, 12, 'reset drops overrides to authored truth');
+
+  // Parity: getMachine truth (document) vs getMachineState truth (runtime)
+  // agree for every clean input, including inputs created after construction.
+  const lateInput = store.addMachineInput(machineId, { id: 'in_late', name: 'Late', type: 'bool', value: true });
+  const docMachine = machineById(store.document, machineId);
+  const stateInputs = new Map(runtime.inputs.map((input) => [input.id, input.value]));
+  for (const authored of docMachine.inputs) {
+    assert.strictEqual(stateInputs.get(authored.id), authored.value,
+      `parity violated for input ${authored.id} (added ${authored.id === lateInput ? 'after' : 'before'} construction)`);
+  }
+  assert.strictEqual(new Set(docMachine.inputs.map((i) => i.id)).size, runtime.inputs.length,
+    'runtime must expose exactly the document inputs');
+
+  // Defect 3: deleting a blend endpoint mid-blend must not land on it.
+  runtime.fire('Go');
+  runtime.step(0.1); // sD -> sA? no: tAD is sA->sD and we are on sD already; drive from sA:
+  runtime.reset();
+  runtime.fire('Go');
+  runtime.step(0.1);
+  assert.strictEqual(runtime.stateId, sD);
+  // Build a blend and delete its target mid-flight.
+  store.addMachineTransition(machineId, { id: 'tBlend2', from: sD, to: 'sC', duration: 2 }, { label: 'Blend', source: 'script' });
+  runtime.reset();
+  runtime.step(1); // arrives at sD? tAD requires Go; instead drive with a no-condition edge:
+  // (sD has no outgoing non-condition edge yet; force via authored transition below)
+  events.length = 0;
+  store.addMachineTransition(machineId, { id: 'tDC', from: sD, to: 'sC', duration: 2 }, { label: 'D-C blend', source: 'script' });
+  // The structural change reset us to sA; walk back to sD through Go.
+  runtime.fire('Go');
+  runtime.step(0.1);
+  assert.strictEqual(runtime.stateId, sD, 'setup: preview must be on sD');
+  runtime.step(0.5); // tBlend2 (first satisfied, authored order) or tDC starts a 2s blend — either way blending toward sC.
+  assert.ok(runtime.transition, 'setup: a blend toward sC must be active');
+  const danglingToId = runtime.transition.toId;
+  assert.strictEqual(danglingToId, 'sC');
+  store.removeMachineState(machineId, 'sC'); // deletes BOTH blends mid-flight
+  assert.strictEqual(runtime.transition, null, 'the dangling blend must be reconciled away');
+  runtime.step(3); // where the old code would land stateId on the deleted sC
+  assert.notStrictEqual(runtime.stateId, 'sC', 'a deleted blend endpoint can never become current');
+  assert.ok(machineById(store.document, machineId).states.some((s) => s.id === runtime.stateId));
+
+  // Defect 4 / removal of a previewed machine: no throw anywhere.
+  events.length = 0;
+  store.removeStateMachine(machineId, { label: 'Delete machine', source: 'user' });
+  assert.strictEqual(runtime.stateId, null);
+  assert.strictEqual(runtime.state, null);
+  assert.deepStrictEqual(runtime.step(0.5), []);
+  assert.strictEqual(runtime.evaluate().overrides && Object.keys(runtime.evaluate().overrides).length, 0);
+  assert.deepStrictEqual(runtime.inputs, []);
+  assert.strictEqual(events.length, 1, 'one machine-removed event');
+  assert.strictEqual(events[0].reason, 'machine-removed');
+  assert.throws(() => runtime.fire('Go'), /no longer in the document/, 'explicit API calls on a dead machine still throw');
+
+  // Undo restores the machine; the runtime revalidates without throwing.
+  events.length = 0;
+  store.undo();
+  assert.strictEqual(runtime.stateId, null, 'restored machine adopts initial position on next access');
+  assert.strictEqual(runtime.stateId, 'sA');
+  assert.strictEqual(events.length, 1, 'one machine-restored event');
+  assert.strictEqual(events[0].reason, 'machine-restored');
+  unsubscribe();
+  store.removeStateMachine(machineId);
+  assert.strictEqual(events.length, 1, 'unsubscribed listeners receive nothing');
+
+  console.log('✓ 3B-1 runtime reconciliation (dangling state/transition, shadowing, remove/restore)');
+}
+
+// 3B-1 B: invalidation is per effective change — debounced, not per part.
+{
+  const { doc, idle } = fixtureDocument();
+  const store = new VeyraStore(doc);
+  const machineId = store.addStateMachine({
+    name: 'Flicker',
+    states: [
+      { id: 'sA', name: 'A', timeline: idle.id },
+      { id: 'sB', name: 'B', timeline: idle.id },
+      { id: 'sC', name: 'C', timeline: idle.id },
+    ],
+    initial: 'sC',
+    transitions: [
+      { id: 'tBC', from: 'sB', to: 'sC' },
+      { id: 'tCB', from: 'sC', to: 'sB' },
+    ],
+  });
+  const runtime = createMachineRuntime(() => store.document, machineId);
+  assert.strictEqual(runtime.stateId, 'sC');
+  const events = [];
+  runtime.onInvalidate((event) => events.push(event));
+
+  // One command that structurally cascades (state + two transitions + initial)
+  // must still produce exactly ONE event on next access.
+  store.removeMachineState(machineId, 'sC', { label: 'Cascade', source: 'user' });
+  void runtime.stateId;
+  void runtime.stateId;
+  void runtime.evaluate();
+  assert.strictEqual(events.length, 1, 'multi-part commands must not flicker');
+  assert.strictEqual(events[0].type, 'runtime-invalidated');
+  assert.strictEqual(events[0].machineId, machineId);
+
+  // A value-only edit is not structural: no reset, no event, position kept.
+  runtime.step(2);
+  const stateTimeBefore = runtime.stateTime;
+  store.updateMachineTransition(machineId, 'tCB', { duration: 1.5 }, { label: 'Tune', source: 'user' });
+  assert.strictEqual(runtime.stateTime, stateTimeBefore, 'duration tuning must not reset the preview');
+  assert.strictEqual(events.length, 1);
+
+  // Retargeting a live state's timeline is not a position change either:
+  // preview continues and evaluation picks up the new timeline.
+  const otherTimeline = store.addTimeline({ name: 'Retarget', duration: 60, fps: 30 });
+  runtime.step(0.5);
+  const timeBefore = runtime.stateTime;
+  store.updateMachineState(machineId, 'sB', { timelineId: otherTimeline });
+  assert.strictEqual(runtime.stateTime, timeBefore, 'retarget must not disturb the running preview');
+  assert.strictEqual(events.length, 1);
+  const evaluated = runtime.evaluate();
+  assert.ok(Object.keys(evaluated.overrides).length === 0 || evaluated.stateId, 'evaluate stays consistent with the document');
+
+  console.log('✓ 3B-1 invalidation is debounced per effective change');
+}
+
+// 3B-1 B: Logan's gate — commands interleaved with undo/redo under a fake
+// clock; evaluate() must stay consistent with store.document at EVERY revision.
+{
+  const { doc, idle, active } = fixtureDocument();
+  const store = new VeyraStore(doc);
+  const machineId = store.addStateMachine({
+    name: 'Chaos',
+    inputs: [{ id: 'in_go', name: 'Go', type: 'trigger' }, { id: 'in_n', name: 'N', type: 'number', value: 0 }],
+    states: [
+      { id: 'sA', name: 'A', timeline: idle.id },
+      { id: 'sB', name: 'B', timeline: idle.id },
+      { id: 'sC', name: 'C', timeline: active.id },
+    ],
+    transitions: [{ id: 'tAB', from: 'sA', to: 'sB', duration: 0.5, conditions: [{ id: 'cg', input: 'in_go', op: 'fired' }] }],
+  }, { label: 'Create', source: 'script' });
+  const runtime = createMachineRuntime(() => store.document, machineId);
+
+  const steps = [
+    () => { runtime.step(1 / 60); },
+    () => { runtime.fire('Go'); runtime.step(1 / 30); },
+    () => { store.addMachineTransition(machineId, { id: 'tBC', from: 'sB', to: 'sC', duration: 1 }); },
+    () => { runtime.step(0.25); },
+    () => { store.updateMachineState(machineId, 'sC', { name: 'Renamed' }); },
+    () => { runtime.step(0.75); },
+    () => { store.undo(); },
+    () => { runtime.step(1 / 60); },
+    () => { store.removeMachineState(machineId, 'sB'); },
+    () => { runtime.step(0.5); },
+    () => { store.undo(); },
+    () => { store.undo(); },
+    () => { runtime.step(2); },
+    () => { store.redo(); },
+    () => { store.redo(); },
+    () => { runtime.step(0.1); },
+    () => { runtime.setInput('N', 3); runtime.step(1); },
+    () => { store.removeMachineInput(machineId, 'in_n'); },
+    () => { runtime.step(1); },
+    () => { assert.throws(() => store.removeMachineInput(machineId, 'in_go'), /cg/); },
+    () => { runtime.step(1); },
+    () => { store.undo(); },
+    () => { store.undo(); },
+    () => { runtime.step(0.5); },
+  ];
+
+  const consistent = (where) => {
+    const machine = machineById(store.document, machineId);
+    const ev = runtime.evaluate();
+    assert.strictEqual(ev.machineId, machineId, where);
+    if (!machine) {
+      assert.strictEqual(ev.stateId, null, `${where}: removed machine reports no state`);
+      assert.strictEqual(ev.transition, null, `${where}: removed machine reports no transition`);
+      assert.deepStrictEqual(ev.inputs, [], `${where}: removed machine reports no inputs`);
+      return;
+    }
+    const stateIds = new Set(machine.states.map((s) => s.id));
+    assert.ok(ev.stateId === null || stateIds.has(ev.stateId), `${where}: stateId ${ev.stateId} dangling`);
+    if (ev.transition) {
+      assert.ok(stateIds.has(ev.transition.fromId), `${where}: transition.fromId dangling`);
+      assert.ok(stateIds.has(ev.transition.toId), `${where}: transition.toId dangling`);
+      assert.ok(machine.transitions.some((t) => t.id === ev.transition.id), `${where}: transition id dangling`);
+    }
+    const inputIds = new Set(machine.inputs.map((i) => i.id));
+    for (const input of ev.inputs) {
+      assert.ok(inputIds.has(input.id), `${where}: runtime input ${input.id} dangling`);
+    }
+    assert.ok(ev.stateTime >= 0, `${where}: state time is never negative`);
+    if (ev.stateId !== null) {
+      const named = machine.states.find((s) => s.id === ev.stateId);
+      assert.strictEqual(ev.stateName, named.name, `${where}: stateName must match the document`);
+    }
+  };
+
+  consistent('revision 0');
+  for (let index = 0; index < steps.length; index += 1) {
+    steps[index]();
+    consistent(`after step ${index}`);
+  }
+
+  console.log('✓ 3B-1 undo/redo interleave under a fake clock stays consistent at every revision');
+}
+
+// 3B-1 C: the new command surface is visible in the scene summary.
+{
+  const { doc, idle } = fixtureDocument();
+  const normalized = normalizeDocument({
+    ...doc,
+    stateMachines: [createStateMachine({ name: 'Surfaced', states: [createMachineState({ name: 'A', timeline: idle.id })] })],
+  });
+  const [summaryMachine] = createSceneSummary(normalized).stateMachines;
+  assert.ok(summaryMachine.capabilities, 'summary machines must surface capabilities');
+  for (const op of ['update-input', 'remove-input', 'update-state', 'update-transition']) {
+    assert.ok(summaryMachine.capabilities.graph.includes(op), `capabilities.graph must include ${op}`);
+  }
+  assert.ok(summaryMachine.capabilities.runtime.includes('evaluate'));
+
+  console.log('✓ 3B-1 machine capabilities surface in the scene summary');
 }
 
 console.log('\n✅ All Veyra state machine tests passed!');

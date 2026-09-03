@@ -3,6 +3,10 @@ import {
   boneById,
   constraintById,
   controlById,
+  createAsset,
+  createBone,
+  createConstraint,
+  createControl,
   createDocument,
   createId,
   createKeyframe,
@@ -10,19 +14,20 @@ import {
   createMachineState,
   createMachineTransition,
   createStateMachine,
+  createMesh,
   createNode,
   createTimeline,
   createTrack,
   descendantIds,
   machineById,
-  nodeById,
   meshById,
+  nodeById,
   normalizeDocument,
   timelineById,
   trackByAddress,
 } from './model.js';
 import { isAnimatableProperty, readProperty, writeProperty } from './properties.js';
-import { createReference, referenceId } from './references.js';
+import { createBoneRef, createConstraintRef, createControlRef, createMeshRef, createReference, referenceId } from './references.js';
 
 export const VEYRA_COMMAND_SOURCES = Object.freeze(['user', 'ai', 'script', 'import']);
 
@@ -251,43 +256,174 @@ export class VeyraStore {
     const object = this.selectedObject;
     if (!reference || !object) return false;
     if (reference.kind === 'node') return this.remove(reference.id);
-    this.execute(`Delete ${object.name}`, (document) => {
-      if (reference.kind === 'mesh') {
-        document.meshes = document.meshes.filter((item) => item.id !== reference.id);
-      } else if (reference.kind === 'constraint') {
-        document.constraints = document.constraints.filter((item) => item.id !== reference.id);
-      } else if (reference.kind === 'control') {
-        document.controls = document.controls.filter((item) => item.id !== reference.id);
-        document.constraints = document.constraints.filter((item) => referenceId(item.target, 'control') !== reference.id);
-      } else if (reference.kind === 'bone') {
-        const removed = new Set([reference.id]);
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const bone of document.bones) {
-            if (removed.has(referenceId(bone.parent, 'bone')) && !removed.has(bone.id)) {
-              removed.add(bone.id);
-              changed = true;
-            }
-          }
-        }
-        document.bones = document.bones.filter((bone) => !removed.has(bone.id));
-        for (const mesh of document.meshes) {
-          for (const vertex of mesh.vertices) {
-            vertex.weights = vertex.weights.filter((weight) => !removed.has(referenceId(weight.bone, 'bone')));
-          }
-        }
-        document.constraints = document.constraints.filter((constraint) => {
-          if (removed.has(referenceId(constraint.bone, 'bone'))) return false;
-          if (removed.has(referenceId(constraint.target, 'bone'))) return false;
-          return !(constraint.bones || []).some((bone) => removed.has(referenceId(bone, 'bone')));
-        });
-      }
+    const descriptor = { label: `Delete ${object.name}` };
+    if (reference.kind === 'bone') return this.removeBone(reference.id, descriptor);
+    if (reference.kind === 'mesh') return this.removeMesh(reference.id, descriptor);
+    if (reference.kind === 'control') return this.removeControl(reference.id, descriptor);
+    if (reference.kind === 'constraint') return this.removeConstraint(reference.id, descriptor);
+    return false;
+  }
+
+  // --- Rig and asset CRUD (UI/AI parity) --------------------------------------
+  // The same transactional commands the editor tools use, so an AI can create
+  // and delete rig objects through the exact same API surface.
+
+  addBone(overrides = {}, commandDescriptor = {}) {
+    const bone = createBone(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add bone ${bone.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.bones.push(bone);
     });
+    this.select(createBoneRef(bone.id));
+    return bone.id;
+  }
+
+  addMesh(overrides = {}, commandDescriptor = {}) {
+    const mesh = createMesh(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add mesh ${mesh.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.meshes.push(mesh);
+    });
+    this.select(createMeshRef(mesh.id));
+    return mesh.id;
+  }
+
+  addControl(overrides = {}, commandDescriptor = {}) {
+    const control = createControl(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add control ${control.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.controls.push(control);
+    });
+    this.select(createControlRef(control.id));
+    return control.id;
+  }
+
+  addConstraint(type, overrides = {}, commandDescriptor = {}) {
+    const constraint = createConstraint(type, overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add ${constraint.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.constraints.push(constraint);
+    });
+    this.select(createConstraintRef(constraint.id));
+    return constraint.id;
+  }
+
+  addAsset(type, overrides = {}, commandDescriptor = {}) {
+    const asset = createAsset(type, overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add asset ${asset.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.assets.push(asset);
+    });
+    return asset.id;
+  }
+
+  removeBone(boneId, commandDescriptor = {}) {
+    const bone = boneById(this.document, boneId);
+    if (!bone) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete ${bone.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      this.#removeBoneCascade(document, boneId);
+    });
+    this.#clearSelection();
+    return true;
+  }
+
+  removeMesh(meshId, commandDescriptor = {}) {
+    const mesh = meshById(this.document, meshId);
+    if (!mesh) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete ${mesh.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.meshes = document.meshes.filter((item) => item.id !== meshId);
+    });
+    this.#clearSelection();
+    return true;
+  }
+
+  removeControl(controlId, commandDescriptor = {}) {
+    const control = controlById(this.document, controlId);
+    if (!control) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete ${control.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.controls = document.controls.filter((item) => item.id !== controlId);
+      document.constraints = document.constraints.filter(
+        (item) => referenceId(item.target, 'control') !== controlId
+      );
+    });
+    this.#clearSelection();
+    return true;
+  }
+
+  removeConstraint(constraintId, commandDescriptor = {}) {
+    const constraint = constraintById(this.document, constraintId);
+    if (!constraint) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete ${constraint.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.constraints = document.constraints.filter((item) => item.id !== constraintId);
+    });
+    this.#clearSelection();
+    return true;
+  }
+
+  removeAsset(assetId, commandDescriptor = {}) {
+    const asset = this.document.assets.find((candidate) => candidate.id === assetId);
+    if (!asset) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete asset ${asset.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.assets = document.assets.filter((candidate) => candidate.id !== assetId);
+    });
+    this.#clearSelection();
+    return true;
+  }
+
+  #removeBoneCascade(document, boneId) {
+    const removed = new Set([boneId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const bone of document.bones) {
+        if (removed.has(referenceId(bone.parent, 'bone')) && !removed.has(bone.id)) {
+          removed.add(bone.id);
+          changed = true;
+        }
+      }
+    }
+    document.bones = document.bones.filter((bone) => !removed.has(bone.id));
+    for (const mesh of document.meshes) {
+      for (const vertex of mesh.vertices) {
+        vertex.weights = vertex.weights.filter((weight) => !removed.has(referenceId(weight.bone, 'bone')));
+      }
+    }
+    document.constraints = document.constraints.filter((constraint) => {
+      if (removed.has(referenceId(constraint.bone, 'bone'))) return false;
+      if (removed.has(referenceId(constraint.target, 'bone'))) return false;
+      return !(constraint.bones || []).some((bone) => removed.has(referenceId(bone, 'bone')));
+    });
+  }
+
+  #clearSelection() {
     this.selectedId = null;
     this.selectedKind = null;
     this.#emit('selection');
-    return true;
   }
 
   setProperty(commandDescriptor, address, value) {
