@@ -445,6 +445,9 @@ export function installFakeDom() {
   const previousElement = globalThis.Element;
   const previousSVGElement = globalThis.SVGElement;
   const previousCSS = globalThis.CSS;
+  const previousLocalStorage = globalThis.localStorage;
+  const previousKeyboardEvent = globalThis.KeyboardEvent;
+  const previousMatchMedia = globalThis.matchMedia;
   const doc = new FakeDocument();
 
   // `renderer.js:45` does `svg instanceof SVGElement`. These globals are part
@@ -462,6 +465,36 @@ export function installFakeDom() {
     requestAnimationFrame: () => { throw new Error('fake-dom: rAF is banned in tests — step with explicit deltas.'); },
   };
 
+  // Globals the browser SHELL (`veyra.js`) touches at import time. The shell is
+  // not a module, so importing it executes top-level code immediately; it dies
+  // on the first missing global. Measurement showed it gets past `document` and
+  // `window` and fails only on autosave's `localStorage` — so the shell is
+  // importable in Node by a very small margin, which makes a real multi-move
+  // drag test possible against the ACTUAL handler rather than a re-implementation.
+  //
+  // Caveats, stated rather than implied: import succeeding is necessary, not
+  // sufficient; further globals may sit behind this one; and any shell-importing
+  // suite needs its own process, because the shell mutates globals at import.
+  globalThis.localStorage = globalThis.localStorage || (() => {
+    const store = new Map();
+    return {
+      getItem: (key) => (store.has(String(key)) ? store.get(String(key)) : null),
+      setItem: (key, value) => { store.set(String(key), String(value)); },
+      removeItem: (key) => { store.delete(String(key)); },
+      clear: () => store.clear(),
+      key: (i) => [...store.keys()][i] ?? null,
+      get length() { return store.size; },
+    };
+  })();
+
+  globalThis.KeyboardEvent = globalThis.KeyboardEvent || class KeyboardEvent extends FakeEvent {};
+  globalThis.matchMedia = globalThis.matchMedia || ((query) => ({
+    matches: false,
+    media: String(query),
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+
   return {
     document: doc,
     SVG_NS,
@@ -471,6 +504,9 @@ export function installFakeDom() {
       globalThis.Element = previousElement;
       globalThis.SVGElement = previousSVGElement;
       globalThis.CSS = previousCSS;
+      globalThis.localStorage = previousLocalStorage;
+      globalThis.KeyboardEvent = previousKeyboardEvent;
+      globalThis.matchMedia = previousMatchMedia;
     },
   };
 }
