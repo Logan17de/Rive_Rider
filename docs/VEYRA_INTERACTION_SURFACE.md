@@ -495,6 +495,34 @@ behaviour change to how every path edits. It needs an assigned decision, not an
 opportunistic fix. The test pins current behaviour (`6`) and explicitly does not
 bless it.
 
+### KD-3 — a deleted node and a non-animatable property are indistinguishable
+
+`isAnimatableProperty` (`properties.js:153-162`) ends in
+`return Boolean(node && supportsNodeProperty(...))`. A **missing node** and a
+**valid node with a non-animatable path** both return `false`, with no
+distinction. `applyLayer` (`evaluation.js:24-26`) then throws a single message:
+
+```
+${source} cannot drive non-animatable property ${address}
+```
+
+`properties.js:108`'s more specific diagnostic is never reached, because the
+predicate returned `false` rather than throwing.
+
+**Why this matters more than a normal message-quality nit:** the two causes have
+*opposite* remediations. If the node was deleted, the fix is to restore or
+recreate it. If the property is not animatable, the fix is to choose a different
+address. An AI reading this error cannot tell which — so it cannot self-correct,
+and will guess. That is a direct hit on the project's core principle: a human
+debugging this would inspect the document and see the node missing; the AI is
+handed strictly less information than the human has.
+
+Found by the arbiter author while a **guard** failed for an unexpected reason —
+i.e. the test suite discovered it, which is the argument for guards that pass
+today being retained rather than deleted.
+
+**Status: unowned.** `properties.js` and `evaluation.js` are in nobody's scope.
+
 ### KD-2 — the headless browser suite exercises first render only (gate i-b)
 
 `renderer.js` uses `:scope >` partial-update paths at `:147`, `:148`, `:734`,
