@@ -388,14 +388,53 @@ preview.
 Requirements:
 
 1. **The documented policy lives at that merge**, not in the controller.
-2. **Report provenance and conflicts rather than spreading silently.** The
-   vocabulary already exists — `sources[address]` (`evaluation.js:28, 104`)
-   surfaced through `propertySource()` (`:108-111`) and already visible in the
-   evaluated scene. Collision reporting therefore gets **AI parity for free**
-   instead of needing a new channel.
+2. **Report provenance and conflicts rather than spreading silently.**
+
+   **Corrected — my original requirement here was not implementable.** I wrote
+   that the collision should be reported through the existing `sources[address]`
+   vocabulary (`evaluation.js:28, 104`, surfaced via `propertySource()`
+   `:108-111`), on the assumption that attribution could name the losing
+   contributor. It cannot: the merge at `:64` **collapses both contributors into
+   a single object before attribution happens at `:67`.** By the time `sources`
+   is written, the information that a collision occurred no longer exists. The
+   channel is fine; the data never reaches it.
+
+   The requirement is therefore: **attribution must happen AT the merge, not
+   downstream of it.** The merge produces both the merged layer *and* a record of
+   which addresses had more than one contributor, and that record is surfaced
+   alongside `sources` in the evaluated scene. `sources` remains the delivery
+   vehicle — it just has to be fed from the merge rather than inferred after it.
+
+   Found by the gate author while implementing against the brief, which is the
+   correct time to discover an unimplementable requirement.
 3. **Decide explicitly what `Space` does while a machine previews** — stop
    preview, refuse playback, or pause-and-resume. Pick one; do not leave it to
    implementation.
+
+### Precedence ruling (leader decision)
+
+**Current precedence stands: playback wins over machine overrides. Report the
+collision; do not change who wins.**
+
+Reasoning, and the reason this is split from the reporting work:
+
+- Changing precedence is a **behaviour change to existing documents**, and no
+  test or user report currently demands it. Reporting is strictly **additive**.
+- All five capped debts are clearable *today* under unchanged precedence, so the
+  fix is unblocked without waiting on a design argument.
+- The conflict may prove **moot**: it is an editor-mode collision (a human
+  pressing `Space` while a machine previews), not a runtime one. If `Space`
+  stops the preview, the two never drive the same address concurrently — which
+  would settle precedence by removing the case rather than ranking the layers.
+
+So: **land reporting now with precedence unchanged; decide precedence separately,
+with the `Space` decision made first**, since it may dissolve the question.
+
+A note on `AI_CONTROL_MODEL.md`'s highest-level-first principle, which argues the
+machine (semantic) should outrank raw timeline playback: that is a real argument
+*for* machine-wins, and it is deliberately **not** being acted on yet — precisely
+because it is an argument from principle, and the collision it would resolve may
+not survive the `Space` decision. Recorded so it is not lost.
 4. **Test at the function boundary, not the product boundary.** Call the merge
    directly with two synthetic layers sharing an address. A size-one set that
    "tests a collision" by asserting none occurred proves nothing and reads as

@@ -92,22 +92,33 @@ A transition connects two states of the same machine:
 ]
 ```
 
-- `duration` is in **seconds** and must be ≥ 0. `0` cuts immediately with no
-  blend.
+- `duration` is in **seconds** and must be ≥ 0 (bounded 0–10000). `0` cuts
+  immediately with no blend.
 - `after` (seconds, or `null`) gates the transition until the current state
-  has been active for at least that long.
+  has been active for at least that long (bounded 0–100000).
 - `conditions` is a list of input conditions, satisfied when **all** hold.
+  A present but non-array `conditions` value is a validation error — it is
+  never silently emptied, because that would turn a gated transition into an
+  unconditional one with no trace.
 
-Condition operators:
+Condition operators and the **operator/type matrix**:
 
-| Op        | Applies to        | Semantics                                   |
-| --------- | ----------------- | ------------------------------------------- |
-| `<` `<=` `>` `>=` `==` `!=` | number / bool | compare current input value to `value` |
-| `fired`   | trigger only      | trigger is armed (fired since last step)    |
-| `!fired`  | trigger only      | trigger is not armed                        |
+| Op        | Applies to        | Value rule                                        |
+| --------- | ----------------- | ------------------------------------------------- |
+| `<` `<=` `>` `>=` | number only | finite number `value` — on a `bool` or `trigger` input this is a validation error |
+| `==` `!=` | number or bool    | `value` must match the input's own type (`bool` for a bool input, finite number for a number input) — never coerced |
+| `fired`   | trigger only      | trigger is armed (fired since last step); carries no `value` |
+| `!fired`  | trigger only      | trigger is not armed; carries no `value`          |
 
-`fired`/`!fired` on a non-trigger input is a validation error. Comparisons
-require a `value`.
+No comparison operator may gate a `trigger` input (a trigger self-clears
+every step, so an equality test on one is a timing trap); `fired`/`!fired`
+on a non-trigger input is a validation error; comparisons require a
+`value`. Violations **throw at normalization** with the condition path, op,
+and input type — a `.veyra` file can never load into a transition that can
+provably never fire, and an authored value is never silently rewritten
+(the old `0.5 → true` coercion is gone). The same rule is exported as
+`machineConditionViolation(op, value, inputType)` from `model.js` and
+reused by the store's edit commands, so loader and editor cannot drift.
 
 ## Validation
 
@@ -120,12 +131,34 @@ require a `value`.
   `from` ≠ `to`;
 - condition inputs must reference an input in the same machine;
 - state timelines must reference a timeline in the document;
-- `duration` in `[0, 10000]`, `after` in `[0, 100000]`.
+- `duration` in `[0, 10000]`, `after` in `[0, 100000]`;
+- the condition operator/type matrix (table above): ordering ops against
+  non-number inputs, any comparison against `trigger` inputs,
+  `fired`/`!fired` against non-triggers, missing comparison values, and
+  values whose type does not match the input type all throw at load;
+- `conditions`, when present, must be an array — a malformed value throws
+  rather than silently becoming an unconditional transition.
 
 Deleting a timeline that a machine state uses is blocked by the store with a
 named list of the blocking states (`store.removeTimeline` throws); deleting a
 machine state cascade-removes transitions that reference it and clears
 `initial` if it pointed there.
+
+The in-place edit commands refuse destructive work with a named blocker list
+in the same style rather than silently repairing it — because cascade-pruning
+a condition makes transitions fire *more easily* than authored:
+
+- `removeMachineInput` throws while any transition condition references the
+  input (each blocker named: condition id, transition id, op);
+- `updateMachineInput` throws when a `type` change would make an existing
+  dependent condition illegal under the operator/type matrix;
+- `updateMachineState` throws for a `timelineId` that does not exist.
+
+All edit commands mutate **in place by stable id** (ids and transition
+endpoints are immutable), so unrelated runtime positions survive cosmetic
+edits, and a refused command leaves the document, revision, and command
+history untouched (`execute()` rollback; refusals also pre-flight before any
+mutation).
 
 ## Runtime semantics
 
@@ -154,6 +187,31 @@ that overshoots a blend completes the blend and drops the remainder (the
 machine does not re-enter transition detection inside the same step).
 Determinism is per step pattern: the same step sizes and input sequence from
 the same starting state always produce the same state.
+
+### Reconciliation
+
+The runtime tracks a **structural signature** of its machine: the `initial`
+reference, input ids and types, state ids, and transition ids with their
+endpoints. Before every public read or mutation it re-reads the machine and
+compares signatures:
+
+- a **structural** change (anything the position is expressed in) resets the
+  runtime to a valid position derived from the current record — never a
+  throw, so a live preview loop survives edits, undo, and redo — and emits
+  exactly one `runtime-invalidated` event per effective change;
+- a **cosmetic** change (names, authored values, blend durations, `after`
+  gates, condition payloads) does **not** reset the position; those parts
+  are read live on every evaluation anyway;
+- edits to any other part of the document never disturb this machine's
+  preview;
+- runtime overrides exist only for inputs explicitly set via `setInput`/
+  `fire` since the last reset, so a clean input always reports its authored
+  document value — `getMachine()` and `getMachineState()` can never disagree
+  about an unchanged input;
+- an active blend is captured as value primitives, so deleting a blend's
+  endpoint states can never land the runtime on a dangling id;
+- `onInvalidate(listener)` returns an unsubscribe function, and
+  reconciliation never mutates the document.
 
 ### Blending
 
@@ -187,6 +245,7 @@ runtime.step(deltaSeconds);        // → events: transition-start / transition-
 runtime.evaluate();     // → { stateId, stateName, stateTime, transition, inputs, overrides }
 runtime.reset();        // initial state, authored input values, time 0
 runtime.scrub(seconds); // reset + step(seconds) — deterministic re-simulation
+runtime.onInvalidate(listener); // subscribe to structural resets; → unsubscribe fn
 ```
 
 `evaluate().overrides` uses the same property-address keys as
@@ -204,9 +263,13 @@ veyra.getMachine(machineId);
 veyra.createMachine({ name, inputs, states, transitions, initial });
 veyra.deleteMachine(machineId);
 veyra.addMachineInput(machineId, { name, type, value });
+veyra.updateMachineInput(machineId, inputId, { name?, type?, value? });
+veyra.removeMachineInput(machineId, inputId);
 veyra.addMachineState(machineId, { name, timelineId });
+veyra.updateMachineState(machineId, stateId, { name?, timelineId? });
 veyra.removeMachineState(machineId, stateId);
 veyra.addMachineTransition(machineId, { from, to, duration, after, conditions });
+veyra.updateMachineTransition(machineId, transitionId, { duration?, after?, conditions? });
 veyra.removeMachineTransition(machineId, transitionId);
 veyra.setMachineInput(machineId, nameOrId, value);
 veyra.fireMachineInput(machineId, nameOrId);
@@ -216,11 +279,15 @@ veyra.resetMachine(machineId);
 veyra.scrubMachine(machineId, seconds);
 ```
 
-`createSceneSummary` includes every machine with inputs, states, transitions,
-and conditions, so an AI can plan edits from the summary alone; every
-mutation goes through the transactional store, is undoable, and is recorded
-in the command history with its source (`user` / `ai` / `script` /
-`import`).
+`createSceneSummary` includes every machine with its `capabilities` (the
+single `VEYRA_MACHINE_CAPABILITIES` source in `stateMachine.js`, shared with
+the project manifest so the two catalogs cannot drift) plus inputs, states,
+transitions, and conditions, so an AI can plan edits from the summary alone;
+every mutation goes through the transactional store, is undoable, and is
+recorded in the command history with its source (`user` / `ai` / `script` /
+`import`). The same edit commands are dispatchable as actions on the
+serializable command bus (`dispatchVeyraCommand`), which is how AI callers
+reach them.
 
 ## Known limitations (next phases)
 
