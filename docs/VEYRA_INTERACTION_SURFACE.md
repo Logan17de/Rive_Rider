@@ -619,16 +619,27 @@ decoration.*
 
 ### Positive controls are part of the rule
 
-A corrected assertion still needs to prove it *can* fail. The fourth instance of
-the green-for-the-wrong-reason pattern was a **fix** for the third: correct in
-what it observed, but with no positive control showing the assertion would go red
-if the behaviour regressed.
-
-So the discipline has two halves, and the second is the one everyone forgets:
+A corrected assertion still needs to prove it *can* fail. So the discipline has
+two halves, and the second is the one everyone forgets:
 
 1. Name whose behaviour the assertion observes.
 2. Demonstrate the assertion can fail — a negative control for absence, a
    positive control for presence.
+
+**Recorded correction.** A fourth instance of the pattern was alleged against the
+*fix* for instance (3), on the grounds that it lacked a positive control. The
+allegation was **retracted by its author after a mutation test on a throwaway
+copy of the file proved the assertion does fail when the behaviour regresses.**
+The claim had already been committed here and is corrected rather than quietly
+removed.
+
+This is the rule working as intended, applied to a reviewer instead of an
+implementer: a disputed claim was settled by **running an experiment rather than
+arguing a third time**, and the durable record was fixed the moment the evidence
+landed. Mutation testing — deliberately breaking the source on a scratch copy to
+confirm the test goes red — is the cheapest available proof that an assertion is
+load-bearing, and is the preferred way to settle "does this test actually test
+anything?"
 
 ### Measured frame budget
 
