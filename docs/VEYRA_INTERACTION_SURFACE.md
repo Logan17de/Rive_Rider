@@ -539,6 +539,104 @@ catch this bug class, and which the state graph panel will depend on.
 **Gate (i-b): partial re-render and pointer-drag coverage must exist before the
 panel is dispatched.**
 
+## Test discipline: name whose behaviour you observe
+
+Adopted after **three tests went green for the wrong reason in three files within
+one hour**, each written by a careful author:
+
+1. An error-message comparison that embedded the address in both sides, so the
+   strings always differed and the check could never fail.
+2. A stale-override check whose address failed to *parse*, so it threw before
+   ever reaching the guard it claimed to exercise.
+3. A lost-pointer-capture check that asserted on `FakeElement.hasPointerCapture`
+   — the **test harness's own bookkeeping** — while its message declared a
+   renderer defect. `renderer.js:505-515` handles `pointercancel` correctly:
+   it removes all three listeners, clears `dragging`/`dragKind`, and fires
+   `callbacks.cancel`.
+
+None was sloppy. Each asserted something *true* about a **convenient stand-in for
+the thing that matters**. The harm is not the false green: it is that the next
+reader "fixes" correct source to satisfy a test that was only ever measuring the
+harness.
+
+**Rule: every assertion must name whose behaviour it observes — model, store,
+renderer, or harness. If it observes the harness, the test must say so.**
+
+Corollary for the renderer: assert renderer state (`dragging === false`,
+`dragKind === null`) and, most importantly, that a `pointermove` *after*
+cancellation causes **no further document mutation** — which proves the
+`removeEventListener` calls actually worked. That is the "assert against the
+model" rule applied one level in.
+
+**Open, and deliberately not asserted:** whether `pointerCancel` omitting an
+explicit `releasePointerCapture` is correct because browsers implicitly release
+capture on cancel. Web search is unavailable in this session, so **no member has
+verified it**. It is recorded as an open question rather than settled from
+memory.
+
+## Wiring policy: unwired must never mean forgotten
+
+`veyra-browser.js` carried an impossible assertion for months because it was
+never in `npm test`. The fix is not "wire everything immediately" — a suite with
+intentional reds would make the build permanently red, which trains everyone to
+ignore it (the same rot by a different route).
+
+The rule:
+
+- A suite is wired into `npm test` **when it is green**.
+- Until then it is a **named acceptance gate**, listed below with an owner and
+  the work that will make it green.
+- An unwired suite that is not listed here is a bug in our process.
+
+### The debt ratchet
+
+The dilemma — wire a suite carrying genuine unfixed debt and the build is
+permanently red; leave it unwired and it rots — is resolved by a **capped debt
+count**. The suite asserts *how much* is unenforced, rather than that nothing is:
+
+```
+KNOWN DEBT (capped at 5): 5 unenforced contract items — the override-merge
+collision policy, 3B-2 scope. This run passes by design. It stops passing the
+moment the count rises.
+```
+
+The suite can therefore be wired **immediately**: it exits 0 today, fails the
+instant debt grows, and prompts lowering the cap as debt shrinks. Debt becomes a
+number the build enforces instead of prose nobody re-reads.
+
+Verified across all three branches by execution: cap 5 → exit 0; cap 4 → **exit
+1**; cap 6 → exit 0 with a "lower the cap" note. *A cap that never rejects is
+decoration.*
+
+**Every future suite carrying intentional reds uses this pattern.**
+
+| Suite | Status | Gate for |
+| ----- | ------ | -------- |
+| `veyra-machine-invariants.test.mjs` | wired, 40/40 | 3B-1 (closed) |
+| `veyra-browser.test.mjs` | wired, 15/15 | 3B-2 gate (i) (closed) |
+| `veyra-renderer-interaction.test.mjs` | green, exit 0 — **wire now** | 3B-2 gate (i-b) |
+| `veyra-override-merge.test.mjs` | exit 0 via ratchet (5 capped) | 3B-2 collision policy |
+
+### Positive controls are part of the rule
+
+A corrected assertion still needs to prove it *can* fail. The fourth instance of
+the green-for-the-wrong-reason pattern was a **fix** for the third: correct in
+what it observed, but with no positive control showing the assertion would go red
+if the behaviour regressed.
+
+So the discipline has two halves, and the second is the one everyone forgets:
+
+1. Name whose behaviour the assertion observes.
+2. Demonstrate the assertion can fail — a negative control for absence, a
+   positive control for presence.
+
+### Measured frame budget
+
+From the override-merge suite: **16.70 ms/frame, within the 60 fps budget**, and
+**288 ms of work per second of preview**. The override merge itself is free; the
+`evaluateDocument` triple-normalize (`:57, :72, :81`) is ~9-10% of every
+evaluation — real, worth fixing eventually, **not** a 3B-2 blocker.
+
 ## Definition of done for gate (i)
 
 Building the seam is not closing the gate. `package.json:6-7` are hardcoded
