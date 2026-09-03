@@ -684,6 +684,30 @@ check('GUARD', 'an abandoned drag can always be cancelled back to a clean store'
     'the store must be usable again after an abandoned transaction');
 });
 
+check('GUARD', 'a rejected nested begin leaves the outer transaction intact and committable', () => {
+  // The property that makes a THROWING begin() safe to ship at all. Without it,
+  // loud refusal would mean "the editor is stuck"; with it, refusal is recoverable
+  // by construction and a caller can clean up. Measured before it was written down,
+  // because the artboard regression was described as "stranding a transaction" and
+  // "wedging the editor" — neither of which is true, and a test written against a
+  // stranded state could only ever be deleted.
+  const h = harness();
+  const label = { label: 'Gesture', source: 'user' };
+  h.store.begin(label);
+  h.store.mutate((document) => { document.artboard.width = 500; }, 'drag');
+  assert.throws(() => h.store.begin(label), /transaction/i,
+    'a nested begin must be refused, not silently absorbed');
+  // Refusal must not damage the transaction already in flight.
+  assert.doesNotThrow(() => h.store.mutate((document) => { document.artboard.width = 700; }, 'drag'),
+    'the outer transaction must survive a rejected nested begin()');
+  assert.equal(h.store.document.artboard.width, 700, 'mutate() after the refusal did not apply');
+  assert.doesNotThrow(() => h.store.commit(),
+    'commit() must still close the gesture — a refused begin() must not strand it');
+  assert.equal(h.store.document.artboard.width, 700, 'committed value is not the last mutation');
+  assert.doesNotThrow(() => h.store.execute({ label: 'Later command', source: 'user' }, () => {}),
+    'the store must accept new commands after a refused nested begin()');
+});
+
 check('GUARD', 'a stale override address raises rather than silently doing nothing', () => {
   // 3B-2 must decide this explicitly: does the preview controller catch-and-
   // report around evaluateDocument, or guarantee validity by construction?
