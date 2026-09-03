@@ -602,6 +602,50 @@ catch this bug class, and which the state graph panel will depend on.
 **Gate (i-b): partial re-render and pointer-drag coverage must exist before the
 panel is dispatched.**
 
+## Shell drag paths are structurally untestable — and this is now binding
+
+**A store-level test cannot catch a shell-level misuse.** The `begin()`
+regression proved it: `store.begin()` was called from inside a `pointermove`
+handler (`veyra.js:2239`), firing every move while `commit()` ran only on
+`pointerup`. The **store behaved correctly throughout**. A
+`begin×3 → one transaction → one undo` test passes with that bug fully present,
+because the defect was never in the store.
+
+Worse: `veyra.js` **cannot be imported in Node at all** — it is a browser script
+with no module boundary. So no Node suite can reach the drag orchestration, and
+13 green suites watched working code break.
+
+### The requirement
+
+**Drag orchestration must live in `src/veyra/` as a pure function returning a
+command descriptor — `event → intent → command`.**
+
+This is the same cut already required for the panel (see *Verification
+strategy*), arrived at independently from a second direction, which is the
+strongest argument for it. Consequences:
+
+- "begin exactly once per gesture" becomes **structurally obvious** rather than a
+  convention every call site must remember.
+- The gesture becomes Node-testable without a browser.
+- The panel inherits a working pattern instead of needing `try`/`catch`
+  discipline replicated at every site.
+
+**This is a stated constraint on the 3B-2 brief, not optional refactoring.** Any
+new drag path in the panel that calls `store.begin()` directly from a DOM handler
+repeats the exact defect.
+
+## Editing a wired file is no longer private
+
+The moment a suite is wired into `npm test`, it stops being scratch space. A
+five-call `edit` chain on a wired file left it unparseable between calls, and
+another member ran the battery in that window and reported a `SyntaxError` in
+someone else's file.
+
+- **Announce before editing a wired file, not only after.**
+- Prefer **one atomic `write`** over a chain of `edit`s on a wired file.
+- A member hitting a broken wired file **reports it and does not touch it** —
+  which is what happened, and is the correct behaviour.
+
 ## Test discipline: name whose behaviour you observe
 
 Adopted after **three tests went green for the wrong reason in three files within
