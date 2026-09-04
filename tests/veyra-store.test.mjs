@@ -245,4 +245,28 @@ function parityFor(kind, id) {
   console.log('✓ cascade removal parity between remove* and removeSelection');
 }
 
+// Test: open transactions are observable and recoverable after caller errors.
+{
+  const document = normalizeDocument(createDocument({ nodes: [createNode('rectangle', { id: 'transaction_node' })] }));
+  const store = new VeyraStore(document);
+  const before = JSON.stringify(store.document);
+  assert.equal(store.inTransaction, false, 'store reports no transaction initially');
+  store.begin({ label: 'Recoverable gesture', source: 'user' });
+  assert.equal(store.inTransaction, true, 'store reports an open transaction');
+  assert.throws(() => store.mutate(() => { throw new Error('simulated gesture failure'); }), /simulated gesture failure/);
+  assert.equal(store.inTransaction, true, 'store preserves open transaction after mutation failure');
+  if (store.inTransaction) store.cancel();
+  assert.equal(store.inTransaction, false, 'caller can cancel an open transaction');
+  assert.equal(JSON.stringify(store.document), before, 'cancel restores pre-transaction document');
+  store.begin({ label: 'Next gesture', source: 'user' });
+  store.mutate((current) => { current.nodes[0].name = 'Moved'; });
+  store.mutate((current) => { current.nodes[0].name = 'Moved again'; });
+  store.mutate((current) => { current.nodes[0].name = 'Final'; });
+  assert.equal(store.commit(), true, 'multi-move gesture commits');
+  assert.equal(store.commandHistory.length, 1, 'multi-move gesture creates one undo entry');
+  store.undo();
+  assert.equal(store.document.nodes[0].name, 'Rectangle');
+  console.log('✓ transaction observability, recovery, and multi-move undo granularity');
+}
+
 console.log('veyra store tests passed');

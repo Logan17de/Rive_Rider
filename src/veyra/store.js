@@ -133,6 +133,10 @@ export class VeyraStore {
     this.#emit(command.label);
   }
 
+  get inTransaction() {
+    return Boolean(this.#transaction);
+  }
+
   begin(commandDescriptor) {
     if (this.#transaction) {
       // One transaction slot: a second begin() must never be silently
