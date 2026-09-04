@@ -3,6 +3,13 @@ import {
   VEYRA_EASING_TYPES,
   VEYRA_LOOP_MODES,
   VEYRA_MACHINE_INPUT_TYPES,
+  VEYRA_MACHINE_STATE_TYPES,
+  VEYRA_CONDITION_OPS,
+  VEYRA_MACHINE_ORDERING_OPS,
+  VEYRA_LISTENER_KINDS,
+  VEYRA_LISTENER_EVENTS,
+  VEYRA_LISTENER_ACTIONS,
+  machineConditionViolation,
   VEYRA_NODE_TYPES,
   VEYRA_PROPERTY_BOUNDS,
 } from './model.js';
@@ -146,6 +153,41 @@ function summarizeStateMachines(sceneSummary) {
 
 function parameter(name, type, required, description, extra = {}) {
   return { name, type, required, description, ...extra };
+}
+
+function machineConditionRules() {
+  const sample = { number: 0, bool: false, trigger: undefined };
+  return Object.fromEntries(VEYRA_MACHINE_INPUT_TYPES.map((inputType) => [
+    inputType,
+    VEYRA_CONDITION_OPS.filter((op) => machineConditionViolation(op, sample[inputType], inputType) === null),
+  ]));
+}
+
+function authoringContract() {
+  return {
+    machineInput: {
+      required: ['id', 'type'],
+      type: { enum: [...VEYRA_MACHINE_INPUT_TYPES] },
+    },
+    machineState: {
+      required: ['id', 'timeline'],
+      type: { enum: [...VEYRA_MACHINE_STATE_TYPES] },
+    },
+    machineCondition: {
+      required: ['id', 'input', 'op'],
+      operators: [...VEYRA_CONDITION_OPS],
+      orderingOperators: [...VEYRA_MACHINE_ORDERING_OPS],
+      allowedOperatorsByInputType: machineConditionRules(),
+      valueRequiredFor: VEYRA_CONDITION_OPS.filter((op) => op !== 'fired' && op !== '!fired'),
+      triggerOperators: ['fired', '!fired'],
+    },
+    listener: {
+      required: ['id', 'target', 'machine', 'input', 'event', 'action'],
+      kind: { enum: [...VEYRA_LISTENER_KINDS] },
+      event: { enum: [...VEYRA_LISTENER_EVENTS] },
+      action: { enum: [...VEYRA_LISTENER_ACTIONS] },
+    },
+  };
 }
 
 function action(id, name, description, targetKind, parameters, capabilities) {
@@ -357,6 +399,7 @@ export function createProjectManifest(document, options = {}) {
       },
     },
     capabilities: projectCapabilities(document),
+    authoring: authoringContract(),
     references: {
       document: [...VEYRA_REFERENCE_KINDS],
       manifest: [...MANIFEST_ONLY_REFERENCE_KINDS],

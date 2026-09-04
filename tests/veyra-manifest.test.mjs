@@ -14,6 +14,8 @@ import {
   VEYRA_EASING_TYPES,
   VEYRA_LOOP_MODES,
   VEYRA_MACHINE_INPUT_TYPES,
+  VEYRA_CONDITION_OPS,
+  machineConditionViolation,
   VEYRA_NODE_TYPES,
   VEYRA_PROPERTY_BOUNDS,
 } from '../src/veyra/model.js';
@@ -124,6 +126,20 @@ assert.equal(manifest.capabilities.includes('rig.bones'), false, 'Fixture has no
 assert.deepEqual(manifest.references.document, [...VEYRA_REFERENCE_KINDS]);
 assert.deepEqual(manifest.references.manifest, ['action', 'keyframe', 'track']);
 assert.deepEqual(manifest.references.propertyAddress.grammar, '<kind>:<id>/<segment>[/<segment>]');
+
+// --- Enumerable machine/listener authoring contract ---------------------------
+const contract = manifest.authoring;
+assert.deepEqual(contract.machineState.required, ['id', 'timeline'], 'manifest names machine-state required fields');
+assert.deepEqual(contract.machineCondition.required, ['id', 'input', 'op'], 'manifest names machine-condition required fields');
+assert.deepEqual(contract.listener.required, ['id', 'target', 'machine', 'input', 'event', 'action'], 'manifest names listener required references');
+const samples = { number: 0, bool: false, trigger: undefined };
+for (const [inputType, advertised] of Object.entries(contract.machineCondition.allowedOperatorsByInputType)) {
+  const accepted = VEYRA_CONDITION_OPS.filter((op) => machineConditionViolation(op, samples[inputType], inputType) === null);
+  assert.deepEqual(advertised, accepted, `manifest operator matrix matches validator for ${inputType}`);
+  assert.equal(advertised.includes('bogus'), false, `manifest rejects unknown operator for ${inputType}`);
+}
+assert.deepEqual(contract.machineCondition.operators, [...VEYRA_CONDITION_OPS]);
+assert.equal(contract.listener.action.enum.includes('play'), false, 'manifest does not advertise unsupported listener action');
 
 // --- Deterministic output ----------------------------------------------------
 const first = serializeProjectManifest(createProjectManifest(document));
