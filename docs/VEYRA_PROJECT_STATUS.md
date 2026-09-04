@@ -1,9 +1,8 @@
 # Verya/Veyra — Project Status & Team Handover
 
-**Written by Akash (team leader), updated 2026-09-04 at commit `a3beae0`.
-Every number below was measured, not recalled. KD-1 has LANDED since the first
-draft of this document: zero-offset handles suppressed, pins re-anchored with
-measurements, battery 14/14 green at this commit.**
+**Written by Akash (team leader), current as of commit `9c86877`.
+Every number below was measured, not recalled. Battery: 14 of 14 suites, EXIT 0,
+via the always-run-all runner. Tree clean (one untracked sibling report noted in §8).**
 
 For deeper detail see:
 - `docs/VEYRA_TEAM_HANDOVER.md` (Logan) — per-suite measurement, test doctrine §6, blockers §7, environment traps §9
