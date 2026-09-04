@@ -72,8 +72,8 @@ export function hitTestPoint(point, document, viewport = {}) {
   for (let index = document.nodes.length - 1; index >= 0; index -= 1) {
     const node = document.nodes[index];
     if (!node.visible || node.type === 'group') continue;
-    const localPoint = apply(inverse(resolve(node)) || [], worldPoint);
-    if (inside(node, localPoint)) return { kind: 'node', id: node.id };
+    const matrix = inverse(resolve(node));
+    if (matrix && inside(node, apply(matrix, worldPoint))) return { kind: 'node', id: node.id };
   }
   return null;
 }

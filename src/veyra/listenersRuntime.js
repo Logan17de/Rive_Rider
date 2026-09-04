@@ -27,7 +27,7 @@ export function resolveListenerIntents({ event, scene, document = scene, viewpor
   const pointerEvent = type.startsWith('pointer');
   const hit = pointerEvent ? hitTestPoint(pointOf(event), scene || document, viewport) : null;
   const revision = listenerRevision(document);
-  const nextHoverKey = hit ? `${hit.id}:${revision}:${sceneRevision}` : `:${revision}:${sceneRevision}`;
+  const nextHoverKey = hit ? `${hit.id}:${revision}:${sceneRevision}` : null;
   const previousId = typeof hoverKey === 'string' ? hoverKey.split(':')[0] : (hoverKey?.id || null);
   const nextId = hit?.id || null;
   const transitions = [];
@@ -74,3 +74,7 @@ export function createListenerResolver({ document, viewport = {} } = {}) {
 export function runtimeIntentForListener(listener) {
   return intentFor(listener);
 }
+
+// Compatibility aliases keep the pure seam discoverable to existing callers.
+export const resolvePointerEvent = resolveListenerIntents;
+export const resolveListenerEvent = resolveListenerIntents;
