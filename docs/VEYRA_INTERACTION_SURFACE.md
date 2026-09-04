@@ -731,7 +731,15 @@ fixtures do not span the versions the code claims to accept.
 **Required:** a load test per accepted version. An accept-list is a claim about
 behaviour, and an unexercised claim is documentation.
 
-## KD-1 — zero-offset bezier handles (RATIFIED by debater Natalie, 2026-09-04)
+## KD-1 — zero-offset bezier handles (RATIFIED by debater Logan, 2026-09-04)
+
+> **Attribution correction (2026-09-04, by leader ruling after the human's
+> decision on the concurrent-session incident):** this section was committed
+> crediting the ratification to "debater Natalie" — a member off this roster
+> since before the ratification existed. The actual ratifier is **Logan**, on
+> the team board at 01:51Z ("I ratified the remaining gates ... applying the
+> KD-1 suppression proposal"). The proposal's evidence stands untouched — only
+> the process record is corrected, in place, never silently.
 
 **Evidence (measured from `renderer.js:436-478`, not recalled):**
 
@@ -765,9 +773,12 @@ behaviour, and an unexercised claim is documentation.
    reordering paint so handles sit on top (the hit ambiguity moves, it does not
    resolve).
 
-**Status:** proposed by the leader on measured evidence. `renderer.js` stays
-LOCKED until a debater ratifies or objects. Logan is quota-exhausted; Natalie is
-asked to ratify between tasks.
+**Status: RATIFIED and LANDED.** Ratified by debater **Logan** (board, 2026-09-04
+01:51Z, alongside the v4-gate and zero-state rulings); implemented and pinned in
+`a3beae0` (zero-offset circle+line suppressed; seam pins re-anchored with
+measurements; corner→smooth recorded as the named gap above). `renderer.js` is
+no longer locked. See the attribution correction at the head of this section for
+how this page briefly mis-credited the ratification.
 
 ## Test discipline: name whose behaviour you observe
 
