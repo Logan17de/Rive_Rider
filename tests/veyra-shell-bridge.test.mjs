@@ -29,4 +29,15 @@ assert.equal(bridge.document, replacement, 'document identity replacement update
 assert.equal(bridge.revision, 1, 'document replacement advances scene revision');
 const point = canvasPoint({ clientX: 125, clientY: 240 }, { getBoundingClientRect: () => ({ left: 25, top: 40, width: 200, height: 100 }) }, { cssWidth: 400, cssHeight: 200 });
 assert.deepEqual(point, { x: 200, y: 400 }, 'DOM coordinate conversion honors canvas offset and CSS scale');
+const noHitIntents = [];
+const noHitBridge = createShellInteractionBridge({ document, onIntent: (intent) => noHitIntents.push(intent) });
+const noHit = noHitBridge.resolve({ type: 'pointerdown', x: -100, y: -100 }, scene, 1, { width: 100, height: 100, centerX: 0, centerY: 0, zoom: 1 });
+assert.equal(noHit.hit, null, 'preview no-hit resolves no target');
+assert.equal(noHitIntents.length, 0, 'preview no-hit does not dispatch playback');
+const replacementWithMove = normalizeDocument({ ...document, id: 'replacement-two', listeners: [] });
+bridge.resolve({ type: 'pointermove', x: 50, y: 50 }, scene, 2, { width: 100, height: 100, centerX: 0, centerY: 0, zoom: 1 });
+bridge.updateDocument(replacementWithMove);
+assert.equal(bridge.resolver.hoverKey, null, 'document identity refresh clears prior hover state');
+assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 0, altKey: true }, tool: 'select', preview: true }), false, 'Alt-pan remains authoring-routed');
+
 console.log('All shell bridge tests passed!');

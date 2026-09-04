@@ -2252,6 +2252,7 @@ function previewPointerEligible(event) {
 function resolvePreviewPointer(event) {
   if (!previewPointerEligible(event) || !evaluatedScene) return null;
   const point = canvasPoint(event, canvas, { cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight });
+  const center = renderer.viewCenter || { x: store.document.artboard.width / 2, y: store.document.artboard.height / 2 };
   const viewportWidth = canvas.clientWidth || canvas.getBoundingClientRect().width;
   const viewportHeight = canvas.clientHeight || canvas.getBoundingClientRect().height;
   const result = interactionBridge.resolve({
