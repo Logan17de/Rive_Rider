@@ -122,18 +122,20 @@ back-door safeguard. Both emitted versions are provably in the support list
 ## 8. Remaining work queue
 
 1. **Answer the four questions above** (blocks the panel).
-2. **3B-7a in flight (Natalie):** extract the artboard-resize drag into a pure
-   gesture in `src/veyra/` — Stage 1 of the binding `event → intent → command`
-   constraint. Stage 2 (keyframe + work-area drags) briefs after it lands.
+2. **3B-7b in flight (Natalie):** extract the keyframe + work-area commit-at-end
+   drags into pure command descriptors — Stage 2 of the binding
+   `event → intent → command` constraint. Pan stays view-only.
 3. Panel: state-graph UI, MachinePreviewController, listener wiring (3B-2 body).
 4. Conditional v4 stamping documentation in `docs/VEYRA_STATE_MACHINES.md`.
 5. Vertex-type affordance — closes the KD-1 named gap (corner → smooth).
 
-**Closed this session:** G4-finish `store.inTransaction` + recovery coverage
-(`e765c84`) · 3B-6 enumerable authoring contract in the manifest (`f9a1230`) ·
-measured drag inventory narrowing the extraction (`6d412e7`) · KD-1 decided,
-ratified, fixed, pinned (`a3beae0`) · always-run-all runner (`c279f2e`) ·
-per-version load coverage (`a3beae0`).
+**Closed this session:** 3B-7a artboard-resize gesture extraction (committed,
+battery now **15/15** — begin-exactly-once is structural, real-store probe
+confirmed one undo entry + byte-exact restore) · G4-finish `store.inTransaction`
++ recovery coverage (`e765c84`) · 3B-6 enumerable authoring contract in the
+manifest (`f9a1230`) · measured drag inventory narrowing the extraction
+(`6d412e7`) · KD-1 decided, ratified, fixed, pinned (`a3beae0`) ·
+always-run-all runner (`c279f2e`) · per-version load coverage (`a3beae0`).
 
 **Note on `docs/STATUS_REPORT_FOR_LOGESH.md`:** written by "Sheema (critic)" of
 a sibling team — not a member of this team's roster — and left untracked. Two of
