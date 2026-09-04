@@ -2252,17 +2252,12 @@ function previewPointerEligible(event) {
 function resolvePreviewPointer(event) {
   if (!previewPointerEligible(event) || !evaluatedScene) return null;
   const point = canvasPoint(event, canvas, { cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight });
-  const center = renderer.viewCenter || { x: store.document.artboard.width / 2, y: store.document.artboard.height / 2 };
   const viewportWidth = canvas.clientWidth || canvas.getBoundingClientRect().width;
   const viewportHeight = canvas.clientHeight || canvas.getBoundingClientRect().height;
-  const worldPoint = {
-    x: (point.x - viewportWidth / 2) / renderer.zoom + center.x,
-    y: (point.y - viewportHeight / 2) / renderer.zoom + center.y,
-  };
   const result = interactionBridge.resolve({
     type: event.type,
-    x: worldPoint.x,
-    y: worldPoint.y,
+    x: point.x,
+    y: point.y,
     pointerId: event.pointerId,
   }, evaluatedScene, interactionSceneRevision, {
     width: canvas.clientWidth || canvas.getBoundingClientRect().width,
@@ -2281,7 +2276,7 @@ canvas.addEventListener('pointerdown', (event) => {
   if (!previewPointerEligible(event)) return;
   const result = resolvePreviewPointer(event);
   if (result?.intents?.length || result?.transitions?.length) event.preventDefault();
-});
+}, true);
 
 // Artboard handles: the top/left border strips pan the canvas (drag the
 // artboard), while the right/bottom strips and corner resize the artboard.

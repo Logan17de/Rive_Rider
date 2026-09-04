@@ -37,9 +37,11 @@ export function createShellInteractionBridge({ document = null, onIntent = null,
   function resolve(event, scene = currentDocument, sceneRevision = revision, viewport = {}) {
     resolver.setViewport(viewport);
     const result = resolver.resolve(event, scene, sceneRevision);
-    for (const intent of result.intents || []) {
-      if (onIntent) onIntent(intent);
-      else report(`Interaction intent has no transport: ${intent.op}`, onDiagnostic);
+    if (event.type !== 'pointermove') {
+      for (const intent of result.intents || []) {
+        if (onIntent) onIntent(intent);
+        else report(`Interaction intent has no transport: ${intent.op}`, onDiagnostic);
+      }
     }
     if (event.type === 'pointermove') {
       for (const transition of result.transitions || []) {
