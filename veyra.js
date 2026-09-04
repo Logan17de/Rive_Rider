@@ -2275,6 +2275,9 @@ canvas.addEventListener('pointerup', resolvePreviewPointer);
 canvas.addEventListener('pointerdown', (event) => {
   if (!previewPointerEligible(event)) return;
   const result = resolvePreviewPointer(event);
+  // Preview owns eligible primary pointerdown events; prevent renderer child
+  // handlers from starting selection or drag gestures.
+  event.stopPropagation();
   if (result?.intents?.length || result?.transitions?.length) event.preventDefault();
 }, true);
 
