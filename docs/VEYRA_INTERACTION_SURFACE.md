@@ -646,6 +646,54 @@ someone else's file.
 - A member hitting a broken wired file **reports it and does not touch it** —
   which is what happened, and is the correct behaviour.
 
+## Version support must be an append-only list, not a derived pair
+
+The v4 work briefly made **every existing v3 document unreadable**. The accept-list
+was written as `[1, 2, VEYRA_VERSION]` — *derived* from the version constant — so
+bumping the constant to 4 silently dropped 3 from the accepted set. Nothing
+warned; the list looked correct at a glance.
+
+The repair introduced `VEYRA_LEGACY_VERSION = 3`, giving `[1, 2, LEGACY, VERSION]`.
+**That defers the same bug rather than fixing it**, because it is a single slot:
+
+```
+today:  VERSION=4, LEGACY=3  -> accepts [1,2,3,4]
+next:   VERSION=5, LEGACY=4  -> accepts [1,2,4,5]   <- v3 silently gone
+```
+
+A one-slot "legacy" variable asserts *there will never be more than one old
+version* — precisely the assumption that just broke the tree.
+
+**Required shape: an append-only frozen `VEYRA_SUPPORTED_VERSIONS` list, with
+`VEYRA_VERSION` derived from it** (the last entry), not the reverse.
+
+The decisive argument is how the two read **in review**: deleting an element from
+a list named `SUPPORTED_VERSIONS` looks dangerous and invites a question, whereas
+editing `LEGACY = 3` to `LEGACY = 4` reads as routine bookkeeping. Make the
+dangerous operation *look* dangerous.
+
+### This is the third instance of one pattern
+
+A **published description** drifting from the **mechanism**:
+
+1. `sources` emitted `'playback'` while `VEYRA_EVALUATION_ORDER` omitted it.
+2. An accept-list claiming four versions while one slot holds two of them.
+3. (Earlier) the manifest describing capabilities the commands did not have.
+
+The cure is the same each time and is already proven: **derive the description
+from behaviour and assert they match** — the override-merge guard now pins "the
+published layer order matches the order the evaluator actually applies." Apply
+the same treatment to version support.
+
+### Version coverage gap
+
+**Only v1 has legacy load coverage** (`veyra-foundation.test.mjs:56-59`). Nothing
+loads a v3 document — which is exactly why this class of break ships green: the
+fixtures do not span the versions the code claims to accept.
+
+**Required:** a load test per accepted version. An accept-list is a claim about
+behaviour, and an unexercised claim is documentation.
+
 ## Test discipline: name whose behaviour you observe
 
 Adopted after **three tests went green for the wrong reason in three files within

@@ -17,7 +17,16 @@ import {
 } from './references.js';
 
 export const VEYRA_FORMAT = 'veyra';
+// v4 is feature-gated: ordinary documents continue to normalize as v3, while
+// listener-bearing documents are loud to readers that predate the registry.
 export const VEYRA_VERSION = 3;
+export const VEYRA_LISTENER_VERSION = 4;
+export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4]);
+export const VEYRA_LISTENER_KINDS = Object.freeze(['pointer']);
+export const VEYRA_LISTENER_EVENTS = Object.freeze([
+  'pointerdown', 'pointerup', 'pointermove', 'pointerenter', 'pointerleave',
+]);
+export const VEYRA_LISTENER_ACTIONS = Object.freeze(['setInput', 'fire']);
 export const VEYRA_MIME = 'application/vnd.veyra+json';
 export const VEYRA_ASSET_TYPES = Object.freeze(['image', 'font', 'audio']);
 export const VEYRA_CONSTRAINT_TYPES = Object.freeze([
@@ -479,6 +488,32 @@ export function createStateMachine(overrides = {}) {
   };
 }
 
+export function createPointerListener(overrides = {}) {
+  const kind = String(overrides.kind || 'pointer');
+  if (!VEYRA_LISTENER_KINDS.includes(kind)) throw new TypeError(`Unsupported listener kind: ${kind}`);
+  const event = String(overrides.event || '');
+  if (!VEYRA_LISTENER_EVENTS.includes(event)) throw new TypeError(`Unsupported listener event: ${event}`);
+  const action = String(overrides.action || '');
+  if (!VEYRA_LISTENER_ACTIONS.includes(action)) throw new TypeError(`Unsupported listener action: ${action}`);
+  const target = normalizeReference(overrides.target ?? overrides.targetId, 'node', 'listener.target');
+  const machine = String(overrides.machine ?? overrides.machineId ?? '');
+  const input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'listener.input');
+  if (!target) throw new TypeError('listener.target is required.');
+  if (!machine) throw new TypeError('listener.machine is required.');
+  if (!input) throw new TypeError('listener.input is required.');
+  if (action === 'setInput' && overrides.value === undefined) throw new TypeError('listener.value is required for setInput.');
+  return {
+    id: String(overrides.id || createId('listener')),
+    kind,
+    event,
+    target,
+    machine,
+    input,
+    action,
+    ...(action === 'setInput' ? { value: cloneValue(overrides.value) } : {}),
+  };
+}
+
 export function createDocument(overrides = {}) {
   const now = new Date().toISOString();
   return {
@@ -507,6 +542,7 @@ export function createDocument(overrides = {}) {
     constraints: cloneValue(overrides.constraints || []),
     timelines: cloneValue(overrides.timelines || []),
     stateMachines: cloneValue(overrides.stateMachines || []),
+    listeners: cloneValue(overrides.listeners || []),
   };
 }
 
@@ -1184,12 +1220,43 @@ function normalizeStateMachine(machine, index, timelineIds) {
   };
 }
 
+function normalizeListener(listener, index, nodeIds, machinesById) {
+  const path = `listeners[${index}]`;
+  const kind = String(listener?.kind || '');
+  if (!VEYRA_LISTENER_KINDS.includes(kind)) throw new TypeError(`${path}.kind must be a supported listener kind.`);
+  const event = String(listener?.event || '');
+  if (!VEYRA_LISTENER_EVENTS.includes(event)) throw new TypeError(`${path}.event must be a supported pointer event.`);
+  const action = String(listener?.action || '');
+  if (!VEYRA_LISTENER_ACTIONS.includes(action)) throw new TypeError(`${path}.action must be setInput or fire.`);
+  const target = requiredReference(listener?.target ?? listener?.targetId, 'node', `${path}.target`);
+  const targetId = referenceId(target, 'node');
+  if (!nodeIds.has(targetId)) throw new TypeError(`${path}.target references missing node ${targetId}.`);
+  const machineId = String(listener?.machine ?? listener?.machineId ?? '');
+  const machine = machinesById.get(machineId);
+  if (!machine) throw new TypeError(`${path}.machine references missing state machine ${machineId}.`);
+  const inputRef = requiredReference(listener?.input ?? listener?.inputId, 'machineInput', `${path}.input`);
+  const inputId = referenceId(inputRef, 'machineInput');
+  const input = machine.inputs.find((candidate) => candidate.id === inputId || candidate.name === inputId);
+  if (!input) throw new TypeError(`${path}.input references missing machine input ${inputId}.`);
+  if (action === 'setInput' && listener.value === undefined) throw new TypeError(`${path}.value is required for setInput.`);
+  return {
+    id: String(listener?.id || createId('listener')),
+    kind,
+    event,
+    target,
+    machine: machineId,
+    input: createMachineInputRef(input.id),
+    action,
+    ...(action === 'setInput' ? { value: cloneValue(listener.value) } : {}),
+  };
+}
+
 export function normalizeDocument(input) {
   if (!input || typeof input !== 'object') throw new TypeError('Veyra document must be an object.');
   if (input.format !== VEYRA_FORMAT) throw new TypeError(`Expected format "${VEYRA_FORMAT}".`);
   const inputVersion = Number(input.version);
-  if (![1, 2, VEYRA_VERSION].includes(inputVersion)) {
-    throw new TypeError(`Unsupported Veyra version ${input.version}; expected version 1, 2, or ${VEYRA_VERSION}.`);
+  if (!VEYRA_SUPPORTED_VERSIONS.includes(inputVersion)) {
+    throw new TypeError(`Unsupported Veyra version ${input.version}; expected one of ${VEYRA_SUPPORTED_VERSIONS.join(', ')}.`);
   }
   if (!Array.isArray(input.nodes)) throw new TypeError('nodes must be an array.');
   if (input.nodes.length > 10000) throw new RangeError('Veyra document contains too many nodes.');
@@ -1262,14 +1329,29 @@ export function normalizeDocument(input) {
     ? input.stateMachines.map((machine, index) => normalizeStateMachine(machine, index, timelineIds))
     : [];
   const machineIds = new Set();
+  const machinesById = new Map();
   for (const machine of stateMachines) {
     if (machineIds.has(machine.id)) throw new TypeError(`Duplicate state machine id ${machine.id}.`);
     machineIds.add(machine.id);
+    machinesById.set(machine.id, machine);
+  }
+
+  const rawListenersPresent = Object.prototype.hasOwnProperty.call(input, 'listeners');
+  if (rawListenersPresent && !Array.isArray(input.listeners)) {
+    throw new TypeError('listeners must be an array.');
+  }
+  const listeners = (Array.isArray(input.listeners) ? input.listeners : []).map(
+    (listener, index) => normalizeListener(listener, index, ids, machinesById)
+  );
+  const listenerIds = new Set();
+  for (const listener of listeners) {
+    if (listenerIds.has(listener.id)) throw new TypeError(`Duplicate listener id ${listener.id}.`);
+    listenerIds.add(listener.id);
   }
 
   return {
     format: VEYRA_FORMAT,
-    version: VEYRA_VERSION,
+    version: listeners.length > 0 ? VEYRA_LISTENER_VERSION : VEYRA_VERSION,
     conventions,
     id: String(input.id || createId('document')),
     name: String(input.name || 'Untitled Veyra'),
@@ -1289,6 +1371,7 @@ export function normalizeDocument(input) {
     constraints,
     timelines,
     stateMachines,
+    listeners,
   };
 }
 
