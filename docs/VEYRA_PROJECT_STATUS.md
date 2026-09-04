@@ -1,10 +1,9 @@
 # Verya/Veyra — Project Status & Team Handover
 
-**Written by Akash (team leader), updated 2026-09-04 at commit `0d048c5`.
-Every number below was measured, not recalled. The battery measurement is at
-the current working tree, which includes one IN-FLIGHT change: Natalie's
-always-run-all runner (`scripts/run-suites.mjs` + `package.json` test line) is
-live and reporting "14 of 14 suites passed" but not yet committed.**
+**Written by Akash (team leader), updated 2026-09-04 at commit `a3beae0`.
+Every number below was measured, not recalled. KD-1 has LANDED since the first
+draft of this document: zero-offset handles suppressed, pins re-anchored with
+measurements, battery 14/14 green at this commit.**
 
 For deeper detail see:
 - `docs/VEYRA_TEAM_HANDOVER.md` (Logan) — per-suite measurement, test doctrine §6, blockers §7, environment traps §9
@@ -124,19 +123,27 @@ back-door safeguard. Both emitted versions are provably in the support list
 ## 8. Remaining work queue
 
 1. **Answer the four questions above** (blocks the panel).
-2. `store.inTransaction` getter + stranded-transaction recovery test
-   (the safety valve for throwing refusal; half-fixed).
+2. `store.inTransaction` getter + stranded-transaction recovery test —
+   **reassigned to Natalie (task daa5a350)**; Asha quota-exhausted.
 3. `event → intent → command` extraction (binding constraint, unstarted).
 4. Panel: state-graph UI, MachinePreviewController, listener wiring (3B-2 body).
-5. KD-1 decision on `renderer.js` zero-offset drag targets, then unlock it.
-6. Conditional v4 stamping documentation in `docs/VEYRA_STATE_MACHINES.md`.
-7. Make required-field/enum metadata enumerable from the manifest (currently
+5. Conditional v4 stamping documentation in `docs/VEYRA_STATE_MACHINES.md`.
+6. Make required-field/enum metadata enumerable from the manifest (currently
    discoverable only by throwing — flagged as an accessibility gap).
-8. Replace the `&&` test chain with an always-run-all runner — **IN FLIGHT**:
-   `scripts/run-suites.mjs` is live in `npm test` and reporting 14/14;
-   commit pending its negative-control proof (suites after a red still run).
-9. Per-version load coverage: every version in `VEYRA_SUPPORTED_VERSIONS`
-   exercised by a load test (currently only v1 and v3/v4 are). Assigned, queued.
+7. Vertex-type affordance — closes the KD-1 named gap (corner → smooth).
+
+**Closed since the first draft of this document:** KD-1 decided, ratified, fixed
+and pinned both ways (`a3beae0`, renderer.js unlocked) · always-run-all runner
+committed (`c279f2e`, negative control proven) · per-version load coverage
+(`a3beae0`).
+
+**Note on `docs/STATUS_REPORT_FOR_LOGESH.md`:** written by "Sheema (critic)" of
+a sibling team — not a member of this team's roster — and left untracked. Two of
+its alarms are stale: the 13/14 suite failure (resolved at `a3beae0`) and its
+claim that the KD-1 ratification line names someone "not part of today's team"
+(Natalie IS on this team's roster and her ratification is in the team record).
+Not rewritten — it is the sibling team's document; the discrepancy is recorded
+here instead.
 
 ## 9. Standing orders (from the human, still in force)
 
