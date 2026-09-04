@@ -123,19 +123,18 @@ back-door safeguard. Both emitted versions are provably in the support list
 ## 8. Remaining work queue
 
 1. **Answer the four questions above** (blocks the panel).
-2. `store.inTransaction` getter + stranded-transaction recovery test —
-   **reassigned to Natalie (task daa5a350)**; Asha quota-exhausted.
-3. `event → intent → command` extraction (binding constraint, unstarted).
-4. Panel: state-graph UI, MachinePreviewController, listener wiring (3B-2 body).
-5. Conditional v4 stamping documentation in `docs/VEYRA_STATE_MACHINES.md`.
-6. Make required-field/enum metadata enumerable from the manifest (currently
-   discoverable only by throwing — flagged as an accessibility gap).
-7. Vertex-type affordance — closes the KD-1 named gap (corner → smooth).
+2. **3B-7a in flight (Natalie):** extract the artboard-resize drag into a pure
+   gesture in `src/veyra/` — Stage 1 of the binding `event → intent → command`
+   constraint. Stage 2 (keyframe + work-area drags) briefs after it lands.
+3. Panel: state-graph UI, MachinePreviewController, listener wiring (3B-2 body).
+4. Conditional v4 stamping documentation in `docs/VEYRA_STATE_MACHINES.md`.
+5. Vertex-type affordance — closes the KD-1 named gap (corner → smooth).
 
-**Closed since the first draft of this document:** KD-1 decided, ratified, fixed
-and pinned both ways (`a3beae0`, renderer.js unlocked) · always-run-all runner
-committed (`c279f2e`, negative control proven) · per-version load coverage
-(`a3beae0`).
+**Closed this session:** G4-finish `store.inTransaction` + recovery coverage
+(`e765c84`) · 3B-6 enumerable authoring contract in the manifest (`f9a1230`) ·
+measured drag inventory narrowing the extraction (`6d412e7`) · KD-1 decided,
+ratified, fixed, pinned (`a3beae0`) · always-run-all runner (`c279f2e`) ·
+per-version load coverage (`a3beae0`).
 
 **Note on `docs/STATUS_REPORT_FOR_LOGESH.md`:** written by "Sheema (critic)" of
 a sibling team — not a member of this team's roster — and left untracked. Two of
