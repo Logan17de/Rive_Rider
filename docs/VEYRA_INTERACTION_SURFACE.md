@@ -422,7 +422,7 @@ Requirements:
    `Space` is the universal play/pause affordance, so while a preview is active
    it toggles **that** preview. This matches the existing single-active-entity
    pattern (`activeTimelineId`, `previewMachineId`) rather than inventing a
-   second concurrency model.
+   second concurrency model. **HUMAN RATIFICATION (Logesh, 2026-09-04, §7 Q2):** Space behaves as normal media controls — running→pause, paused→resume, finished→replay-from-start — AND must remain a literal space character whenever focus is inside a text field (no key-hijacking while typing). Binding for the panel cut; supersedes the earlier mutual-exclusion framing, which survives only as "exactly one transport is active."
 
    **Consequence for precedence:** at the *editor* level this dissolves the
    collision — the two can no longer drive the same address concurrently.
@@ -730,6 +730,52 @@ fixtures do not span the versions the code claims to accept.
 
 **Required:** a load test per accepted version. An accept-list is a claim about
 behaviour, and an unexercised claim is documentation.
+
+## HUMAN RULINGS 2026-09-04 — §7 answered; schema reopened (authority: human > contract > debater > leader)
+
+Logesh answered the four open product questions directly (recorded by Sheema,
+corroborated by Logan and measured against the shipped code). R2 (`Space`) is
+appended in the precedence section above. R1 and R3/R4 follow.
+
+**R1 — External builds:** unknown; nothing has ever been pushed or pulled; the
+project stays local. The **no-v4-gate** position stands unchanged (a format bump
+is cheap, a broken loader is not; the frozen supported-versions list already
+prevents the one-slot-legacy drift).
+
+**R3 — Listener/machine coupling REVERSED (schema reopens 3B-4).** Direct
+click→play-animation must work with **no state machine**: machines are the
+advanced path, not a prerequisite. Measured consequence: the shipped schema
+cannot express the default case — `normalizeListener` requires `machine` and
+`input` unconditionally and `VEYRA_LISTENER_ACTIONS = [setInput, fire]`.
+Required shape:
+
+- Actions grow a **play family**: `play`, `stop`, `seek` (exact enum ratified at
+  the schema cut; `seek` carries a numeric `value`, `play` may carry a
+  `restart: true` modifier (LEADER INFERENCE from R2's replay-from-start intent — NOT attributed to the human; ratify or drop at the schema cut).
+- Conditional required refs: `setInput`/`fire` ⇒ `machine` + `input` required;
+  play-family ⇒ `timeline` required, machine/input forbidden. Unknown-combination
+  shapes **throw** (a binding that silently degrades is the evaporation bug in
+  new clothes).
+- Version rule unchanged: any `listeners` key ⇒ v4.
+- The sibling-team's committed authoring contract (`f9a1230`) and its
+  "play-not-advertised" test now encode the *old* doctrine; at the schema cut
+  they must flip red and be re-anchored in the **same atomic commit**. That red
+  is the canary working.
+
+**R4 — Empty/unfinished machine targets: WARN, do not refuse.** Editing-time:
+non-blocking warning with the offender's address; runtime: explicit log, never
+silent; publish-time: escalate to a strong warning. This **supersedes** the
+debater/leader "refuse loudly at normalize" position ratified at 01:51–01:54Z;
+the arbiter check written against refusal must be rewritten to warning tiers
+before it counts as green.
+
+**Process note (honesty, in place):** during the concurrent-teams incident this
+doc briefly recorded rulings as "RATIFIED by debater Natalie." Natalie turned
+out to be real — a debater on the human's *other* team (separate chat, same
+workspace, ended by the human 2026-09-04). Their ratifications governed their
+board; the authoritative record for this workspace and its tests remains this
+contract and our ratifiers. Where both teams ratified the same decision
+independently, that is convergence — recorded as evidence, not as confusion.
 
 ## KD-1 — zero-offset bezier handles (RATIFIED by debater Logan, 2026-09-04)
 
