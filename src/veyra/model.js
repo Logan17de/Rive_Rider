@@ -1258,7 +1258,7 @@ function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) 
     const machineId = String(machineValue || '');
     const machine = machinesById.get(machineId);
     if (!machine) throw new TypeError(`${path}.machine references missing state machine ${machineId}.`);
-    if (!machine.states.length) console.warn(`${path} targets state machine ${machineId} with no playable state; interaction will be ignored at runtime.`);
+    if (!machine.states.length) console.warn(`${path} targets state machine ${machineId} with no playable state; interaction will be ignored at runtime. No playable animation is configured for this interaction.`);
     const inputRef = requiredReference(inputValue, 'machineInput', `${path}.input`);
     const inputId = referenceId(inputRef, 'machineInput');
     const input = machine.inputs.find((candidate) => candidate.id === inputId || candidate.name === inputId);
