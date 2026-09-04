@@ -8,6 +8,11 @@ import {
   createRadialGradient,
   createSemanticRecord,
   createStarterDocument,
+  createPointerListener,
+  createStateMachine,
+  createMachineInput,
+  createMachineState,
+  VEYRA_SUPPORTED_VERSIONS,
   createTimeline,
   normalizeDocument,
 } from '../src/veyra/model.js';
@@ -213,6 +218,29 @@ assert.throws(() => parseVeyra('{broken'), /Invalid Veyra JSON/);
   workStore.undo();
   assert.equal(workStore.document.timelines[0].workStart, 0);
   assert.equal(workStore.document.timelines[0].workEnd, 60);
+}
+
+// Test: every accepted format version is loadable and stamps by feature content.
+{
+  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4]);
+  const target = createNode('rectangle', { id: 'version_target', name: 'Version target' });
+  const timeline = createTimeline({ id: 'version_timeline', name: 'Version timeline' });
+  const machine = createStateMachine({
+    id: 'version_machine',
+    inputs: [createMachineInput({ id: 'version_input', name: 'Tap', type: 'trigger' })],
+    states: [createMachineState({ id: 'version_state', timeline: timeline.id })],
+  });
+  const fixture = createDocument({ nodes: [target], timelines: [timeline], stateMachines: [machine] });
+  for (const version of VEYRA_SUPPORTED_VERSIONS) {
+    const plain = parseVeyra(JSON.stringify({ ...fixture, version }));
+    assert.equal(plain.version, 3, `model output stamp for listener-free v${version}`);
+    const listener = createPointerListener({ id: `listener_v${version}`, target: target.id, machine: machine.id, input: 'Tap', event: 'pointerdown', action: 'fire' });
+    const withListener = parseVeyra(JSON.stringify({ ...fixture, version, listeners: [listener] }));
+    assert.equal(withListener.version, 4, `model output stamp for listener-bearing v${version}`);
+  }
+  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 5 })), /Unsupported Veyra version/);
+  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 99 })), /Unsupported Veyra version/);
+  console.log('✓ every accepted version loads; output stamp follows listener content');
 }
 
 console.log('veyra model tests passed');

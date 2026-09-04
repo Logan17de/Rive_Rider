@@ -439,18 +439,24 @@ export class VeyraRenderer {
       for (const prefix of ['in', 'out']) {
         const offsetX = Number(vertex[`${prefix}X`]);
         const offsetY = Number(vertex[`${prefix}Y`]);
+        // KD-1 (ratified 2026-09-04, contract doc): a zero-offset handle sits at
+        // exactly the vertex position, painted under the larger vertex point, so
+        // it is invisible AND ungrabbable — a control that can never receive a
+        // click. The model decides, the presenter reports: emit only handles for
+        // offsets that actually exist in the document. Corner-to-smooth from the
+        // canvas is a NAMED GAP until a vertex-type affordance ships; AI reaches
+        // the capability today via veyra.moveHandle (veyra.js:168).
+        if (Math.abs(offsetX) < 0.0001 && Math.abs(offsetY) < 0.0001) continue;
         const handleX = vertex.x + offsetX;
         const handleY = vertex.y + offsetY;
-        if (Math.abs(offsetX) >= 0.0001 || Math.abs(offsetY) >= 0.0001) {
-          controls.appendChild(svgElement('line', {
-            class: 'handleLine',
-            x1: vertex.x,
-            y1: vertex.y,
-            x2: handleX,
-            y2: handleY,
-            'stroke-width': 1 / this.zoom,
-          }));
-        }
+        controls.appendChild(svgElement('line', {
+          class: 'handleLine',
+          x1: vertex.x,
+          y1: vertex.y,
+          x2: handleX,
+          y2: handleY,
+          'stroke-width': 1 / this.zoom,
+        }));
         const handle = svgElement('circle', {
           class: 'bezierHandle',
           'data-handle': prefix,

@@ -163,8 +163,9 @@ back-door safeguard. Both emitted versions are provably in the support list
   renderer-interaction test, listener suite; currently on the always-run-all
   runner task
 
-Two of four members are quota-exhausted. Asha-scoped queue items
-(`store.inTransaction`, v4 docs in `VEYRA_STATE_MACHINES.md`, manifest
+Two of four members are quota-exhausted. **`store.inTransaction` + recovery
+coverage was reassigned to Natalie (task daa5a350)** rather than parked.
+Remaining Asha-scoped items (v4 docs in `VEYRA_STATE_MACHINES.md`, manifest
 enumerability) are parked until her return; they are recorded in §8, not lost.
 
 ---

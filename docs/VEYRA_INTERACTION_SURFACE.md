@@ -694,7 +694,7 @@ fixtures do not span the versions the code claims to accept.
 **Required:** a load test per accepted version. An accept-list is a claim about
 behaviour, and an unexercised claim is documentation.
 
-## KD-1 — zero-offset bezier handles (PROPOSED RULING, pending debater ratification)
+## KD-1 — zero-offset bezier handles (RATIFIED by debater Natalie, 2026-09-04)
 
 **Evidence (measured from `renderer.js:436-478`, not recalled):**
 

@@ -90,10 +90,28 @@ try {
   surface.dispatchEvent(pointerEvent('pointermove', { clientX: 20, clientY: 20 }));
   assert.equal(cancelledMoves, movesBeforeCancel, 'cancel removes the live pointermove handler');
 
-  // KD-1: zero-offset handles are still live targets. A path with no authored
-  // beziers gets six circles, and dragging one creates curvature in the model.
-  // This is deliberately a passing demonstration of the open defect; renderer
-  // behaviour is out of scope for this test task and is not silently changed.
+  // KD-1 fix: zero-offset handles are suppressed, so a corner path exposes no
+  // invisible targets. Corner → smooth from the canvas remains a named gap
+  // until a vertex-type/curve affordance ships; AI can still author offsets.
+  // Positive control: authored bezier handles remain visible and draggable.
+  const handleRenderer = new VeyraRenderer(surface, {
+    moveHandle(nodeId, index, prefix, next) {
+      const node = documentModel.nodes.find((candidate) => candidate.id === nodeId);
+      node.geometry.vertices[index][`${prefix}X`] = next.x;
+      node.geometry.vertices[index][`${prefix}Y`] = next.y;
+    },
+  });
+  handleRenderer.setTool('vertex');
+  handleRenderer.render(evaluated(), smile.id);
+  assert.equal(surface.querySelectorAll('.bezierHandle').length, 4, 'authored non-zero handles remain visible');
+  const authoredHandle = surface.querySelector('.bezierHandle[data-handle="out"]');
+  const authoredVertex = smile.geometry.vertices[0];
+  const authoredX = authoredVertex.outX;
+  authoredHandle.dispatchEvent(pointerEvent('pointerdown', { clientX: authoredVertex.x + authoredX, clientY: authoredVertex.y + authoredVertex.outY }));
+  surface.dispatchEvent(pointerEvent('pointermove', { clientX: authoredVertex.x + authoredX + 3, clientY: authoredVertex.y + authoredVertex.outY + 2 }));
+  surface.dispatchEvent(pointerEvent('pointerup', { clientX: authoredVertex.x + authoredX + 3, clientY: authoredVertex.y + authoredVertex.outY + 2 }));
+  assert.equal(smile.geometry.vertices[0].outX, authoredX + 3, 'authored handle drag reaches document model');
+
   const straight = structuredClone(smile);
   straight.geometry.vertices = straight.geometry.vertices.map((vertex) => ({
     ...vertex, inX: 0, inY: 0, outX: 0, outY: 0,
@@ -108,15 +126,7 @@ try {
     },
   });
   straightRenderer.render(evaluateDocument(straightDoc), straight.id);
-  assert.equal(surface.querySelectorAll('.bezierHandle').length, 6, 'zero-bezier path still exposes six handles');
-  const invisibleHandle = surface.querySelector('.bezierHandle[data-handle="out"]');
-  const vertexPosition = straight.geometry.vertices[0];
-  invisibleHandle.dispatchEvent(pointerEvent('pointerdown', { clientX: vertexPosition.x, clientY: vertexPosition.y }));
-  surface.dispatchEvent(pointerEvent('pointermove', { clientX: vertexPosition.x + 10, clientY: vertexPosition.y + 5 }));
-  surface.dispatchEvent(pointerEvent('pointerup', { clientX: vertexPosition.x + 10, clientY: vertexPosition.y + 5 }));
-  const curved = straightDoc.nodes.find((node) => node.id === smile.id);
-  assert.equal(curved.geometry.vertices[0].outX, 10);
-  assert.equal(curved.geometry.vertices[0].outY, 5);
+  assert.equal(surface.querySelectorAll('.bezierHandle').length, 0, 'zero-bezier path suppresses invisible handles');
 
   console.log('renderer interaction checks passed');
 } finally {

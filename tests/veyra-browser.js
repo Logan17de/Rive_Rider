@@ -15,26 +15,17 @@ try {
   assert(document.querySelectorAll('[data-node-id]').length === 9, 'Scene node count mismatch.');
   assert(document.querySelectorAll('.sceneShape').length === 8, 'Rendered shape count mismatch.');
   assert(document.querySelectorAll('.vertexPoint').length === 3, 'Path vertex handles missing.');
-  // PINS CURRENT BEHAVIOUR — NOT APPROVED BEHAVIOUR.
+  // KD-1 RATIFIED AND FIXED (2026-09-04, contract doc section KD-1).
   //
-  // Corrected from a stale `4` when this suite was first run headless (3B-2
-  // gate (i)). `renderer.js:436-465` iterates vertices x ['in','out'] and
-  // appends a `bezierHandle` circle UNCONDITIONALLY; the
-  // `Math.abs(offset) >= 0.0001` guard at :444 wraps only the `handleLine`,
-  // not the handle. Handle count is therefore structurally `vertices * 2`, so
-  // 3 vertices always yield 6 — for any path, with or without authored bezier
-  // data. No configuration of this renderer produces 4. The `4` predates the
-  // in/out loop and survived only because this file was never in `npm test`.
-  //
-  // OPEN QUESTION (surfaced by counting the DOM, not by eyeballing a canvas):
-  // should a vertex with zero in/out offsets expose a draggable handle sitting
-  // exactly on top of it? As written, a path with no beziers still gets 6
-  // pointer targets (:463 binds #startHandleDrag), so grabbing one silently
-  // turns a corner into a curve. That looks like a real interaction defect.
-  // Deliberately NOT fixed here: `renderer.js` is in no one's file scope, and
-  // changing how every path edits deserves its own assigned decision rather
-  // than riding in on a test-infrastructure task.
-  assert(document.querySelectorAll('.bezierHandle').length === 6, 'Bezier handles missing.');
+  // The starter Smile path has 3 vertices with exactly 4 non-zero in/out
+  // offsets (measured from createStarterDocument: v0.out, v1.in, v1.out,
+  // v2.in). Zero-offset handles are no longer emitted: they sat exactly at the
+  // vertex position, painted under the larger vertex point, invisible AND
+  // ungrabbable — controls that could never receive a click. The pin moved
+  // from 6 (2 of which were phantoms under vertices v0 and v2) to 4.
+  // Corner-to-smooth from the canvas is a NAMED GAP until a vertex-type
+  // affordance ships; AI reaches the capability via veyra.moveHandle.
+  assert(document.querySelectorAll('.bezierHandle').length === 4, 'Bezier handles missing.');
   assert(document.querySelector('.selectionBox'), 'Selection bounds missing.');
   assert(document.querySelectorAll('[data-bone-id]').length === 2, 'Rig bone overlays missing.');
   assert(document.querySelectorAll('.boneEnd').length === 2, 'Direct bone pose handles missing.');
