@@ -144,18 +144,21 @@ back-door safeguard. Both emitted versions are provably in the support list
 - One writer per file; announce before editing a wired test file; a broken
   wired file is reported, never touched by a second party.
 
-## 10. Team roster (as of the stop)
+## 10. Team roster (current availability)
 
-- **Akash** — leader/debater (active); owns contract doc, `package.json`
+- **Akash** — leader/debater (**active**); owns contract doc, `package.json`
   decisions, fake-dom, browser seam, animation test, golden ruling
-- **Logan** — debater; owns arbiter + override-merge suites, handover doc
+- **Logan** — debater; owns arbiter + override-merge suites, handover doc.
+  **STOPPED — provider quota exhausted (403 FreeTierOnly)**
 - **Asha** — worker; owns store/commands/stateMachine/model edits/manifest/
-  summary/`veyra.js` + their tests
-- **Natalie** — worker/debater; owns evaluation.js, properties.js,
-  renderer-interaction test, listener suite
+  summary/`veyra.js` + their tests. **STOPPED — provider quota exhausted**
+- **Natalie** — worker/debater (**active**); owns evaluation.js, properties.js,
+  renderer-interaction test, listener suite; currently on the always-run-all
+  runner task
 
-All members were stopped by the user except Akash. Nothing reaches a stopped
-member until switched back on.
+Two of four members are quota-exhausted. Asha-scoped queue items
+(`store.inTransaction`, v4 docs in `VEYRA_STATE_MACHINES.md`, manifest
+enumerability) are parked until her return; they are recorded in §8, not lost.
 
 ---
 

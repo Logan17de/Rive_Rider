@@ -694,6 +694,44 @@ fixtures do not span the versions the code claims to accept.
 **Required:** a load test per accepted version. An accept-list is a claim about
 behaviour, and an unexercised claim is documentation.
 
+## KD-1 — zero-offset bezier handles (PROPOSED RULING, pending debater ratification)
+
+**Evidence (measured from `renderer.js:436-478`, not recalled):**
+
+- For every path vertex the renderer emits BOTH `in` and `out` handle circles
+  unconditionally (`:439-465`), regardless of offset.
+- The offset guard at `:444` wraps only the `handleLine`, never the handle
+  circle. A zero-offset handle sits at exactly `(vertex.x, vertex.y)`.
+- The vertex point (`r = 5/zoom`) is appended AFTER the handles (`:467`), so it
+  paints on top of the coincident handle (`r = 4/zoom`) and receives every
+  pointer hit. **A zero-offset handle is invisible AND ungrabbable.**
+- Consequence: for a corner vertex (both offsets zero) a human can never grab a
+  handle to drag curvature into existence. The capability is reachable only via
+  the script API — `veyra.moveHandle` (`veyra.js:168`) — which AI uses directly.
+- So this is the INVERSE of the core principle: something AI can do that a human
+  cannot do from the canvas.
+
+**Proposed ruling:**
+
+1. **Suppress zero-offset handles at render time** — circle AND line. The guard
+   already exists for the line; extend it to the circle. A control that can never
+   receive a click is noise, and "the control exists in the document" does not
+   oblige the presenter to paint it where it cannot be touched.
+2. Re-anchor the seam pin `tests/veyra-browser.js` (`.bezierHandle === 6`,
+   currently marked PINS-CURRENT-BEHAVIOUR-NOT-APPROVED) to the non-zero-offset
+   handle count, with the rationale inline.
+3. **"Corner → smooth from the canvas" is recorded as a NAMED GAP** until a
+   vertex-type affordance ships with the panel. Named, not silent — the same
+   discipline as the listener/machine coupling.
+4. Rejected alternatives: emitting handles at synthetic non-zero offsets (the
+   presenter would fabricate document state — model decides, presenter reports);
+   reordering paint so handles sit on top (the hit ambiguity moves, it does not
+   resolve).
+
+**Status:** proposed by the leader on measured evidence. `renderer.js` stays
+LOCKED until a debater ratifies or objects. Logan is quota-exhausted; Natalie is
+asked to ratify between tasks.
+
 ## Test discipline: name whose behaviour you observe
 
 Adopted after **three tests went green for the wrong reason in three files within
