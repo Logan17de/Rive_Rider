@@ -1,5 +1,13 @@
 # Veyra — team handover
 
+> **STATUS BANNER (added by Akash, 2026-09-04, commit `0d048c5`):** the tree has
+> moved since this document was written. The atomic green commit `7223a1e`
+> landed after it: listeners suite committed and wired, golden fixtures
+> re-blessed, battery fully green at 14/14. The current authoritative picture is
+> `docs/VEYRA_PROJECT_STATUS.md`. This document remains the deeper reference for
+> per-suite measurement, test doctrine (§6), and environment traps (§9); where
+> its numbers conflict with the status doc, the status doc is newer.
+
 **Written:** 2026-09-03, updated same day · **Tree:** local commit `1d0c65e` + uncommitted `package.json`/`model.js`/docs, 29 ahead / 3 behind `origin/main`
 **Verification command:** `npm test` (14 wired suites) · `npm run check` (17 modules)
 **Standing orders from the human:** **local only — no push, no pull, no fetch.** `renderer.js` is locked. No destructive git (`stash`, `reset`, `checkout --`, `clean`) — the working tree carries unpushed work that a `stash` would strand.

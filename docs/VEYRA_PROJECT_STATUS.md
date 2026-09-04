@@ -1,7 +1,10 @@
 # Verya/Veyra — Project Status & Team Handover
 
-**Written by Akash (team leader) at commit `7223a1e`, 2026-09-04. Every number
-below was measured at that commit, not recalled.**
+**Written by Akash (team leader), updated 2026-09-04 at commit `0d048c5`.
+Every number below was measured, not recalled. The battery measurement is at
+the current working tree, which includes one IN-FLIGHT change: Natalie's
+always-run-all runner (`scripts/run-suites.mjs` + `package.json` test line) is
+live and reporting "14 of 14 suites passed" but not yet committed.**
 
 For deeper detail see:
 - `docs/VEYRA_TEAM_HANDOVER.md` (Logan) — per-suite measurement, test doctrine §6, blockers §7, environment traps §9
@@ -129,7 +132,11 @@ back-door safeguard. Both emitted versions are provably in the support list
 6. Conditional v4 stamping documentation in `docs/VEYRA_STATE_MACHINES.md`.
 7. Make required-field/enum metadata enumerable from the manifest (currently
    discoverable only by throwing — flagged as an accessibility gap).
-8. Replace the `&&` test chain with an always-run-all runner.
+8. Replace the `&&` test chain with an always-run-all runner — **IN FLIGHT**:
+   `scripts/run-suites.mjs` is live in `npm test` and reporting 14/14;
+   commit pending its negative-control proof (suites after a red still run).
+9. Per-version load coverage: every version in `VEYRA_SUPPORTED_VERSIONS`
+   exercised by a load test (currently only v1 and v3/v4 are). Assigned, queued.
 
 ## 9. Standing orders (from the human, still in force)
 
@@ -162,7 +169,10 @@ enumerability) are parked until her return; they are recorded in §8, not lost.
 
 ---
 
-**Verification snapshot at `7223a1e`:** architecture ✓ · model ✓ · foundation ✓ ·
+**Verification snapshot (working tree, HEAD `0d048c5` + in-flight runner):**
+`npm test` → **14 of 14 suites passed, EXIT 0**, reported by the new
+always-run-all runner (which runs every suite even if an earlier one fails —
+the `&&`-chain shadowing class is dead). architecture ✓ · model ✓ · foundation ✓ ·
 rigging ✓ · validation ✓ · animation ✓ · statemachine ✓ · manifest ✓ · store ✓ ·
 listeners ✓ · golden ✓ · invariants 41/41 ✓ · browser seam 15/15 ✓ ·
-renderer-interaction ✓ · override-merge 19/19 ✓ — **EXIT 0**.
+renderer-interaction ✓ · override-merge 19/19 (debt cap 0) ✓.
