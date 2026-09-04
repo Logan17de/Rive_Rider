@@ -19,6 +19,9 @@ const move = moveBridge.resolve({ type: 'pointermove', x: 50, y: 50 }, scene, 1,
 assert.equal(move.intents.length, 1, 'resolver reports direct pointermove listener without dispatching it');
 assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 0 }, tool: 'select', preview: false }), false, 'select mode blocks preview dispatch');
 assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 0 }, tool: 'select', preview: true }), true, 'preview mode admits primary pointer dispatch');
+assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 1 }, tool: 'select', preview: true }), false, 'middle-button pan is not preview dispatch');
+assert.equal(isPreviewPointerEligible({ event: { isPrimary: false, button: 0 }, tool: 'select', preview: true }), false, 'non-primary pointers are not preview dispatch');
+assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 0 }, tool: 'pencil', preview: true }), false, 'editing tools remain authoring-routed');
 assert.equal(bridge.resolver, bridge.resolver, 'bridge retains one resolver between events');
 const replacement = { ...document, id: 'replacement' };
 bridge.updateDocument(replacement);

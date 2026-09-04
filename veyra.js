@@ -2270,8 +2270,12 @@ function resolvePreviewPointer(event) {
   return result;
 }
 
-canvas.addEventListener('pointermove', resolvePreviewPointer);
-canvas.addEventListener('pointerup', resolvePreviewPointer);
+canvas.addEventListener('pointermove', (event) => {
+  if (!previewPointerEligible(event)) return;
+  resolvePreviewPointer(event);
+  event.stopPropagation();
+}, true);
+canvas.addEventListener('pointerup', resolvePreviewPointer, true);
 canvas.addEventListener('pointerdown', (event) => {
   if (!previewPointerEligible(event)) return;
   const result = resolvePreviewPointer(event);
