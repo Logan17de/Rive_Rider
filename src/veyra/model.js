@@ -26,7 +26,7 @@ export const VEYRA_LISTENER_KINDS = Object.freeze(['pointer']);
 export const VEYRA_LISTENER_EVENTS = Object.freeze([
   'pointerdown', 'pointerup', 'pointermove', 'pointerenter', 'pointerleave',
 ]);
-export const VEYRA_LISTENER_ACTIONS = Object.freeze(['setInput', 'fire']);
+export const VEYRA_LISTENER_ACTIONS = Object.freeze(['setInput', 'fire', 'play', 'stop', 'seek']);
 export const VEYRA_MIME = 'application/vnd.veyra+json';
 export const VEYRA_ASSET_TYPES = Object.freeze(['image', 'font', 'audio']);
 export const VEYRA_CONSTRAINT_TYPES = Object.freeze([
@@ -496,21 +496,36 @@ export function createPointerListener(overrides = {}) {
   const action = String(overrides.action || '');
   if (!VEYRA_LISTENER_ACTIONS.includes(action)) throw new TypeError(`Unsupported listener action: ${action}`);
   const target = normalizeReference(overrides.target ?? overrides.targetId, 'node', 'listener.target');
-  const machine = String(overrides.machine ?? overrides.machineId ?? '');
-  const input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'listener.input');
   if (!target) throw new TypeError('listener.target is required.');
-  if (!machine) throw new TypeError('listener.machine is required.');
-  if (!input) throw new TypeError('listener.input is required.');
+  const machineValue = overrides.machine ?? overrides.machineId;
+  const inputValue = overrides.input ?? overrides.inputId;
+  const timelineValue = overrides.timeline ?? overrides.timelineId;
+  const machine = machineValue == null || machineValue === '' ? null : String(machineValue);
+  const input = inputValue == null || inputValue === '' ? null : normalizeReference(inputValue, 'machineInput', 'listener.input');
+  const timeline = timelineValue == null || timelineValue === '' ? null : normalizeReference(timelineValue, 'timeline', 'listener.timeline');
+  const machineAction = action === 'setInput' || action === 'fire';
+  const timelineAction = action === 'play' || action === 'stop' || action === 'seek';
+  if (machineAction && timelineValue != null && timelineValue !== '') throw new TypeError(`listener.timeline is not allowed for ${action}.`);
+  if (timelineAction && ((machineValue != null && machineValue !== '') || (inputValue != null && inputValue !== ''))) {
+    throw new TypeError(`listener.machine/input are not allowed for ${action}.`);
+  }
+  if (machineAction && !machine) throw new TypeError(`listener.machine is required for ${action}.`);
+  if (machineAction && !input) throw new TypeError(`listener.input is required for ${action}.`);
+  if (timelineAction && !timeline) throw new TypeError(`listener.timeline is required for ${action}.`);
   if (action === 'setInput' && overrides.value === undefined) throw new TypeError('listener.value is required for setInput.');
+  if (action === 'seek' && (!Number.isFinite(Number(overrides.value)) || Number(overrides.value) < 0)) {
+    throw new TypeError('listener.value must be a non-negative finite number for seek.');
+  }
   return {
     id: String(overrides.id || createId('listener')),
     kind,
     event,
     target,
-    machine,
-    input,
+    ...(machine ? { machine } : {}),
+    ...(input ? { input } : {}),
+    ...(timeline ? { timeline } : {}),
     action,
-    ...(action === 'setInput' ? { value: cloneValue(overrides.value) } : {}),
+    ...(action === 'setInput' || action === 'seek' ? { value: cloneValue(overrides.value) } : {}),
   };
 }
 
@@ -1220,35 +1235,51 @@ function normalizeStateMachine(machine, index, timelineIds) {
   };
 }
 
-function normalizeListener(listener, index, nodeIds, machinesById) {
+function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) {
   const path = `listeners[${index}]`;
   const kind = String(listener?.kind || '');
   if (!VEYRA_LISTENER_KINDS.includes(kind)) throw new TypeError(`${path}.kind must be a supported listener kind.`);
   const event = String(listener?.event || '');
   if (!VEYRA_LISTENER_EVENTS.includes(event)) throw new TypeError(`${path}.event must be a supported pointer event.`);
   const action = String(listener?.action || '');
-  if (!VEYRA_LISTENER_ACTIONS.includes(action)) throw new TypeError(`${path}.action must be setInput or fire.`);
+  if (!VEYRA_LISTENER_ACTIONS.includes(action)) throw new TypeError(`${path}.action must be one of ${VEYRA_LISTENER_ACTIONS.join(', ')}.`);
   const target = requiredReference(listener?.target ?? listener?.targetId, 'node', `${path}.target`);
   const targetId = referenceId(target, 'node');
   if (!nodeIds.has(targetId)) throw new TypeError(`${path}.target references missing node ${targetId}.`);
-  const machineId = String(listener?.machine ?? listener?.machineId ?? '');
-  const machine = machinesById.get(machineId);
-  if (!machine) throw new TypeError(`${path}.machine references missing state machine ${machineId}.`);
-  const inputRef = requiredReference(listener?.input ?? listener?.inputId, 'machineInput', `${path}.input`);
-  const inputId = referenceId(inputRef, 'machineInput');
-  const input = machine.inputs.find((candidate) => candidate.id === inputId || candidate.name === inputId);
-  if (!input) throw new TypeError(`${path}.input references missing machine input ${inputId}.`);
-  if (action === 'setInput' && listener.value === undefined) throw new TypeError(`${path}.value is required for setInput.`);
-  return {
-    id: String(listener?.id || createId('listener')),
-    kind,
-    event,
-    target,
-    machine: machineId,
-    input: createMachineInputRef(input.id),
-    action,
-    ...(action === 'setInput' ? { value: cloneValue(listener.value) } : {}),
-  };
+  const machineAction = action === 'setInput' || action === 'fire';
+  const timelineAction = action === 'play' || action === 'stop' || action === 'seek';
+  const machineValue = listener?.machine ?? listener?.machineId;
+  const inputValue = listener?.input ?? listener?.inputId;
+  const timelineValue = listener?.timeline ?? listener?.timelineId;
+  if (machineAction && timelineValue != null) throw new TypeError(`${path}.timeline is not allowed for ${action}.`);
+  if (timelineAction && (machineValue != null || inputValue != null)) throw new TypeError(`${path}.machine/input are not allowed for ${action}.`);
+  const result = { id: String(listener?.id || createId('listener')), kind, event, target, action };
+  if (machineAction) {
+    const machineId = String(machineValue || '');
+    const machine = machinesById.get(machineId);
+    if (!machine) throw new TypeError(`${path}.machine references missing state machine ${machineId}.`);
+    const inputRef = requiredReference(inputValue, 'machineInput', `${path}.input`);
+    const inputId = referenceId(inputRef, 'machineInput');
+    const input = machine.inputs.find((candidate) => candidate.id === inputId || candidate.name === inputId);
+    if (!input) throw new TypeError(`${path}.input references missing machine input ${inputId}.`);
+    result.machine = machineId;
+    result.input = createMachineInputRef(input.id);
+    if (action === 'setInput') {
+      if (listener.value === undefined) throw new TypeError(`${path}.value is required for setInput.`);
+      result.value = cloneValue(listener.value);
+    }
+  } else if (timelineAction) {
+    const timelineRef = requiredReference(timelineValue, 'timeline', `${path}.timeline`);
+    const timelineId = referenceId(timelineRef, 'timeline');
+    if (!timelineIds.has(timelineId)) throw new TypeError(`${path}.timeline references missing timeline ${timelineId}.`);
+    result.timeline = createTimelineRef(timelineId);
+    if (action === 'seek') {
+      const value = Number(listener.value);
+      if (!Number.isFinite(value) || value < 0) throw new TypeError(`${path}.value must be a non-negative finite number for seek.`);
+      result.value = value;
+    }
+  }
+  return result;
 }
 
 export function normalizeDocument(input) {
@@ -1341,7 +1372,7 @@ export function normalizeDocument(input) {
     throw new TypeError('listeners must be an array.');
   }
   const listeners = (Array.isArray(input.listeners) ? input.listeners : []).map(
-    (listener, index) => normalizeListener(listener, index, ids, machinesById)
+    (listener, index) => normalizeListener(listener, index, ids, machinesById, timelineIds)
   );
   const listenerIds = new Set();
   for (const listener of listeners) {

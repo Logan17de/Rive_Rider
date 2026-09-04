@@ -131,7 +131,7 @@ assert.deepEqual(manifest.references.propertyAddress.grammar, '<kind>:<id>/<segm
 const contract = manifest.authoring;
 assert.deepEqual(contract.machineState.required, ['id', 'timeline'], 'manifest names machine-state required fields');
 assert.deepEqual(contract.machineCondition.required, ['id', 'input', 'op'], 'manifest names machine-condition required fields');
-assert.deepEqual(contract.listener.required, ['id', 'target', 'machine', 'input', 'event', 'action'], 'manifest names listener required references');
+assert.deepEqual(contract.listener.required, ['id', 'target', 'event', 'action'], 'manifest names listener common required fields');
 const samples = { number: 0, bool: false, trigger: undefined };
 for (const [inputType, advertised] of Object.entries(contract.machineCondition.allowedOperatorsByInputType)) {
   const accepted = VEYRA_CONDITION_OPS.filter((op) => machineConditionViolation(op, samples[inputType], inputType) === null);
@@ -139,7 +139,9 @@ for (const [inputType, advertised] of Object.entries(contract.machineCondition.a
   assert.equal(advertised.includes('bogus'), false, `manifest rejects unknown operator for ${inputType}`);
 }
 assert.deepEqual(contract.machineCondition.operators, [...VEYRA_CONDITION_OPS]);
-assert.equal(contract.listener.action.enum.includes('play'), false, 'manifest does not advertise unsupported listener action');
+assert.equal(contract.listener.action.enum.includes('play'), true, 'manifest advertises the supported direct-play listener action');
+assert.deepEqual(contract.listener.variants.machine.actions, ['setInput', 'fire']);
+assert.deepEqual(contract.listener.variants.timeline.actions, ['play', 'stop', 'seek']);
 
 // --- Deterministic output ----------------------------------------------------
 const first = serializeProjectManifest(createProjectManifest(document));

@@ -47,6 +47,7 @@ function projectCapabilities(document) {
   if (document.constraints.length) capabilities.push('rig.constraints');
   if (document.timelines.length) capabilities.push('animation.timelines');
   if ((document.stateMachines || []).length) capabilities.push('animation.state-machines');
+  if ((document.listeners || []).length) capabilities.push('interaction.listeners');
   return capabilities;
 }
 
@@ -182,10 +183,14 @@ function authoringContract() {
       triggerOperators: ['fired', '!fired'],
     },
     listener: {
-      required: ['id', 'target', 'machine', 'input', 'event', 'action'],
+      required: ['id', 'target', 'event', 'action'],
       kind: { enum: [...VEYRA_LISTENER_KINDS] },
       event: { enum: [...VEYRA_LISTENER_EVENTS] },
       action: { enum: [...VEYRA_LISTENER_ACTIONS] },
+      variants: {
+        machine: { required: ['machine', 'input'], actions: ['setInput', 'fire'] },
+        timeline: { required: ['timeline'], actions: ['play', 'stop', 'seek'] },
+      },
     },
   };
 }

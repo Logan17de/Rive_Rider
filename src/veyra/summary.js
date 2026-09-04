@@ -108,5 +108,16 @@ export function createSceneSummary(document, options = {}) {
         })),
       })),
     })),
+    listeners: (document.listeners || []).map((listener) => ({
+      ref: { kind: 'listener', id: listener.id },
+      kind: listener.kind,
+      event: listener.event,
+      target: cloneValue(listener.target),
+      action: listener.action,
+      ...(listener.machine ? { machine: listener.machine } : {}),
+      ...(listener.input ? { input: cloneValue(listener.input) } : {}),
+      ...(listener.timeline ? { timeline: cloneValue(listener.timeline) } : {}),
+      ...(listener.value !== undefined ? { value: cloneValue(listener.value) } : {}),
+    })),
   };
 }
