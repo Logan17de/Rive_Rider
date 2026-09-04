@@ -634,6 +634,43 @@ strongest argument for it. Consequences:
 new drag path in the panel that calls `store.begin()` directly from a DOM handler
 repeats the exact defect.
 
+### Inventory (measured 2026-09-04): the renderer already complies; only the shell does not
+
+Measured by reading every pointer-orchestration site, not assumed. This narrows
+the extraction — it is **not** a rebuild of the canvas, it is bringing the shell
+up to the standard the renderer already meets.
+
+**Renderer drags already implement `event → intent → command`** (the model to
+copy). Each gesture in `renderer.js` calls `callbacks.begin(label)` once, then
+`callbacks.move*()` per move, then `callbacks.commit()` — one transaction, one
+undo entry per gesture, with `callbacks.cancel()` on `pointercancel`
+(`renderer.js:498-522` capture helper; node `:552-565`, group `:585-595`,
+curve-create `:602-618`, handle `:630-642`, vertex `:658-671`, control
+`:691-702`, bone `:720-733`). The shell wires these to the store
+(`veyra.js:158,236-237`). **Do not touch this path — it is the reference
+implementation.**
+
+**Shell drags are the imperative outliers that need extracting.** Three
+patterns, all in `veyra.js`:
+
+1. **Live-mutate, transaction per gesture** — artboard resize (`veyra.js:2228-2267`).
+   `begin` on first move, `mutate` per move, `commit`/`cancel` on end. This is
+   the exact site of the G4 regression; today it is protected only by an inline
+   `!resizing` guard plus a `try{commit}catch{cancel}`. Highest-priority extract.
+2. **Commit-at-end, single command** — keyframe drag (`veyra.js:1280-1327`) and
+   work-area band (`veyra.js:2025-2076`). During the gesture only DOM/style
+   changes; one store command on pointerup. Already correct in *shape*; the
+   orchestration just lives inline in the shell rather than in a pure function.
+3. **View-only, no store** — canvas pan (`veyra.js:2189-2207`) and the artboard
+   pan strip. No transaction needed; out of scope for extraction except to keep
+   it from being accidentally transactionalised.
+
+**Consequence for the extraction brief:** the target is a set of pure intent
+functions in `src/veyra/` that the shell's three pattern-(1)/(2) sites delegate
+to, mirroring the renderer's `begin/move*/commit` contract. The arbiter for that
+task asserts "begin exactly once per gesture" against those functions in Node,
+which is precisely what the inline shell code cannot be tested for today.
+
 ## Editing a wired file is no longer private
 
 The moment a suite is wired into `npm test`, it stops being scratch space. A
