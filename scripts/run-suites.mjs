@@ -22,6 +22,7 @@ const suites = Object.freeze([
   'tests/veyra-browser.test.mjs',
   'tests/veyra-renderer-interaction.test.mjs',
   'tests/veyra-override-merge.test.mjs',
+  'tests/veyra-gestures.test.mjs',
 ]);
 
 const testFiles = readdirSync(join(root, 'tests'))

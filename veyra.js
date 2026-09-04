@@ -46,6 +46,7 @@ import {
 import { VeyraRenderer } from './src/veyra/renderer.js';
 import { mirrorMeshWeights, normalizeMeshWeights } from './src/veyra/rigging.js';
 import { VeyraStore } from './src/veyra/store.js';
+import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
 
@@ -2223,41 +2224,36 @@ artboardFrame.addEventListener('pointerdown', (event) => {
   const scaleX = matrix ? 1 / matrix.a : 1;
   const scaleY = matrix ? 1 / matrix.d : 1;
   let moved = false;
-  let resizing = false;
+  const resizeGesture = mode === 'pan' ? null : createArtboardResizeGesture({
+    store,
+    start,
+    startArtboard,
+    mode,
+    scaleX,
+    scaleY,
+    onMove: ({ width, height }) => setStatus(`Artboard ${width} × ${height}`),
+  });
   handle.setPointerCapture?.(event.pointerId);
   const onMove = (nextEvent) => {
-    if (!moved && Math.hypot(nextEvent.clientX - start.x, nextEvent.clientY - start.y) < 2) return;
-    moved = true;
-    const dx = (nextEvent.clientX - start.x) * scaleX;
-    const dy = (nextEvent.clientY - start.y) * scaleY;
+    const result = resizeGesture?.move(nextEvent);
+    if (result?.moved) moved = true;
     if (mode === 'pan') {
+      if (!moved && Math.hypot(nextEvent.clientX - start.x, nextEvent.clientY - start.y) < 2) return;
+      moved = true;
+      const dx = (nextEvent.clientX - start.x) * scaleX;
+      const dy = (nextEvent.clientY - start.y) * scaleY;
       renderer.panBy(-dx, -dy);
       syncArtboardFrame();
-      return;
     }
-    if (!resizing) {
-      // One transaction per gesture: begin() rejects concurrent transactions
-      // (G4), and this handler runs on EVERY pointermove — a bare begin here
-      // would throw from the second move onward and wedge the store.
-      resizing = true;
-      store.begin('Resize artboard');
-    }
-    const width = Math.max(1, Math.round(startArtboard.width + (mode === 'resize' || mode === 'resize-x' ? dx : 0)));
-    const height = Math.max(1, Math.round(startArtboard.height + (mode === 'resize' || mode === 'resize-y' ? dy : 0)));
-    store.mutate((documentModel) => {
-      documentModel.artboard.width = width;
-      documentModel.artboard.height = height;
-    }, 'drag');
-    setStatus(`Artboard ${width} × ${height}`);
   };
   const onEnd = (nextEvent) => {
     artboardFrame.removeEventListener('pointermove', onMove);
     artboardFrame.removeEventListener('pointerup', onEnd);
     artboardFrame.removeEventListener('pointercancel', onEnd);
     handle.releasePointerCapture?.(nextEvent.pointerId);
-    if (resizing) {
-      try { store.commit(); }
-      catch { store.cancel(); renderAll('validation-error'); }
+    if (resizeGesture?.active) {
+      const result = resizeGesture.end();
+      if (result.error) renderAll('validation-error');
     } else if (mode === 'pan' && moved) {
       setStatus('Canvas panned');
     }
