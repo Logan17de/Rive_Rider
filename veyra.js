@@ -49,6 +49,7 @@ import { VeyraStore } from './src/veyra/store.js';
 import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
+import { createShellInteractionBridge } from './src/veyra/shellBridge.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
@@ -125,6 +126,7 @@ let evaluatedScene = null;
 let animationPlayback = null;
 let activeTimelineId = null;
 let currentFrame = 0;
+let interactionSceneRevision = 0;
 let selectedTrackAddress = null;
 let selectedKeyframe = null;
 let suppressKeyframeClick = false;
@@ -149,6 +151,11 @@ function restoredDocument() {
 const restored = restoredDocument();
 const store = new VeyraStore(restored || createStarterDocument());
 if (restored) savedRevision = -1;
+const interactionBridge = createShellInteractionBridge({
+  document: store.document,
+  onDiagnostic: (message) => showToast(message, true),
+  onIntent: (intent) => dispatchInteractionIntent(intent),
+});
 const renderer = new VeyraRenderer($('veyraCanvas'), {
   select: (reference) => store.select(reference),
   drawPoint: (point) => {
@@ -1472,6 +1479,8 @@ function evaluateCurrentFrame() {
     ? { animation: evaluateTimeline(timeline, currentFrame / timeline.fps, { loop: effectiveLoop }) }
     : {};
   evaluatedScene = evaluateDocument(store.document, layers);
+  interactionBridge.updateDocument(store.document);
+  interactionSceneRevision += 1;
   renderer.render(evaluatedScene, store.selectedRef);
 }
 
@@ -1563,6 +1572,27 @@ function stopAnimation() {
   finishPlayback();
   currentFrame = 0;
   setCurrentFrame(0);
+}
+
+function dispatchInteractionIntent(intent) {
+  if (!intent) return;
+  if (intent.kind === 'transport') {
+    const timelineId = intent.timelineId;
+    if (!timelineById(store.document, timelineId)) {
+      showToast(`Interaction target timeline not found: ${timelineId}`, true);
+      return;
+    }
+    activeTimelineId = timelineId;
+    if (intent.op === 'play') playAnimation({ restart: true });
+    else if (intent.op === 'stop') stopAnimation();
+    else if (intent.op === 'seek' && Number.isFinite(intent.value)) setCurrentFrame(intent.value);
+    else if (intent.op === 'seek') showToast('Interaction seek requires a finite frame value', true);
+    renderTimeline();
+    return;
+  }
+  if (intent.kind === 'runtime') {
+    showToast(`Interaction runtime intent requires a state-machine bridge: ${intent.op}`, true);
+  }
 }
 
 function recordKeyframeFor(address) {
@@ -2209,6 +2239,35 @@ stageViewport.addEventListener('pointerup', finishPan);
 stageViewport.addEventListener('pointercancel', finishPan);
 
 new ResizeObserver(() => syncArtboardFrame()).observe(stageViewport);
+
+function previewPointerEligible(event) {
+  return event.isPrimary !== false
+    && event.button !== 1
+    && !event.altKey
+    && !panGesture
+    && currentTool === 'select'
+    && (stagePanel.dataset.mode === 'preview' || document.body.dataset.mode === 'preview');
+}
+
+function resolvePreviewPointer(event) {
+  if (!previewPointerEligible(event) || !evaluatedScene) return null;
+  const point = renderer.clientPoint(event.clientX, event.clientY);
+  const result = interactionBridge.resolve({
+    type: event.type,
+    x: point.x,
+    y: point.y,
+    pointerId: event.pointerId,
+  }, evaluatedScene, interactionSceneRevision);
+  if (event.type === 'pointerdown' && !result.hit) showToast('No interaction target under pointer', true);
+  return result;
+}
+
+canvas.addEventListener('pointermove', resolvePreviewPointer);
+canvas.addEventListener('pointerdown', (event) => {
+  if (!previewPointerEligible(event)) return;
+  const result = resolvePreviewPointer(event);
+  if (result?.intents?.length || result?.transitions?.length) event.preventDefault();
+});
 
 // Artboard handles: the top/left border strips pan the canvas (drag the
 // artboard), while the right/bottom strips and corner resize the artboard.
