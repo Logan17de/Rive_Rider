@@ -49,7 +49,7 @@ import { VeyraStore } from './src/veyra/store.js';
 import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
-import { createShellInteractionBridge } from './src/veyra/shellBridge.js';
+import { canvasPoint, createShellInteractionBridge, isPreviewPointerEligible } from './src/veyra/shellBridge.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
@@ -2241,28 +2241,42 @@ stageViewport.addEventListener('pointercancel', finishPan);
 new ResizeObserver(() => syncArtboardFrame()).observe(stageViewport);
 
 function previewPointerEligible(event) {
-  return event.isPrimary !== false
-    && event.button !== 1
-    && !event.altKey
-    && !panGesture
-    && currentTool === 'select'
-    && (stagePanel.dataset.mode === 'preview' || document.body.dataset.mode === 'preview');
+  return isPreviewPointerEligible({
+    event,
+    tool: currentTool,
+    panGesture,
+    preview: stagePanel.dataset.mode === 'preview' || document.body.dataset.mode === 'preview',
+  });
 }
 
 function resolvePreviewPointer(event) {
   if (!previewPointerEligible(event) || !evaluatedScene) return null;
-  const point = renderer.clientPoint(event.clientX, event.clientY);
+  const point = canvasPoint(event, canvas, { cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight });
+  const center = renderer.viewCenter || { x: store.document.artboard.width / 2, y: store.document.artboard.height / 2 };
+  const viewportWidth = canvas.clientWidth || canvas.getBoundingClientRect().width;
+  const viewportHeight = canvas.clientHeight || canvas.getBoundingClientRect().height;
+  const worldPoint = {
+    x: (point.x - viewportWidth / 2) / renderer.zoom + center.x,
+    y: (point.y - viewportHeight / 2) / renderer.zoom + center.y,
+  };
   const result = interactionBridge.resolve({
     type: event.type,
-    x: point.x,
-    y: point.y,
+    x: worldPoint.x,
+    y: worldPoint.y,
     pointerId: event.pointerId,
-  }, evaluatedScene, interactionSceneRevision);
+  }, evaluatedScene, interactionSceneRevision, {
+    width: canvas.clientWidth || canvas.getBoundingClientRect().width,
+    height: canvas.clientHeight || canvas.getBoundingClientRect().height,
+    centerX: center.x,
+    centerY: center.y,
+    zoom: renderer.zoom,
+  });
   if (event.type === 'pointerdown' && !result.hit) showToast('No interaction target under pointer', true);
   return result;
 }
 
 canvas.addEventListener('pointermove', resolvePreviewPointer);
+canvas.addEventListener('pointerup', resolvePreviewPointer);
 canvas.addEventListener('pointerdown', (event) => {
   if (!previewPointerEligible(event)) return;
   const result = resolvePreviewPointer(event);

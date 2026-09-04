@@ -11,7 +11,7 @@ const document = normalizeDocument(createDocument({
 const intents = [];
 const bridge = createShellInteractionBridge({ document, onIntent: (intent) => intents.push(intent) });
 const scene = { ...document, kind: 'veyra-evaluated-scene', documentId: document.id };
-const hit = bridge.resolve({ type: 'pointerdown', x: 0, y: 0 }, scene, 1);
+const hit = bridge.resolve({ type: 'pointerdown', x: 50, y: 50 }, scene, 1, { width: 100, height: 100, centerX: 0, centerY: 0, zoom: 1 });
 assert.equal(hit.intents[0].op, 'play', 'preview adapter emits direct play intent');
 assert.equal(intents[0].timelineId, 'tl', 'adapter forwards transport target');
 assert.equal(bridge.resolver, bridge.resolver, 'bridge retains one resolver between events');

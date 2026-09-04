@@ -5,6 +5,12 @@ function report(message, onDiagnostic) {
   else console.warn(message);
 }
 
+/** Preview routing gate shared by shell and deterministic tests. */
+export function isPreviewPointerEligible({ event, tool = 'select', preview = false, panGesture = false } = {}) {
+  return !!event && event.isPrimary !== false && event.button !== 1 && !event.altKey
+    && !panGesture && tool === 'select' && preview === true;
+}
+
 /** Convert a DOM client point into the canvas-local viewport coordinates. */
 export function canvasPoint(event, canvas, viewport = {}) {
   const rect = canvas?.getBoundingClientRect?.() || { left: 0, top: 0, width: viewport.width || 0, height: viewport.height || 0 };
@@ -28,14 +34,17 @@ export function createShellInteractionBridge({ document = null, onIntent = null,
     return resolver;
   }
 
-  function resolve(event, scene = currentDocument, sceneRevision = revision) {
+  function resolve(event, scene = currentDocument, sceneRevision = revision, viewport = {}) {
+    resolver.setViewport(viewport);
     const result = resolver.resolve(event, scene, sceneRevision);
     for (const intent of result.intents || []) {
       if (onIntent) onIntent(intent);
       else report(`Interaction intent has no transport: ${intent.op}`, onDiagnostic);
     }
-    for (const transition of result.transitions || []) {
-      if (transition.intent && onIntent) onIntent(transition.intent);
+    if (event.type === 'pointermove') {
+      for (const transition of result.transitions || []) {
+        if (transition.intent && onIntent) onIntent(transition.intent);
+      }
     }
     return result;
   }

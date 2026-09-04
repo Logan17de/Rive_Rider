@@ -58,10 +58,15 @@ export function resolveListenerIntents({ event, scene, document = scene, viewpor
 export function createListenerResolver({ document, viewport = {} } = {}) {
   let hoverKey = null;
   let sceneRevision = 0;
+  let currentViewport = viewport;
   return {
+    setViewport(nextViewport = {}) {
+      currentViewport = nextViewport;
+      return currentViewport;
+    },
     resolve(event, scene = document, revision = sceneRevision) {
       sceneRevision = revision;
-      const result = resolveListenerIntents({ event, scene, document, viewport, hoverKey, sceneRevision });
+      const result = resolveListenerIntents({ event, scene, document, viewport: currentViewport, hoverKey, sceneRevision });
       hoverKey = result.hoverKey;
       return result;
     },
