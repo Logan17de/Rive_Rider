@@ -1,238 +1,252 @@
-# Veyra — Agent Milestone Queue
+# Veyra — Current Milestone
 
-**Purpose:** increase `plan.md` completion one verified step at a time.
+`plan.md` is the product roadmap. This file contains only the **current implementation milestone**.
 
-**Rule:** this file contains **one current milestone** and **one active TODO only**. Do not pre-create future TODOs. After the current TODO is completed, Logan/ChatGPT verifies the implementation and then adds the next TODO under the same milestone. When the milestone acceptance criteria are fully satisfied, Logan/ChatGPT closes the milestone and creates the next milestone.
+Agents may complete every task inside this milestone, but must not start work outside its scope. If an agent discovers useful follow-up work, append it to `suggestions` instead of expanding this milestone.
 
-`plan.md` remains the product roadmap and source of truth. `todo.md` is only the immediate execution queue.
+When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill the handoff, commit, and stop.
+
+## Mandatory agent rules
+
+1. Preserve the validation boundary: malformed documents, dangling refs, illegal semantic relations, unsupported writes, and ambiguous targets must fail before committed state.
+2. Human names are display metadata, never identity. Stable typed refs are authoritative.
+3. AI aliases/tags must never rename user objects.
+4. Human UI and AI must share the same Store/command/property mutation paths; do not add an AI-only mutation implementation.
+5. Persisted schema changes require deterministic migration/normalization and round-trip tests.
+6. Every new persistent editable entity must be machine-readable through summary/manifest/query surfaces and must have an honest capability contract.
+7. Do not mutate derived/evaluated outputs as authored source state.
+8. Add positive, negative, compatibility, undo/redo, round-trip, and name-independence tests where relevant.
+9. Do not weaken existing tests or capability declarations to make the milestone pass.
+10. Run `npm test` and `npm run check` before handoff.
+11. Keep unrelated refactors, dependency churn, geometry work, headless/CLI work, and future roadmap features out of this milestone.
+12. Follow-up ideas belong in `suggestions`.
 
 ---
 
-## Agent workflow
+# MILESTONE M1 — Universal Semantic Metadata Layer
 
-Use these states:
+**Status:** `READY`
 
-- `[ ] READY` — agent may implement this TODO.
-- `[>] IN PROGRESS` — agent is working on it.
-- `[?] AWAITING VERIFICATION` — agent believes the TODO is complete and must stop.
-- `[x] VERIFIED` — only Logan/ChatGPT may set this after independent review.
-- `[!] BLOCKED` — task cannot be completed safely within scope.
+## Goal
 
-### Mandatory instructions
+Replace Veyra's current node-only semantic annotations with a universal, typed semantic layer that can describe **any current first-class entity** without depending on human-authored names.
 
-1. **Implement only the TODO currently present in this file.** Do not start the next logical task, even if it appears obvious.
-2. **Do not self-verify.** When finished, set the TODO to `[?] AWAITING VERIFICATION`, fill the Handoff section, commit, and stop.
-3. **Do not add the next TODO yourself.** Logan/ChatGPT will inspect the code and tests first. Only after verification will the next TODO be written.
-4. **Preserve the validation boundary.** Invalid documents, references, commands, graph topology, conditions, or AI targets must fail before becoming committed state. Never silently repair dangerous malformed input.
-5. **Names are display metadata, not identity.** Human names may be duplicate, empty, misleading, localized, or changed. Persistence, graph relationships, commands, AI control, and tests must use stable typed IDs/references.
-6. **AI-owned names never overwrite human names.** Future AI aliases/tags such as `right_eye` must live in semantic metadata/AI namespaces rather than changing the user's `name` field.
-7. **Fail closed on ambiguity.** AI must never guess an entity from a convenient human name when structural/semantic evidence is insufficient.
-8. **Human UI and AI must share the same mutation system.** Do not create a second AI-only implementation. Use canonical Store/command/property paths.
-9. **Every persistent editable feature must eventually be AI-readable.** Stable reference, summary/manifest visibility, capabilities, query/read path, and canonical mutation path are required for feature completion.
-10. **Do not mutate derived outputs.** Respect authored -> animation/data -> constraints/layout -> evaluated/rendered ownership.
-11. **Keep capability declarations honest.** Manifest/capability flags must describe what actually works.
-12. **Persisted schema changes require compatibility handling and tests.** Existing supported `.veyra` documents must continue to load deterministically or fail with an intentional precise error.
-13. **Tests are implementation work.** Add positive, negative, boundary, round-trip, undo/redo, and name-independence tests where relevant. Never weaken existing assertions just to obtain green tests.
-14. Run `npm test` and `npm run check` before handoff. Report failures or inability to run them truthfully.
-15. Avoid unrelated refactors, dependency churn, broad reformatting, or roadmap work outside the TODO.
-16. If the public document, command, manifest, or AI contract changes, update the relevant documentation in the same implementation.
-17. Once status becomes `[?] AWAITING VERIFICATION`, **stop coding**.
+The result must let AI attach its own stable understanding—roles, aliases, tags, relations, provenance, and confidence—to nodes, rig entities, animation entities, state-machine entities, listeners, geometry sub-entities, assets, and other current typed references while preserving the user's original names exactly.
 
-### Required handoff
+This milestone is the semantic foundation required before a reliable name-independent resolver can be built.
+
+## Why this milestone is next
+
+Stable typed identity is now implemented and verified for the current graph, including real persistent keyframe IDs and typed refs for animation, machine, listener, geometry, and paint sub-entities.
+
+The remaining semantic layer is still node-specific: `createSemanticRecord()` creates a node ref, `normalizeDocument()` requires semantic targets to be nodes, and `semanticFor()` accepts only a node ID. The next milestone must remove that architectural restriction rather than building resolver logic on top of it.
+
+---
+
+## Task 1 — Universal semantic-record identity and target contract
+
+Replace the node-specific semantic record with a first-class persistent semantic record.
+
+Required minimum shape:
+
+```js
+{
+  id: 'semantic_...',
+  target: { kind: '<typed-kind>', id: '<stable-id>' },
+  canonicalRole: '',
+  description: '',
+  tags: [],
+  aliases: [],
+  relations: [],
+  provenance: {},
+  status: 'confirmed | inferred | rejected | stale'
+}
+```
+
+Requirements:
+
+- semantic records have their own stable persistent IDs;
+- `target` accepts any currently supported first-class typed reference whose entity exists;
+- target validation is generic and kind-aware;
+- missing/wrong-kind targets fail precisely;
+- duplicate semantic-record IDs are rejected;
+- multiple semantic records may target the same entity when their namespaces/provenance differ;
+- old node semantics remain loadable through deterministic migration.
+
+## Task 2 — AI aliases, roles, tags, provenance, confidence
+
+Support machine-owned semantic metadata without touching human display names.
+
+At minimum support:
+
+- `canonicalRole`;
+- `description`;
+- `tags[]`;
+- `aliases[]` with namespace/owner and value;
+- provenance/source such as `user`, `ai`, `import`, `system`;
+- optional agent identifier;
+- optional confidence;
+- optional evidence/basis list;
+- semantic status: `confirmed`, `inferred`, `rejected`, `stale`.
+
+Rules:
+
+- alias namespaces must coexist without overwriting one another;
+- AI aliases never write to entity `name` fields;
+- tags/aliases are normalized deterministically;
+- invalid confidence/status/alias records fail validation rather than being silently repaired.
+
+## Task 3 — Typed semantic relations
+
+Add semantic relations between entities using typed refs.
+
+Example:
+
+```js
+{
+  predicate: 'part_of',
+  target: { kind: 'node', id: 'node_face' }
+}
+```
+
+Requirements:
+
+- relation targets must resolve to real current entities;
+- dangling relation refs are rejected or removed only through an explicit documented cascade operation;
+- predicates are normalized deterministically;
+- relations survive rename/save/load;
+- deleting an entity cannot silently leave corrupted semantic relations.
+
+Do not build inference logic in this milestone; only the storage/validation/control contract.
+
+## Task 4 — Generic semantic lookup and canonical editing path
+
+Replace node-only helpers such as `semanticFor(document, nodeId, ...)` with generic typed-reference APIs.
+
+Provide a clear canonical way to:
+
+- find semantic records by record ID;
+- find semantics for a typed target ref;
+- create semantic records;
+- update roles/descriptions/tags/aliases/provenance/status;
+- add/remove semantic relations;
+- delete semantic records.
+
+All mutations must use the existing canonical Store/command/transaction architecture so they participate in:
+
+- validation;
+- undo/redo;
+- command provenance;
+- AI/human parity.
+
+Do not introduce a separate AI semantic mutation backend.
+
+## Task 5 — Manifest, summary, capabilities, and query visibility
+
+Expose universal semantics to AI through the existing machine-readable surfaces.
+
+Requirements:
+
+- summary/manifest include semantic-record refs and typed target refs;
+- semantics are visible for non-node entities, including representative rig, timeline/keyframe, state-machine/condition, listener, asset, and geometry entities;
+- capability declarations accurately describe which semantic fields/actions are readable/writable;
+- semantic records can be located without consulting entity display names;
+- no capability may claim universal semantics until its real path exists.
+
+## Task 6 — Backward compatibility and lifecycle behavior
+
+Migrate the existing semantic format safely.
+
+Existing records like:
+
+```js
+{
+  target: { kind: 'node', id: 'node_...' },
+  role: '...',
+  description: '...',
+  tags: []
+}
+```
+
+must continue to load deterministically.
+
+Define and test:
+
+- legacy `role` -> new canonical role behavior;
+- deterministic creation of missing semantic-record IDs;
+- repeated normalization does not regenerate IDs;
+- entity deletion behavior;
+- duplicate/copy behavior where applicable;
+- round-trip serialization stability.
+
+Do not silently reinterpret malformed semantic data.
+
+## Task 7 — Adversarial name-independence and validation tests
+
+Add a dedicated semantic test suite proving at least:
+
+1. semantics can target node, bone/control/constraint, timeline/track/keyframe, state machine/state/input/transition/condition, listener, asset, mesh/path vertex, and gradient stop refs where supported;
+2. renaming a target does not change semantic targeting;
+3. duplicate human names do not change semantic targeting;
+4. empty human names do not change semantic targeting;
+5. deliberately misleading names do not override typed semantic targets;
+6. AI aliases never mutate human `name` fields;
+7. multiple alias namespaces coexist;
+8. missing/wrong-kind target refs fail precisely;
+9. dangling relation refs fail precisely;
+10. legacy node semantic records migrate and remain stable on the next round-trip;
+11. semantic edits are undoable/redoable through the canonical mutation path;
+12. manifest/summary semantic refs resolve without name lookup.
+
+---
+
+## Explicit non-goals
+
+Do not implement in this milestone:
+
+- semantic inference from geometry/rigging/animation;
+- natural-language entity resolution;
+- candidate ranking or ambiguity scoring;
+- headless Node API / CLI work from `suggestions`;
+- Bézier/path hit-testing;
+- path-topology commands;
+- pointer-events expansion;
+- state-machine feature expansion;
+- View Models/Data Binding;
+- components/layout/text/scripting/new Rive feature families.
+
+---
+
+## Acceptance criteria
+
+The milestone is complete only when:
+
+- semantics are no longer node-only;
+- every current first-class typed entity kind has a defined semantic-target policy;
+- semantic records have stable IDs;
+- AI aliases/tags/roles/provenance/status can be stored without changing human names;
+- typed semantic relations validate correctly;
+- legacy node semantics migrate deterministically;
+- semantic CRUD uses canonical Store/command paths with undo/redo;
+- summary/manifest/capabilities expose the implemented semantic contract honestly;
+- rename/duplicate/empty/misleading-name tests prove name independence;
+- all new and existing tests pass;
+- `npm test` passes;
+- `npm run check` passes.
+
+## Handoff
 
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Commit: <sha>
-- Changed files: <paths>
-- Tests added/changed: <paths>
-- npm test: PASS | FAIL | NOT RUN (<reason>)
-- npm run check: PASS | FAIL | NOT RUN (<reason>)
-- Task-specific checks: <commands/results>
-- Persistence/migration impact: <none or exact description>
-- AI/name-independence proof: <what was tested>
-- Known limitations: <none or exact list>
+- Implementation commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Task-specific checks:
+- Persistence/migration impact:
+- AI/name-independence proof:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
-
----
-
-# MILESTONE M0 — AI-Native Identity & Understanding Foundation
-
-**Milestone status:** ACTIVE
-
-### Milestone goal
-
-Make the complete Veyra graph understandable and addressable by AI **without depending on human-authored names**.
-
-An AI should ultimately be able to look at an arbitrary project where objects are named things like `Layer 47`, `asdf`, `thing`, duplicate names, misleading names, or no names at all, and still reason about the correct objects using stable identity, semantic metadata, structure, relationships, geometry, rigging, animation ownership, interactions, and other graph evidence.
-
-AI may later assign its own aliases/tags such as `right_eye`, `mouth`, `idle_state`, or `hand_target`, but those aliases are separate from human display names and resolve back to immutable Veyra references.
-
-### Milestone completion criteria
-
-This milestone remains open until the foundation supports, at minimum:
-
-- stable typed identity for all first-class authored entities;
-- stable identity across rename/edit/save/load operations;
-- semantic metadata that can target all relevant entity kinds, not only scene nodes;
-- AI-owned aliases/tags without renaming user objects;
-- a deterministic name-independent entity resolver;
-- ambiguity reporting instead of guessing;
-- graph relationships and ownership/dependency information AI can inspect;
-- a canonical AI query/control surface using the same commands as the human editor;
-- adversarial tests using duplicate, random, empty, and deliberately misleading names.
-
-**Important:** these are milestone-level outcomes, **not permission to implement all of them now**. Only the TODO below is currently authorized.
-
----
-
-## TODO M0.1 — Stable Identity Contract for the Existing Graph
-
-**Status:** `[x] VERIFIED`
-
-### Objective
-
-Establish a complete stable-identity contract for every first-class persistent entity that exists in Veyra **today**, before semantic inference or advanced AI resolution is built.
-
-### Current gaps observed in the code
-
-- `VEYRA_REFERENCE_KINDS` does not currently represent every authored graph entity exposed elsewhere in the model/manifest.
-- Keyframes do not have their own persistent IDs; their effective identity depends on timeline/track/frame, so moving one can change how it is identified.
-- Several graph entities are exposed to AI but lack a single canonical typed-reference contract across the system.
-- Some friendly APIs accept names for convenience; persisted relationships and canonical AI references must remain ID-backed.
-
-### Required implementation
-
-1. Audit every persistent entity currently represented by the Veyra document model, including at least:
-   - document
-   - node
-   - asset
-   - gradient stop / independently editable paint sub-entities where appropriate
-   - bone
-   - mesh
-   - mesh vertex
-   - control
-   - constraint
-   - timeline
-   - track
-   - keyframe
-   - state machine
-   - machine input
-   - machine state
-   - machine transition
-   - machine condition
-   - listener
-   - existing semantic-record targets
-2. Decide explicitly which entities require first-class typed references. Do not invent IDs for purely value-like objects without an editing/reference need; document exclusions.
-3. Extend the canonical reference system for every current first-class entity.
-4. Give keyframes stable persistent IDs at creation time.
-5. Preserve keyframe IDs when frame/easing/value changes or when keyframes move.
-6. Normalize/migrate legacy keyframes without IDs so the ID is created once and remains stable after the first normalized save/load round-trip.
-7. Replace synthetic manifest-only keyframe identity with the actual persistent keyframe reference.
-8. Ensure state machines, transitions, conditions, listeners, tracks, gradient stops, and other newly first-class entities expose canonical typed refs wherever AI can inspect them.
-9. Add lookup helpers where needed so downstream code does not recreate identity using names or ad-hoc frame tuples.
-10. Keep all currently valid supported `.veyra` documents loadable.
-11. Update affected reference/manifest/document contract documentation.
-
-### Explicit non-goals
-
-Do **not** implement yet:
-
-- semantic inference;
-- universal semantic metadata;
-- AI aliases;
-- the semantic entity resolver;
-- ownership/dependency graph work beyond what identity requires;
-- new Rive feature families;
-- View Models, layouts, components, text, scripting, or state-machine UI.
-
-Those may become later TODOs, but only after this TODO is independently verified.
-
-### Acceptance criteria
-
-- Every current first-class persistent entity has an explicit stable identity strategy.
-- Keyframes have real persistent IDs.
-- Moving a keyframe preserves its exact ID.
-- Serialize -> normalize/load -> serialize preserves existing first-class IDs.
-- A legacy keyframe without an ID gains one and retains it on the next round-trip.
-- Duplicate IDs are rejected in the appropriate scope with precise errors.
-- Timeline/machine/state/input/node renames do not change related entity identities or stored graph references.
-- Manifest refs for covered entities resolve to the correct entity without consulting human names.
-- Existing editor behavior remains functional.
-- `npm test` passes.
-- `npm run check` passes.
-
-### Mandatory tests
-
-Prove at least:
-
-1. keyframe ID survives move;
-2. keyframe ID survives serialization round-trip;
-3. legacy keyframe receives a stable ID after first normalization;
-4. timeline rename does not alter track/keyframe identity;
-5. machine/state/input rename does not alter transition/condition identity or references;
-6. node rename does not alter listener target identity;
-7. duplicate first-class IDs are rejected;
-8. manifest typed refs resolve without name lookup.
-
-### Handoff
-
-```text
-Handoff
-- Status: VERIFIED
-- Commit: d5b4e73 (identity) + 246daea (pathVertexById correction) + 358da30 (handoff) + 88167c8 (final handoff)
-- Changed files: docs/plan.md; src/veyra/manifest.js; src/veyra/model.js; src/veyra/references.js; src/veyra/store.js; src/veyra/summary.js; tests/fixtures/veyra/animated.veyra; tests/veyra-manifest.test.mjs; tests/veyra-identity.test.mjs; milestone.md (handoff status)
-- Tests added/changed: tests/veyra-identity.test.mjs plus persistent-ID fixture/manifest assertions
-- npm test: PASS — 21 of 21 suites passed
-- npm run check: PASS — 30 of 30 source files passed syntax check
-- Task-specific checks: keyframe create/edit/move/round-trip stability; deterministic legacy migration; timeline and machine/state/input rename stability; node listener-target stability; duplicate node/keyframe/entity rejection; manifest typed refs resolve by ID; gradient-stop/path-vertex/mesh-vertex lookup and refs; `pathVertexById` regression
-- Persistence/migration impact: normalized legacy keyframes receive deterministic `keyframe_<trackId>_<index>` IDs; existing IDs are preserved through normalize/save/load and same-frame setKeyframe edits. Existing supported documents remain loadable; canonical JSON gains keyframe IDs.
-- AI/name-independence proof: manifest refs use persistent typed IDs for document, timeline, track, keyframe, state machine, machine entities, listeners, geometry vertices, and gradient stops; rename tests resolve graph relationships without human-name lookup.
-- Known limitations: value-only transforms/geometry/colors/condition values remain owner-addressed; semantic inference, aliases, universal metadata, resolver, dependency graph, and editor UI remain out of scope. Independently verified by Asha/Sara on 88167c8.
-```
-
----
-
-## TODO M0.2 — Deterministic Name-Independent Entity Resolver
-
-**Status:** `[ ] READY`
-
-### Objective
-
-Provide a canonical AI query/resolution surface that resolves covered entities from stable typed references and structural evidence without depending on human-authored names, and fails closed when evidence is ambiguous.
-
-### Required implementation
-
-1. Add a DOM-free resolver/query module using the existing typed-reference and summary/manifest contracts.
-2. Resolve exact typed references by kind and ID first; reject wrong-kind, missing, malformed, and cross-scope references precisely.
-3. Support deterministic structural queries over the existing graph (ownership, parent/child relationships, timeline/track/keyframe ownership, machine/state/input/transition relationships, and geometry ownership) without treating display names as identity.
-4. Treat names only as optional evidence; duplicate, empty, misleading, or renamed names must never silently select an entity.
-5. Return explicit `resolved`, `ambiguous`, and `notFound` outcomes with stable candidate references and machine-readable reasons.
-6. Expose the resolver through the canonical AI-readable surface without creating an AI-only mutation path; do not mutate documents during resolution.
-7. Add adversarial tests for duplicate/random/empty/misleading names, rename stability, wrong-kind references, ambiguous structural matches, deterministic candidate ordering, and exact typed-reference success.
-8. Update the manifest/query contract documentation while preserving supported document compatibility.
-
-### Explicit non-goals
-
-Do not implement AI-owned aliases/tags, semantic inference, dependency-graph expansion, new feature families, T4b resumption, Bézier geometry, or state-machine UI in this TODO.
-
-### Acceptance criteria
-
-- Exact typed-ID resolution succeeds without consulting names.
-- Ambiguous or insufficient evidence never guesses and returns stable candidate refs plus a reason.
-- Duplicate, empty, misleading, and renamed display names are covered by tests.
-- Resolver output is deterministic and DOM-free.
-- Existing tests and supported documents remain functional.
-- `npm test` and `npm run check` pass.
-
----
-
-## What happens next
-
-Nothing is pre-assigned.
-
-When the current TODO is completed, Logan tells ChatGPT to verify it. ChatGPT will inspect the actual implementation and tests against `plan.md` and this milestone. Then exactly one of these happens:
-
-- verification fails -> the current TODO remains active and exact corrections are requested;
-- verification passes but M0 is incomplete -> the current TODO becomes VERIFIED and ChatGPT adds **one new M0 TODO** based on the remaining highest-priority gap;
-- verification proves all M0 criteria are satisfied -> M0 closes and ChatGPT creates the next milestone with its first TODO.
