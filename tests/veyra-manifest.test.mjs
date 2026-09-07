@@ -294,7 +294,7 @@ assert.deepEqual(
 
 // --- Action schema --------------------------------------------------------------
 const actions = manifest.actions;
-assert.equal(actions.length, 45, 'Action catalog grows additively from 27 published entries to 45 total affordances.');
+assert.equal(actions.length, 50, 'Action catalog grows additively from 45 entries to 50 with canonical semantic CRUD.');
 const actionIds = actions.map((item) => item.ref.id);
 assert.equal(new Set(actionIds).size, actionIds.length, 'Action ids must be unique.');
 for (const item of actions) {

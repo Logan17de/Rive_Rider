@@ -170,6 +170,16 @@ function machineConditionRules() {
   ]));
 }
 
+function semanticActionRefs() {
+  return VEYRA_SEMANTIC_CAPABILITIES.actions.map((commandName) => {
+    const command = VEYRA_COMMAND_TABLE[commandName];
+    if (!command || !command.capabilities.includes('semantic-write')) {
+      throw new TypeError(`Semantic capability action ${commandName} is not dispatchable as a semantic write.`);
+    }
+    return command.manifestId;
+  });
+}
+
 function authoringContract() {
   return {
 
@@ -179,6 +189,7 @@ function authoringContract() {
       readable: [...VEYRA_SEMANTIC_CAPABILITIES.readable],
       writable: [...VEYRA_SEMANTIC_CAPABILITIES.writable],
       actions: [...VEYRA_SEMANTIC_CAPABILITIES.actions],
+      actionRefs: semanticActionRefs(),
       status: { enum: [...VEYRA_SEMANTIC_CAPABILITIES.statuses] },
       provenanceSource: { enum: [...VEYRA_SEMANTIC_CAPABILITIES.provenanceSources] },
       identity: 'semantic record id and typed target refs; display names are never identity',

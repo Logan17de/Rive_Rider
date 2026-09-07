@@ -5,6 +5,7 @@ import {
   VEYRA_NODE_TYPES,
   VEYRA_PROPERTY_BOUNDS,
 } from './model.js';
+import { VEYRA_SEMANTIC_COMMAND_ACTIONS } from './semantics.js';
 
 // Serializable command bus over the VeyraStore public API.
 //
@@ -171,6 +172,31 @@ const COMMAND_TABLE = {
     summary: 'Remove the current selection through the shared cascade cleanup.',
     params: [],
     run: (store) => store.removeSelection(),
+  },
+  addSemantic: {
+    summary: 'Add a semantic record for a typed target reference.',
+    params: [param('target', 'reference', true), param('overrides', 'object', false)],
+    run: (store, args, command) => store.addSemantic(args.target, args.overrides ?? {}, command ?? {}),
+  },
+  updateSemantic: {
+    summary: 'Update an existing semantic record by stable semantic-record id.',
+    params: [param('semanticId', 'string', true), param('patch', 'object', true)],
+    run: (store, args, command) => store.updateSemantic(args.semanticId, args.patch, command ?? {}),
+  },
+  removeSemantic: {
+    summary: 'Remove a semantic record by stable semantic-record id.',
+    params: [param('semanticId', 'string', true)],
+    run: (store, args, command) => store.removeSemantic(args.semanticId, command ?? {}),
+  },
+  addSemanticRelation: {
+    summary: 'Add one typed semantic relation to a semantic record.',
+    params: [param('semanticId', 'string', true), param('relation', 'object', true)],
+    run: (store, args, command) => store.addSemanticRelation(args.semanticId, args.relation, command ?? {}),
+  },
+  removeSemanticRelation: {
+    summary: 'Remove one typed semantic relation from a semantic record.',
+    params: [param('semanticId', 'string', true), param('relation', 'object', true)],
+    run: (store, args, command) => store.removeSemanticRelation(args.semanticId, args.relation, command ?? {}),
   },
   setProperty: {
     summary: 'Write a capability-checked property by address.',
@@ -364,6 +390,36 @@ const COMMAND_MANIFEST_OVERRIDES = {
   removeSelection: {
     targetKind: 'selection',
     capabilities: ['selection', 'transactional', 'undoable'],
+  },
+  addSemantic: {
+    manifestId: 'add-semantic',
+    name: 'Add semantic',
+    targetKind: 'semanticRecord',
+    capabilities: ['semantic-write', 'transactional', 'undoable', 'returns-id'],
+  },
+  updateSemantic: {
+    manifestId: 'update-semantic',
+    name: 'Update semantic',
+    targetKind: 'semanticRecord',
+    capabilities: ['semantic-write', 'transactional', 'undoable'],
+  },
+  removeSemantic: {
+    manifestId: 'remove-semantic',
+    name: 'Remove semantic',
+    targetKind: 'semanticRecord',
+    capabilities: ['semantic-write', 'transactional', 'undoable'],
+  },
+  addSemanticRelation: {
+    manifestId: 'add-semantic-relation',
+    name: 'Add semantic relation',
+    targetKind: 'semanticRecord',
+    capabilities: ['semantic-write', 'typed-relation', 'transactional', 'undoable'],
+  },
+  removeSemanticRelation: {
+    manifestId: 'remove-semantic-relation',
+    name: 'Remove semantic relation',
+    targetKind: 'semanticRecord',
+    capabilities: ['semantic-write', 'typed-relation', 'transactional', 'undoable'],
   },
   setProperty: {
     manifestId: 'write-property',
@@ -707,6 +763,10 @@ for (const [commandName, entry] of Object.entries(COMMAND_TABLE)) {
     transport: 'command',
     hostAvailability: 'available',
   });
+}
+
+for (const action of VEYRA_SEMANTIC_COMMAND_ACTIONS) {
+  if (!COMMAND_TABLE[action]) throw new TypeError(`Missing semantic command-bus action: ${action}`);
 }
 
 export const VEYRA_COMMAND_TABLE = Object.freeze(COMMAND_TABLE);

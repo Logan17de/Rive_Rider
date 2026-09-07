@@ -104,8 +104,43 @@ export function createListenerRef(id) {
   return createReference('listener', id);
 }
 
-export function createPaintRef(id) {
-  return createReference('paint', id);
+export function createPaintRef(ownerKindOrRef, ownerId = null) {
+  let ownerKind;
+  let id;
+  if (ownerKindOrRef && typeof ownerKindOrRef === 'object') {
+    ownerKind = String(ownerKindOrRef.kind || '');
+    id = String(ownerKindOrRef.id || '');
+  } else if (ownerId == null) {
+    const encoded = String(ownerKindOrRef || '');
+    const separator = encoded.indexOf(':');
+    if (separator <= 0) {
+      throw new TypeError('paint references must be owner-qualified as node:<id> or mesh:<id>.');
+    }
+    ownerKind = encoded.slice(0, separator);
+    id = encoded.slice(separator + 1);
+  } else {
+    ownerKind = String(ownerKindOrRef || '');
+    id = String(ownerId || '');
+  }
+  if (!['node', 'mesh'].includes(ownerKind)) {
+    throw new TypeError(`paint owner kind must be node or mesh, not ${ownerKind || 'empty'}.`);
+  }
+  if (!id) throw new TypeError('paint owner id is required.');
+  return createReference('paint', `${ownerKind}:${id}`);
+}
+
+export function paintOwnerReference(value) {
+  const ref = value && typeof value === 'object'
+    ? createReference('paint', value.id)
+    : createReference('paint', value);
+  const separator = ref.id.indexOf(':');
+  if (separator <= 0) throw new TypeError('paint reference is not owner-qualified.');
+  const ownerKind = ref.id.slice(0, separator);
+  const ownerId = ref.id.slice(separator + 1);
+  if (!['node', 'mesh'].includes(ownerKind) || !ownerId) {
+    throw new TypeError('paint reference must encode a node or mesh owner.');
+  }
+  return createReference(ownerKind, ownerId);
 }
 
 export function createGradientStopRef(id) {

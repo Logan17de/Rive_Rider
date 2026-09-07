@@ -12,15 +12,17 @@ import {
   createMeshVertexRef,
   createNodeRef,
   createPathVertexRef,
+  createPaintRef,
   createStateMachineRef,
   createTimelineRef,
   createSemanticRecordRef,
   referenceId,
 } from './references.js';
 
-function paintSummary(paint) {
+function paintSummary(paint, ownerKind, ownerId) {
   const stops = paint?.fill?.stops || [];
   return {
+    ref: createPaintRef(ownerKind, ownerId),
     fillType: paint?.fill?.type || 'solid',
     gradientStops: stops.map((stop) => ({
       ref: createGradientStopRef(stop.id),
@@ -76,7 +78,7 @@ export function createSceneSummary(document, options = {}) {
         type: node.type,
         name: node.name,
         parent: cloneValue(node.parent),
-        paint: paintSummary(node.paint),
+        paint: paintSummary(node.paint, 'node', node.id),
         visible: node.visible,
         locked: node.locked,
         semantics: semantic
@@ -103,7 +105,7 @@ export function createSceneSummary(document, options = {}) {
       meshes: document.meshes.map((mesh) => ({
         ref: { kind: 'mesh', id: mesh.id },
         name: mesh.name,
-        paint: paintSummary(mesh.paint),
+        paint: paintSummary(mesh.paint, 'mesh', mesh.id),
         vertexRefs: mesh.vertices.map((vertex) => createMeshVertexRef(vertex.id)),
         vertexCount: mesh.vertices.length,
         triangleCount: mesh.triangles.length,

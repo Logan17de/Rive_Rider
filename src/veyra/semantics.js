@@ -1,11 +1,23 @@
 import {
   VEYRA_REFERENCE_KINDS,
+  createPaintRef,
   createReference,
+  paintOwnerReference,
   referencesEqual,
 } from './references.js';
 
 export const VEYRA_SEMANTIC_STATUSES = Object.freeze(['confirmed', 'inferred', 'rejected', 'stale']);
 export const VEYRA_SEMANTIC_SOURCES = Object.freeze(['user', 'ai', 'import', 'system']);
+export const VEYRA_SEMANTIC_TARGET_KINDS = Object.freeze(
+  VEYRA_REFERENCE_KINDS.filter((kind) => kind !== 'semanticRecord'),
+);
+export const VEYRA_SEMANTIC_COMMAND_ACTIONS = Object.freeze([
+  'addSemantic',
+  'updateSemantic',
+  'removeSemantic',
+  'addSemanticRelation',
+  'removeSemanticRelation',
+]);
 
 let semanticFallbackId = 0;
 
@@ -32,10 +44,44 @@ function cleanString(value, path, { allowEmpty = false } = {}) {
   return result;
 }
 
-export function normalizeSemanticTarget(value, path = 'semantic target') {
+function normalizeSemanticReference(value, path = 'semantic reference') {
   if (typeof value === 'string') return createReference('node', value);
-  if (!value || typeof value !== 'object') throw new TypeError(`${path} must be a typed reference.`);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${path} must be a typed reference.`);
+  }
   return createReference(String(value.kind || ''), value.id);
+}
+
+function qualifyPaintReference(reference, document, path) {
+  if (reference.kind !== 'paint') return reference;
+  try {
+    const owner = paintOwnerReference(reference);
+    return createPaintRef(owner);
+  } catch {
+    // Unqualified paint refs are accepted only as legacy/transient input.
+    // Once a document context exists they are deterministically migrated.
+  }
+  if (!document) return reference;
+  const ownerId = reference.id;
+  const owners = [];
+  if ((document.nodes || []).some((node) => node.id === ownerId)) owners.push({ kind: 'node', id: ownerId });
+  if ((document.meshes || []).some((mesh) => mesh.id === ownerId)) owners.push({ kind: 'mesh', id: ownerId });
+  if (owners.length > 1) {
+    throw new TypeError(`${path} paint owner id ${ownerId} is ambiguous between node and mesh; use an owner-qualified paint reference.`);
+  }
+  return owners.length === 1 ? createPaintRef(owners[0]) : reference;
+}
+
+export function normalizeSemanticTarget(value, path = 'semantic target', document = null) {
+  const reference = qualifyPaintReference(normalizeSemanticReference(value, path), document, path);
+  if (reference.kind === 'semanticRecord') {
+    throw new TypeError(`${path} cannot target semanticRecord; semantic records may only be relation targets.`);
+  }
+  return reference;
+}
+
+function normalizeSemanticRelationTarget(value, path, document = null) {
+  return qualifyPaintReference(normalizeSemanticReference(value, path), document, path);
 }
 
 function normalizeTags(tags = [], path = 'semantic tags') {
@@ -100,7 +146,7 @@ function normalizePredicate(value, path) {
   return predicate;
 }
 
-function normalizeRelations(relations = [], path = 'semantic relations') {
+function normalizeRelations(relations = [], path = 'semantic relations', document = null) {
   if (!Array.isArray(relations)) throw new TypeError(`${path} must be an array.`);
   const normalized = relations.map((relation, index) => {
     if (!relation || typeof relation !== 'object' || Array.isArray(relation)) {
@@ -108,7 +154,7 @@ function normalizeRelations(relations = [], path = 'semantic relations') {
     }
     return {
       predicate: normalizePredicate(relation.predicate, `${path}[${index}].predicate`),
-      target: normalizeSemanticTarget(relation.target, `${path}[${index}].target`),
+      target: normalizeSemanticRelationTarget(relation.target, `${path}[${index}].target`, document),
     };
   });
   const seen = new Set();
@@ -136,8 +182,8 @@ function sourceFromLegacy(record) {
   return provenance;
 }
 
-export function createSemanticRecord(targetOrNodeId, overrides = {}) {
-  const target = normalizeSemanticTarget(targetOrNodeId, 'semantic target');
+export function createSemanticRecord(targetOrNodeId, overrides = {}, document = null) {
+  const target = normalizeSemanticTarget(targetOrNodeId, 'semantic target', document);
   const provenance = normalizeProvenance(sourceFromLegacy(overrides));
   const status = overrides.status ?? (provenance.source === 'ai' ? 'inferred' : 'confirmed');
   if (!VEYRA_SEMANTIC_STATUSES.includes(status)) {
@@ -151,21 +197,21 @@ export function createSemanticRecord(targetOrNodeId, overrides = {}) {
     description: String(overrides.description ?? ''),
     tags: normalizeTags(overrides.tags || []),
     aliases: normalizeAliases(overrides.aliases || []),
-    relations: normalizeRelations(overrides.relations || []),
+    relations: normalizeRelations(overrides.relations || [], 'semantic relations', document),
     provenance,
     status,
   };
 }
 
-export function normalizeSemanticRecords(records = []) {
+export function normalizeSemanticRecords(records = [], document = null) {
   if (!Array.isArray(records)) throw new TypeError('semantics must be an array.');
   const normalized = records.map((record, index) => {
     if (!record || typeof record !== 'object' || Array.isArray(record)) {
       throw new TypeError(`semantics[${index}] must be a semantic record.`);
     }
-    const target = normalizeSemanticTarget(record.target ?? record.nodeId, `semantics[${index}].target`);
+    const target = normalizeSemanticTarget(record.target ?? record.nodeId, `semantics[${index}].target`, document);
     const id = record.id || deterministicId(`${referenceKey(target)}\u0000${String(record.namespace ?? 'default')}\u0000${index}`);
-    return createSemanticRecord(target, { ...record, id });
+    return createSemanticRecord(target, { ...record, id }, document);
   });
   const ids = new Set();
   normalized.forEach((record, index) => {
@@ -176,7 +222,7 @@ export function normalizeSemanticRecords(records = []) {
 }
 
 export function entityByReference(document, reference) {
-  const ref = normalizeSemanticTarget(reference);
+  const ref = qualifyPaintReference(normalizeSemanticReference(reference), document, 'reference');
   const find = (items) => (items || []).find((item) => item.id === ref.id) || null;
   switch (ref.kind) {
     case 'document': return document.id === ref.id ? document : null;
@@ -190,8 +236,14 @@ export function entityByReference(document, reference) {
       }
       return null;
     case 'paint': {
-      const owner = find(document.nodes) || find(document.meshes);
-      return owner?.paint || null;
+      let owner;
+      try {
+        owner = paintOwnerReference(ref);
+      } catch {
+        return null;
+      }
+      const collection = owner.kind === 'node' ? document.nodes : document.meshes;
+      return (collection || []).find((item) => item.id === owner.id)?.paint || null;
     }
     case 'gradientStop':
       for (const owner of [...(document.nodes || []), ...(document.meshes || [])]) {
@@ -256,6 +308,7 @@ export function entityByReference(document, reference) {
 export function validateSemanticRecords(document) {
   const ids = new Set();
   for (const [index, record] of (document.semantics || []).entries()) {
+    normalizeSemanticTarget(record.target, `semantics[${index}].target`, document);
     if (ids.has(record.id)) throw new TypeError(`Duplicate semantic record id ${record.id}.`);
     ids.add(record.id);
     if (!entityByReference(document, record.target)) {
@@ -275,7 +328,7 @@ export function semanticRecordById(document, semanticId) {
 }
 
 export function semanticsForTarget(document, targetOrNodeId) {
-  const target = normalizeSemanticTarget(targetOrNodeId);
+  const target = normalizeSemanticTarget(targetOrNodeId, 'semantic target', document);
   return (document.semantics || []).filter((record) => referencesEqual(record.target, target));
 }
 
@@ -290,7 +343,7 @@ export function updateSemanticRecordInDocument(document, semanticId, patch) {
   if (patch.id !== undefined && patch.id !== semanticId) throw new TypeError('semantic record id is immutable.');
   const current = document.semantics[index];
   const target = patch.target ?? current.target;
-  document.semantics[index] = createSemanticRecord(target, { ...current, ...patch, id: semanticId });
+  document.semantics[index] = createSemanticRecord(target, { ...current, ...patch, id: semanticId }, document);
   return document.semantics[index];
 }
 
@@ -315,7 +368,7 @@ export function addSemanticRelationInDocument(document, semanticId, relation) {
 export function removeSemanticRelationInDocument(document, semanticId, relation) {
   const current = semanticRecordById(document, semanticId);
   if (!current) throw new TypeError(`Unknown semantic record ${semanticId}.`);
-  const normalized = normalizeRelations([relation])[0];
+  const normalized = normalizeRelations([relation], 'semantic relations', document)[0];
   return updateSemanticRecordInDocument(document, semanticId, {
     relations: current.relations.filter((candidate) =>
       candidate.predicate !== normalized.predicate || !referencesEqual(candidate.target, normalized.target)),
@@ -328,14 +381,14 @@ export function allEntityReferenceKeys(document) {
   add('document', document.id);
   for (const node of document.nodes || []) {
     add('node', node.id);
-    add('paint', node.id);
+    add('paint', createPaintRef('node', node.id).id);
     for (const vertex of node.type === 'path' ? node.geometry?.vertices || [] : []) add('pathVertex', vertex.id);
     for (const stop of node.paint?.fill?.stops || []) add('gradientStop', stop.id);
   }
   for (const asset of document.assets || []) add('asset', asset.id);
   for (const bone of document.bones || []) add('bone', bone.id);
   for (const mesh of document.meshes || []) {
-    add('mesh', mesh.id); add('paint', mesh.id);
+    add('mesh', mesh.id); add('paint', createPaintRef('mesh', mesh.id).id);
     for (const vertex of mesh.vertices || []) add('meshVertex', vertex.id);
     for (const stop of mesh.paint?.fill?.stops || []) add('gradientStop', stop.id);
   }

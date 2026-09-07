@@ -22,7 +22,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 # MILESTONE M1 — Universal Semantic Metadata Layer — CORRECTION PASS
 
-**Status:** `CORRECTIONS REQUIRED`
+**Status:** `AWAITING VERIFICATION`
 
 ## Verification result
 
@@ -175,16 +175,16 @@ M1 is complete only when all of the following are true:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Command-bus semantic CRUD proof:
-- Paint identity collision proof:
-- semanticRecord target policy:
-- Persistence/migration impact:
-- AI/name-independence proof:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Correction commits: Implement M1 correction pass [m1-corrected]
+- Changed files: src/veyra/references.js, semantics.js, model.js, capabilities.js, summary.js, commands.js, manifest.js, tests/veyra-semantics-corrections.test.mjs, tests/veyra-manifest.test.mjs, milestone.md
+- Tests added/changed: dedicated correction suite covering command-bus CRUD/atomicity, owner-qualified paint collision identity/cascade/round-trip/summary-manifest refs, and semanticRecord target exclusion; manifest action count remains strict at 50
+- npm test: PASS (required by correction workflow before commit)
+- npm run check: PASS (required by correction workflow before commit)
+- Command-bus semantic CRUD proof: all five VEYRA_SEMANTIC_COMMAND_ACTIONS dispatch 1:1 to Store methods; AI provenance is forwarded; invalid refs/patches return failure without document/revision/history mutation; capability actions resolve mechanically to generated manifest action refs
+- Paint identity collision proof: paint refs are owner-qualified as paint id node:<owner-id> or mesh:<owner-id>; same node/mesh owner IDs remain legal and resolve/cascade independently; legacy unqualified paint refs migrate only when unique and fail precisely when ambiguous
+- semanticRecord target policy: unsupported as a semantic-record target and rejected during creation/normalization/validation; still supported intentionally as a typed semantic relation target
+- Persistence/migration impact: canonical paint semantic refs are owner-qualified; legacy unqualified paint refs deterministically qualify from owner kind when unique; semantic IDs remain unchanged; save/load preserves qualified identity
+- AI/name-independence proof: dispatched AI alias/role/status edits leave human names untouched; owner renames do not alter paint semantic refs
+- Suggestions added to `suggestions`: none
+- Known limitations: legacy unqualified paint refs are inherently ambiguous when a node and mesh already share the owner ID, so normalization rejects them and requires an explicit owner-qualified ref
 ```

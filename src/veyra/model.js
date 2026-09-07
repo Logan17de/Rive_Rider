@@ -1405,7 +1405,7 @@ export function normalizeDocument(input) {
     assetIds.add(asset.id);
   }
 
-  const semantics = normalizeSemanticRecords(input.semantics || []);
+  const semantics = normalizeSemanticRecords(input.semantics || [], { nodes, meshes });
 
   const timelines = Array.isArray(input.timelines)
     ? input.timelines.map((timeline, index) => normalizeTimeline(timeline, index, inputVersion))

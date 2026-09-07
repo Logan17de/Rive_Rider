@@ -1,5 +1,9 @@
-import { VEYRA_REFERENCE_KINDS } from './references.js';
-import { VEYRA_SEMANTIC_SOURCES, VEYRA_SEMANTIC_STATUSES } from './semantics.js';
+import {
+  VEYRA_SEMANTIC_COMMAND_ACTIONS,
+  VEYRA_SEMANTIC_SOURCES,
+  VEYRA_SEMANTIC_STATUSES,
+  VEYRA_SEMANTIC_TARGET_KINDS,
+} from './semantics.js';
 
 const COMMON_WRITABLE = Object.freeze([
   'name',
@@ -154,10 +158,10 @@ export function supportsRigProperty(kind, object, path, mode = 'writable') {
 
 
 export const VEYRA_SEMANTIC_CAPABILITIES = Object.freeze({
-  targetKinds: Object.freeze([...VEYRA_REFERENCE_KINDS.filter((kind) => kind !== 'semanticRecord')]),
+  targetKinds: Object.freeze([...VEYRA_SEMANTIC_TARGET_KINDS]),
   readable: Object.freeze(['id', 'target', 'namespace', 'canonicalRole', 'description', 'tags', 'aliases', 'relations', 'provenance', 'status']),
   writable: Object.freeze(['target', 'namespace', 'canonicalRole', 'description', 'tags', 'aliases', 'relations', 'provenance', 'status']),
-  actions: Object.freeze(['create', 'update', 'delete', 'add-relation', 'remove-relation']),
+  actions: Object.freeze([...VEYRA_SEMANTIC_COMMAND_ACTIONS]),
   statuses: Object.freeze([...VEYRA_SEMANTIC_STATUSES]),
   provenanceSources: Object.freeze([...VEYRA_SEMANTIC_SOURCES]),
 });
