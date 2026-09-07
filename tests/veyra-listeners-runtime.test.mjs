@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import {
   createDocument, createNode, createTimeline, createPointerListener, normalizeDocument,
 } from '../src/veyra/model.js';
-import { resolveListenerIntents, createListenerResolver } from '../src/veyra/listenersRuntime.js';
+import {
+  resolveListenerIntents,
+  resolvePointerEvent,
+  resolveListenerEvent,
+  createListenerResolver,
+} from '../src/veyra/listenersRuntime.js';
 
 const node = createNode('rectangle', { id: 'button', transform: { x: 40, y: 40 } });
 const timeline = createTimeline({ id: 'door', name: 'DoorOpen' });
@@ -25,6 +30,38 @@ const first = resolver.resolve({ type: 'pointermove', x: 40, y: 40 });
 const second = resolver.resolve({ type: 'pointermove', x: 40, y: 40 });
 assert.notEqual(first.hoverKey, null, 'resolver records a stable hover key');
 assert.equal(second.transitions.length, 0, 'resolver deduplicates unchanged hover transitions');
+
+const refreshedTimeline = createTimeline({ id: 'new-door', name: 'NewDoor' });
+const refreshedDocument = normalizeDocument(createDocument({
+  nodes: [createNode('rectangle', { id: 'button', transform: { x: 40, y: 40 } })],
+  timelines: [refreshedTimeline],
+  listeners: [createPointerListener({ id: 'play-new-door', targetId: 'button', event: 'pointerdown', action: 'play', timelineId: 'new-door' })],
+}));
+resolver.setDocument(refreshedDocument);
+assert.equal(resolver.hoverKey, null, 'setDocument resets hover state after document replacement');
+const refreshed = resolver.resolve({ type: 'pointerdown', x: 40, y: 40 });
+assert.deepEqual(refreshed.intents[0], { kind: 'transport', op: 'play', timelineId: 'new-door' }, 'held resolver reads listeners from the new document');
+const refreshedHover = resolver.resolve({ type: 'pointermove', x: 40, y: 40 });
+resolver.setDocument(refreshedDocument);
+assert.equal(resolver.hoverKey, refreshedHover.hoverKey, 'setDocument of the same document is a safe no-op');
+
+assert.throws(
+  () => resolveListenerIntents({ event: { type: 'pointerdown', x: 40, y: 40 }, document, bogus: true }),
+  (error) => error instanceof TypeError && /bogus/.test(error.message) && /event, scene, document, viewport, hoverKey, sceneRevision/.test(error.message),
+  'resolveListenerIntents rejects and names unknown option keys',
+);
+assert.throws(
+  () => createListenerResolver({ scene: document }),
+  (error) => error instanceof TypeError && /scene/.test(error.message) && /document, viewport/.test(error.message),
+  'createListenerResolver rejects a wrong scene option key',
+);
+for (const [name, alias] of [['resolvePointerEvent', resolvePointerEvent], ['resolveListenerEvent', resolveListenerEvent]]) {
+  assert.throws(
+    () => alias({ event: { type: 'pointerdown', x: 40, y: 40 }, document, wrong: true }),
+    (error) => error instanceof TypeError && /wrong/.test(error.message),
+    `${name} rejects unknown option keys like resolveListenerIntents`,
+  );
+}
 
 assert.throws(() => normalizeDocument(createDocument({
   nodes: [node],

@@ -20,8 +20,30 @@ function intentFor(listener) {
   return { kind: 'transport', op: listener.action, timelineId: referenceId(listener.timeline, 'timeline'), ...(listener.value !== undefined ? { value: listener.value } : {}) };
 }
 
-/** Resolve one plain event into pure runtime intents and hover transitions. */
-export function resolveListenerIntents({ event, scene, document = scene, viewport = {}, hoverKey = null, sceneRevision = 0 } = {}) {
+const RESOLVE_LISTENER_OPTION_KEYS = Object.freeze([
+  'event', 'scene', 'document', 'viewport', 'hoverKey', 'sceneRevision',
+]);
+const RESOLVER_OPTION_KEYS = Object.freeze(['document', 'viewport']);
+
+function assertKnownOptions(options, functionName, acceptedKeys) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError(`${functionName} options must be an object`);
+  }
+  const unknownKeys = Object.keys(options).filter((key) => !acceptedKeys.includes(key));
+  if (unknownKeys.length) {
+    throw new TypeError(`Unknown ${functionName} option key(s): ${unknownKeys.join(', ')}. Accepted keys: ${acceptedKeys.join(', ')}`);
+  }
+}
+
+/**
+ * Resolve one plain event into pure runtime intents and hover transitions.
+ * Accepted options: event, scene, document, viewport, hoverKey, sceneRevision.
+ */
+export function resolveListenerIntents(options = {}) {
+  assertKnownOptions(options, 'resolveListenerIntents', RESOLVE_LISTENER_OPTION_KEYS);
+  const {
+    event, scene, document = scene, viewport = {}, hoverKey = null, sceneRevision = 0,
+  } = options;
   if (!event || !document) return { hoverKey: null, listenerRevision: listenerRevision(document), transitions: [], intents: [] };
   const type = String(event.type || event.event || '');
   const pointerEvent = type.startsWith('pointer');
@@ -54,8 +76,14 @@ export function resolveListenerIntents({ event, scene, document = scene, viewpor
   return { hoverKey: nextHoverKey, listenerRevision: revision, transitions, intents, hit };
 }
 
-/** Create a deterministic resolver retaining only the current hover key. */
-export function createListenerResolver({ document, viewport = {} } = {}) {
+/**
+ * Create a deterministic resolver retaining only the current hover key.
+ * Accepted options: document, viewport.
+ */
+export function createListenerResolver(options = {}) {
+  assertKnownOptions(options, 'createListenerResolver', RESOLVER_OPTION_KEYS);
+  const { document, viewport = {} } = options;
+  let currentDocument = document;
   let hoverKey = null;
   let sceneRevision = 0;
   let currentViewport = viewport;
@@ -64,9 +92,16 @@ export function createListenerResolver({ document, viewport = {} } = {}) {
       currentViewport = nextViewport;
       return currentViewport;
     },
-    resolve(event, scene = document, revision = sceneRevision) {
+    setDocument(nextDocument) {
+      if (nextDocument !== currentDocument) {
+        currentDocument = nextDocument;
+        hoverKey = null;
+      }
+      return currentDocument;
+    },
+    resolve(event, scene = currentDocument, revision = sceneRevision) {
       sceneRevision = revision;
-      const result = resolveListenerIntents({ event, scene, document, viewport: currentViewport, hoverKey, sceneRevision });
+      const result = resolveListenerIntents({ event, scene, document: currentDocument, viewport: currentViewport, hoverKey, sceneRevision });
       hoverKey = result.hoverKey;
       return result;
     },

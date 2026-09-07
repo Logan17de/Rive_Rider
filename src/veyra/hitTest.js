@@ -44,6 +44,19 @@ function worldMatrices(document) {
   return { byId, resolve };
 }
 
+function visibleThroughAncestors(node, byId) {
+  const seen = new Set();
+  let current = node;
+  while (current) {
+    if (!current.visible) return false;
+    if (seen.has(current.id)) return false;
+    seen.add(current.id);
+    const parentId = referenceId(current.parent, 'node');
+    current = parentId ? byId.get(parentId) : null;
+  }
+  return true;
+}
+
 function inside(node, point) {
   const bounds = localBounds(node);
   if (!bounds || bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) return false;
@@ -68,10 +81,10 @@ export function hitTestPoint(point, document, viewport = {}) {
     x: (finite(point.x) - width / 2) / zoom + centerX,
     y: (finite(point.y) - height / 2) / zoom + centerY,
   };
-  const { resolve } = worldMatrices(document);
+  const { byId, resolve } = worldMatrices(document);
   for (let index = document.nodes.length - 1; index >= 0; index -= 1) {
     const node = document.nodes[index];
-    if (!node.visible || node.type === 'group') continue;
+    if (!visibleThroughAncestors(node, byId) || node.type === 'group') continue;
     const matrix = inverse(resolve(node));
     if (matrix && inside(node, apply(matrix, worldPoint))) return { kind: 'node', id: node.id };
   }

@@ -88,7 +88,6 @@ function resolveEvent(
     event,
     scene,
     document,
-    listeners: document.listeners,
     viewport,
     hoverKey,
     sceneRevision,
