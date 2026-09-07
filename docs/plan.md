@@ -4,7 +4,7 @@
 commit lands, a block clears, acceptance moves, or scope shifts. This is the
 single place to check "where are we."
 
-**Last updated:** 2026-09-04 06:07 UTC · HEAD `bb4d298`
+**Last updated:** 2026-09-07 · T1 battery relight and shell-handler extraction in progress
 
 ---
 
@@ -23,10 +23,10 @@ without a state machine) is **done, tested, and accepted** — `src/veyra/`
 has hit-testing, an event→intent resolver, and schema support, all
 independently verified. The **current, active milestone** is wiring that
 runtime into the actual browser editor (`veyra.js`) so a click is *visibly*
-interactive. Implementation is on its 5th correction round and is **blocked
-in independent acceptance** — not because the underlying idea is wrong, but
-because no test yet proves the real `veyra.js` file behaves correctly when a
-real pointer event fires on it. See §5.
+interactive. The handler extraction, deterministic battery, and checker are
+implemented in T1; independent acceptance is still pending on the settled,
+committed tree. Transport intent emission is covered, while the separate
+intent→playback dispatcher remains T2. See §4.
 
 ## 3. Completed milestones
 
@@ -38,10 +38,15 @@ real pointer event fires on it. See §5.
   enter/leave, stateful `createListenerResolver()` wrapper.
 - Warn-not-block on unfinished/empty state machines (human ruling), exact
   wording: `⚠️ No playable animation is configured for this interaction.`
-- 18/18 automated suites pass, `npm run check` clean.
-- Full 8-gate independent acceptance (schema truth, warn-tier, manifest
-  canary, byte/history isolation under load, **mutation-proofed** guard,
-  determinism, version rule, full battery). All 8 passed.
+- **Historical correction:** the earlier claim that 18/18 automated suites passed
+  and the full battery was green was not true after `c2e1cc0`. The new shell
+  suite was not in the runner's hand-maintained list, so its sync guard threw
+  before executing any suite; **the battery was dark**. No standard 18/18
+  result was produced during that period.
+- The related earlier statement that all 8 acceptance gates passed is also
+  corrected: the full-battery gate did not execute after the runner drift, so
+  the overall 8-gate result was unproven. The runner and acceptance record are
+  being repaired in §4 before this milestone is called accepted.
 - One real defect found and fixed pre-ship: a `play` listener carrying
   leftover machine/input data silently lost that data on file load (guard
   existed in the constructor helper but not in the actual load path). Fixed
@@ -61,61 +66,67 @@ without touching schema, without breaking any existing editor tool (pan,
 select, drag, pencil, artboard handles), and without ever writing to the
 document/undo history from the pointer path.
 
+**Status (2026-09-07):** the handler factory extraction and integration suite
+are present in the working tree, but the standard battery has been relit only
+in T1 and independent acceptance is still pending. This section remains open
+until the committed tree passes both standard commands and the acceptance
+mutation proof.
+
 **Owner:** Asha (implementation). **Acceptance gate:** Sheema (independent,
 adversarial — does not implement, only verifies against the brief).
 **Scope ruling / unblocking:** Akash. **Review:** Logan.
 
 ### 4.1 What's landed so far (not yet accepted)
-| Commit | What it did |
+| Commit / state | What it did |
 |---|---|
 | `c2e1cc0` | First implementation: `src/veyra/shellBridge.js`, `veyra.js` wiring, focused test. |
 | `ba560a9` | Fixed: added `setViewport()` seam on the resolver (ratified API instead of a 4th `.resolve()` arg). |
 | `11d5773` | Fixed: coordinate double-transform (shell was converting to world coords, then the resolver converted *again*). Fixed pointermove-only derived-transition routing. |
 | `a92737e` / `8e726d6` | Fixed: preview pointerdown only called `preventDefault()`, not `stopPropagation()`, so the renderer's own drag/select handler could still fire underneath a preview click. Added capture-phase isolation. |
 | `bb4d298` | Fixed: a real browser-time crash — `center` was referenced but its declaration had been deleted in an earlier correction (`node --check` can't catch this; it only shows up when an eligible pointer event actually fires). Added more adapter-level regression coverage (no-hit, document-identity hover reset, Alt-routing). |
+| Working tree (T1) | Extracted `createPreviewPointerHandlers` so `veyra.js` registers the exact handlers covered by `tests/veyra-shell-integration.test.mjs`; deterministic runner and syntax-check-chain repairs are in progress. |
 
-### 4.2 Why it's still blocked (as of `bb4d298`)
-Every test added across all 5 rounds calls the **adapter module directly**
-(`bridge.resolve(...)`, `isPreviewPointerEligible(...)`, `canvasPoint(...)`).
-**None of them import or execute `veyra.js` itself**, dispatch a real event
-through a real/fake DOM element, or assert that an observable state inside
-`veyra.js` (e.g. playback actually started) changed. So there is still no
-direct evidence that:
-- clicking a `play` listener in preview mode actually starts playback,
-- a select-mode click does *not* also trigger playback,
-- the document/undo history stay byte-identical through a real interaction,
-- Space/text-input behavior (human ruling) survives the new wiring,
-- missing-target diagnostics are visible through the real path.
+### 4.2 Why acceptance remains open
+The earlier blocker was that all shell tests called the adapter module directly
+and never exercised the handlers registered by `veyra.js`. That is addressed by
+the T1 extraction below, but acceptance is not implied by the extraction:
 
-The required mutation proof (deliberately break the resolver→transport
-wiring on a scratch copy and prove a visible test goes red) also has nothing
-observable to attack yet, for the same reason.
+- `tests/veyra-shell-integration.test.mjs` calls the exact handler functions
+  that `veyra.js` registers and checks their emitted transport intent,
+  propagation control, diagnostics, coordinate conversion, and store/history
+  identity.
+- The test builds its own bridge whose `onIntent` records an array. Therefore
+  **transport intent emitted is not playback proven**: the real
+  `veyra.js` `dispatchInteractionIntent` chain remains a separate integration
+  boundary and is not built or claimed by T1.
+- The required mutation proof was independently completed: breaking
+  resolver→transport in a scratch copy made the handler assertions fail, and
+  the scratch copy was deleted without a commit (see gate 9).
 
-### 4.3 The fix in progress
-This codebase already has the right tool for this:
-`tests/helpers/fake-dom.mjs` — a dependency-free fake DOM
-(`installFakeDom()`, `pointerEvent()`, `FakeElement`) built specifically so
-real UI code can be exercised in Node without a browser. It's already used
-by `tests/veyra-browser.test.mjs` to run *other* browser code; it has never
-yet been pointed at `veyra.js` itself.
+### 4.3 Current implementation and test boundary
+A full fake-DOM boot of monolithic `veyra.js` is deliberately not part of this
+milestone: it expects roughly 89 DOM element ids with `.value`/`.checked`
+behavior, while `tests/helpers/fake-dom.mjs` does not provide that form surface.
+Instead, `src/veyra/shellBridge.js` exports `createPreviewPointerHandlers`, and
+`veyra.js` registers the exact three functions returned by that factory for
+`pointermove`, `pointerup`, and `pointerdown` in capture phase. The integration
+test invokes those same functions with a fake canvas, spyable events, and a real
+`VeyraStore`, avoiding a parallel reimplementation that could drift from the
+shell wiring. A later full-app boot test can address the remaining boundary.
 
-**Asha is now writing one new test file** that:
-1. Installs the fake DOM.
-2. Imports the real `veyra.js` (not a re-implementation of its logic).
-3. Dispatches a real `pointerdown` on the fake canvas element, in preview
-   mode, on a target with a direct-`play` listener.
-4. Asserts an externally-observable signal (e.g. via the existing
-   `globalThis.veyra` debug surface) shows playback actually started.
-5. Repeats for: no-hit (no-op), select-mode (no-op, still selects), and
-   store/history byte-identity across all of the above.
+The integration suite covers preview hits and misses, select-mode no-op
+routing, coordinate conversion, resolver refresh after document replacement,
+unsupported-machine diagnostics, pointer transition behavior, and
+propagation/default-prevention rules. It is now part of T1's deterministic
+battery rather than a hand-maintained runner exception.
 
-This single file is expected to close most of the remaining acceptance
-gates at once and give the mutation proof something real to break.
 
 ### 4.4 Acceptance gate list (Sheema checks all of these before ACCEPT)
 1. Standard `npm test` + `npm run check` green on the settled tree.
-2. Real shell route: preview click on `play` listener starts playback;
-   no-hit/no-listener is a no-op — proven via the fake-DOM integration test.
+2. Real shell route: preview click on a `play` listener emits the expected
+   transport intent; no-hit/no-listener is a no-op — proven via the exact
+   handler integration test. This does not claim the separate
+   `veyra.js` dispatch-to-playback chain, which is T2.
 3. Coordinate conversion actually tested: canvas offset, zoom/pan, CSS/DPR.
 4. Persistent resolver: no churn on repeated unchanged moves; real `leave`
    when the scene changes under a static cursor; resolver refreshes on
@@ -129,14 +140,16 @@ gates at once and give the mutation proof something real to break.
    in text inputs.
 8. Missing-target/unsupported-machine diagnostics are visible, not
    swallowed; the empty-machine warning still shows.
-9. **Mandatory scratch mutation proof:** deliberately disconnect
-   resolver→transport in an uncommitted scratch copy, prove the observable
-   playback assertion goes red, then delete the scratch copy. Never
-   committed.
+9. **Mandatory scratch mutation proof — independently completed:** Alex copied
+   the source and integration test to a scratch directory, disconnected
+   resolver→transport, and ran the mutated integration. It exited 1 with
+   GATE 1, GATE 3, and GATE 7 red (19/22 checks passed); the scratch copy was
+   deleted and nothing was committed. This proves the handler gate is sensitive
+   rather than vacuous.
 
-Only after ACCEPT: Logan wires the new test file into `scripts/run-suites.mjs`
-(single edit), the tree is re-verified as a full green battery, and this
-section moves to "closed."
+After ACCEPT, this section moves to "closed"; the deterministic runner and
+checker are already part of T1, and the settled tree must be independently
+re-verified as a full green battery before that status changes.
 
 ## 5. Named, deliberate gaps (shipped stated, not hidden)
 
@@ -158,10 +171,10 @@ These are real, known, and intentionally **not** blocking current work:
 
 ## 6. Process notes worth keeping
 
-- **Single-writer file ownership** is enforced throughout: Logan owns
-  `scripts/run-suites.mjs`; Akash owns `package.json` and the contract doc;
-  Asha owns runtime/model/shell source; Sheema verifies and reports only —
-  never implements the thing she's accepting.
+- **Single-writer file ownership** is enforced throughout: Logan owns the
+  test runner/checker, `package.json`, and `docs/plan.md`; Asha owns
+  runtime/model/shell source; Alex verifies and reports only — never edits the
+  repository while accepting the thing under test.
 - **Acceptance is adversarial by design.** Five correction rounds on the
   shell bridge is the process working, not failing: each round found a real,
   reproducible defect (double coordinate transform, event-propagation leak

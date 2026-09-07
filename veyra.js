@@ -49,7 +49,7 @@ import { VeyraStore } from './src/veyra/store.js';
 import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
-import { canvasPoint, createShellInteractionBridge, isPreviewPointerEligible } from './src/veyra/shellBridge.js';
+import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
@@ -2240,51 +2240,27 @@ stageViewport.addEventListener('pointercancel', finishPan);
 
 new ResizeObserver(() => syncArtboardFrame()).observe(stageViewport);
 
-function previewPointerEligible(event) {
-  return isPreviewPointerEligible({
-    event,
-    tool: currentTool,
-    panGesture,
-    preview: stagePanel.dataset.mode === 'preview' || document.body.dataset.mode === 'preview',
-  });
-}
+// The three handlers below are built by createPreviewPointerHandlers so an
+// integration test can call the EXACT SAME functions directly (including
+// their stopPropagation/preventDefault calls) instead of a reimplementation
+// that could drift from what's actually wired to the canvas.
+const previewPointerHandlers = createPreviewPointerHandlers({
+  canvas,
+  interactionBridge,
+  getEvaluatedScene: () => evaluatedScene,
+  getInteractionSceneRevision: () => interactionSceneRevision,
+  getTool: () => currentTool,
+  getPanGesture: () => panGesture,
+  getPreviewMode: () => stagePanel.dataset.mode === 'preview' || document.body.dataset.mode === 'preview',
+  getViewCenter: () => renderer.viewCenter,
+  getZoom: () => renderer.zoom,
+  getArtboardSize: () => ({ width: store.document.artboard.width, height: store.document.artboard.height }),
+  onNoHit: () => showToast('No interaction target under pointer', true),
+});
 
-function resolvePreviewPointer(event) {
-  if (!previewPointerEligible(event) || !evaluatedScene) return null;
-  const point = canvasPoint(event, canvas, { cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight });
-  const center = renderer.viewCenter || { x: store.document.artboard.width / 2, y: store.document.artboard.height / 2 };
-  const viewportWidth = canvas.clientWidth || canvas.getBoundingClientRect().width;
-  const viewportHeight = canvas.clientHeight || canvas.getBoundingClientRect().height;
-  const result = interactionBridge.resolve({
-    type: event.type,
-    x: point.x,
-    y: point.y,
-    pointerId: event.pointerId,
-  }, evaluatedScene, interactionSceneRevision, {
-    width: canvas.clientWidth || canvas.getBoundingClientRect().width,
-    height: canvas.clientHeight || canvas.getBoundingClientRect().height,
-    centerX: center.x,
-    centerY: center.y,
-    zoom: renderer.zoom,
-  });
-  if (event.type === 'pointerdown' && !result.hit) showToast('No interaction target under pointer', true);
-  return result;
-}
-
-canvas.addEventListener('pointermove', (event) => {
-  if (!previewPointerEligible(event)) return;
-  resolvePreviewPointer(event);
-  event.stopPropagation();
-}, true);
-canvas.addEventListener('pointerup', resolvePreviewPointer, true);
-canvas.addEventListener('pointerdown', (event) => {
-  if (!previewPointerEligible(event)) return;
-  const result = resolvePreviewPointer(event);
-  // Preview owns eligible primary pointerdown events; prevent renderer child
-  // handlers from starting selection or drag gestures.
-  event.stopPropagation();
-  if (result?.intents?.length || result?.transitions?.length) event.preventDefault();
-}, true);
+canvas.addEventListener('pointermove', previewPointerHandlers.onPointerMove, true);
+canvas.addEventListener('pointerup', previewPointerHandlers.onPointerUp, true);
+canvas.addEventListener('pointerdown', previewPointerHandlers.onPointerDown, true);
 
 // Artboard handles: the top/left border strips pan the canvas (drag the
 // artboard), while the right/bottom strips and corner resize the artboard.

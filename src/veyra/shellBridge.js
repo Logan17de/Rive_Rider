@@ -60,3 +60,87 @@ export function createShellInteractionBridge({ document = null, onIntent = null,
     reset() { resolver.reset(); },
   };
 }
+
+/**
+ * Factory returning the ACTUAL preview pointer event handlers the shell
+ * registers via `canvas.addEventListener`. This exists so integration tests
+ * can call the real handler functions directly — including their
+ * `stopPropagation`/`preventDefault` calls — instead of a parallel
+ * reimplementation that could drift from what `veyra.js` really wires up.
+ *
+ * `veyra.js` calls this once and passes the three returned functions straight
+ * to `addEventListener(..., true)`; it does not duplicate their bodies.
+ */
+export function createPreviewPointerHandlers({
+  canvas,
+  interactionBridge,
+  getEvaluatedScene,
+  getInteractionSceneRevision,
+  getTool,
+  getPanGesture,
+  getPreviewMode,
+  getViewCenter,
+  getZoom,
+  getArtboardSize,
+  onNoHit = null,
+} = {}) {
+  function previewPointerEligible(event) {
+    return isPreviewPointerEligible({
+      event,
+      tool: getTool ? getTool() : 'select',
+      panGesture: getPanGesture ? getPanGesture() : false,
+      preview: getPreviewMode ? getPreviewMode() : false,
+    });
+  }
+
+  function resolvePreviewPointer(event) {
+    const evaluatedScene = getEvaluatedScene ? getEvaluatedScene() : null;
+    if (!previewPointerEligible(event) || !evaluatedScene) return null;
+    const point = canvasPoint(event, canvas, { cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight });
+    const fallback = getArtboardSize ? getArtboardSize() : { width: 0, height: 0 };
+    const center = (getViewCenter && getViewCenter()) || { x: fallback.width / 2, y: fallback.height / 2 };
+    const rect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+    const viewportWidth = canvas.clientWidth || rect.width;
+    const viewportHeight = canvas.clientHeight || rect.height;
+    const sceneRevision = getInteractionSceneRevision ? getInteractionSceneRevision() : 0;
+    const result = interactionBridge.resolve({
+      type: event.type,
+      x: point.x,
+      y: point.y,
+      pointerId: event.pointerId,
+    }, evaluatedScene, sceneRevision, {
+      width: viewportWidth,
+      height: viewportHeight,
+      centerX: center.x,
+      centerY: center.y,
+      zoom: getZoom ? getZoom() : 1,
+    });
+    if (event.type === 'pointerdown' && !result.hit && onNoHit) onNoHit();
+    return result;
+  }
+
+  function onPointerMove(event) {
+    if (!previewPointerEligible(event)) return;
+    resolvePreviewPointer(event);
+    event.stopPropagation();
+  }
+
+  function onPointerUp(event) {
+    const result = resolvePreviewPointer(event);
+    // Preview owns eligible pointerup events as well as pointerdown/move. Keep
+    // ineligible pan gestures on the ancestor's normal bubble-phase path.
+    if (previewPointerEligible(event)) event.stopPropagation();
+    return result;
+  }
+
+  function onPointerDown(event) {
+    if (!previewPointerEligible(event)) return;
+    const result = resolvePreviewPointer(event);
+    // Preview owns eligible primary pointerdown events; prevent renderer child
+    // handlers from starting selection or drag gestures.
+    event.stopPropagation();
+    if (result?.intents?.length || result?.transitions?.length) event.preventDefault();
+  }
+
+  return { onPointerMove, onPointerUp, onPointerDown, previewPointerEligible, resolvePreviewPointer };
+}

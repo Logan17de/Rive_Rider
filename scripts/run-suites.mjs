@@ -7,36 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const suites = Object.freeze([
-  'tests/architecture-modules.test.mjs',
-  'tests/veyra-model.test.mjs',
-  'tests/veyra-foundation.test.mjs',
-  'tests/veyra-rigging.test.mjs',
-  'tests/veyra-animation.test.mjs',
-  'tests/veyra-statemachine.test.mjs',
-  'tests/veyra-manifest.test.mjs',
-  'tests/veyra-store.test.mjs',
-  'tests/veyra-listeners.test.mjs',
-  'tests/veyra-golden.test.mjs',
-  'tests/veyra-machine-invariants.test.mjs',
-  'tests/veyra-browser.test.mjs',
-  'tests/veyra-renderer-interaction.test.mjs',
-  'tests/veyra-override-merge.test.mjs',
-  'tests/veyra-gestures.test.mjs',
-  'tests/veyra-hittest.test.mjs',
-  'tests/veyra-listener-runtime-invariants.test.mjs',
-  'tests/veyra-listeners-runtime.test.mjs',
-]);
-
-const testFiles = readdirSync(join(root, 'tests'))
+const suites = readdirSync(join(root, 'tests'))
   .filter((name) => name.endsWith('.test.mjs'))
   .map((name) => `tests/${name}`)
   .sort();
-const listed = [...suites].sort();
-if (testFiles.length !== listed.length || testFiles.some((file, i) => file !== listed[i])) {
-  const missing = testFiles.filter((file) => !suites.includes(file));
-  const stale = suites.filter((file) => !testFiles.includes(file));
-  throw new Error(`Suite list is out of sync. Unlisted: ${missing.join(', ') || 'none'}; missing files: ${stale.join(', ') || 'none'}.`);
+if (suites.length === 0) {
+  throw new Error('No test suites discovered in tests/. Refusing to pass an empty battery.');
 }
 
 const results = [];
