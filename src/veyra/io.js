@@ -12,12 +12,12 @@ function canonicalize(value) {
   return Object.is(value, -0) ? 0 : value;
 }
 
-export function canonicalVeyraValue(document) {
-  return canonicalize(normalizeDocument(document));
+export function canonicalVeyraValue(documentModel) {
+  return canonicalize(normalizeDocument(documentModel));
 }
 
-export function serializeVeyra(document) {
-  return JSON.stringify(canonicalVeyraValue(document), null, 2);
+export function serializeVeyra(documentModel) {
+  return JSON.stringify(canonicalVeyraValue(documentModel), null, 2);
 }
 
 export function parseVeyra(text) {
@@ -49,11 +49,11 @@ export function downloadBlob(contents, filename, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function downloadVeyra(document) {
-  downloadBlob(serializeVeyra(document), safeFilename(document.name), VEYRA_MIME);
+export function downloadVeyra(documentModel) {
+  downloadBlob(serializeVeyra(documentModel), safeFilename(documentModel.name), VEYRA_MIME);
 }
 
-export function downloadSvg(document) {
-  const normalized = normalizeDocument(document);
+export function downloadSvg(documentModel) {
+  const normalized = normalizeDocument(documentModel);
   downloadBlob(renderSvgString(evaluateDocument(normalized)), safeFilename(normalized.name, '.svg'), 'image/svg+xml');
 }

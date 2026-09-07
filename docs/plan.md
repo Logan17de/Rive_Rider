@@ -16,6 +16,9 @@ animation, timelines, interactions, state machines, variables, assets,
 behavior) is structured so AI can understand and do the same work a human
 can, using the same standard workflows, not a special AI-only path.
 
+**Naming note:** Verya is the product name; `Veyra` remains the technical
+identifier for the `.veyra` file format and persisted contracts for compatibility.
+
 ## 2. Where we are right now (one paragraph)
 
 The pure-runtime interaction milestone (click → play an animation, with or
