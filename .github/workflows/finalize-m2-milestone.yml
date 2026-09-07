@@ -1,0 +1,32 @@
+name: Finalize M2 Milestone
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-m2-milestone.yml'
+      - 'scripts/finalize-m2-milestone.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message, '[m2-handoff]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Finalize handoff
+        run: python3 scripts/finalize-m2-milestone.py
+      - name: Commit milestone
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add milestone.md
+          git diff --cached --check
+          git commit -m "Complete M2 implementation handoff [m2-handoff]"
+          git push origin HEAD:main
