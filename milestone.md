@@ -88,7 +88,7 @@ This milestone remains open until the foundation supports, at minimum:
 
 ## TODO M0.1 — Stable Identity Contract for the Existing Graph
 
-**Status:** `[?] AWAITING VERIFICATION`
+**Status:** `[x] VERIFIED`
 
 ### Objective
 
@@ -179,8 +179,8 @@ Prove at least:
 
 ```text
 Handoff
-- Status: AWAITING VERIFICATION
-- Commit: d5b4e73 (identity) + 246daea (pathVertexById correction) + 358da30 (handoff)
+- Status: VERIFIED
+- Commit: d5b4e73 (identity) + 246daea (pathVertexById correction) + 358da30 (handoff) + 88167c8 (final handoff)
 - Changed files: docs/plan.md; src/veyra/manifest.js; src/veyra/model.js; src/veyra/references.js; src/veyra/store.js; src/veyra/summary.js; tests/fixtures/veyra/animated.veyra; tests/veyra-manifest.test.mjs; tests/veyra-identity.test.mjs; milestone.md (handoff status)
 - Tests added/changed: tests/veyra-identity.test.mjs plus persistent-ID fixture/manifest assertions
 - npm test: PASS — 21 of 21 suites passed
@@ -188,8 +188,42 @@ Handoff
 - Task-specific checks: keyframe create/edit/move/round-trip stability; deterministic legacy migration; timeline and machine/state/input rename stability; node listener-target stability; duplicate node/keyframe/entity rejection; manifest typed refs resolve by ID; gradient-stop/path-vertex/mesh-vertex lookup and refs; `pathVertexById` regression
 - Persistence/migration impact: normalized legacy keyframes receive deterministic `keyframe_<trackId>_<index>` IDs; existing IDs are preserved through normalize/save/load and same-frame setKeyframe edits. Existing supported documents remain loadable; canonical JSON gains keyframe IDs.
 - AI/name-independence proof: manifest refs use persistent typed IDs for document, timeline, track, keyframe, state machine, machine entities, listeners, geometry vertices, and gradient stops; rename tests resolve graph relationships without human-name lookup.
-- Known limitations: value-only transforms/geometry/colors/condition values remain owner-addressed; semantic inference, aliases, universal metadata, resolver, dependency graph, and editor UI remain out of scope. Independent verification has not yet run.
+- Known limitations: value-only transforms/geometry/colors/condition values remain owner-addressed; semantic inference, aliases, universal metadata, resolver, dependency graph, and editor UI remain out of scope. Independently verified by Asha/Sara on 88167c8.
 ```
+
+---
+
+## TODO M0.2 — Deterministic Name-Independent Entity Resolver
+
+**Status:** `[ ] READY`
+
+### Objective
+
+Provide a canonical AI query/resolution surface that resolves covered entities from stable typed references and structural evidence without depending on human-authored names, and fails closed when evidence is ambiguous.
+
+### Required implementation
+
+1. Add a DOM-free resolver/query module using the existing typed-reference and summary/manifest contracts.
+2. Resolve exact typed references by kind and ID first; reject wrong-kind, missing, malformed, and cross-scope references precisely.
+3. Support deterministic structural queries over the existing graph (ownership, parent/child relationships, timeline/track/keyframe ownership, machine/state/input/transition relationships, and geometry ownership) without treating display names as identity.
+4. Treat names only as optional evidence; duplicate, empty, misleading, or renamed names must never silently select an entity.
+5. Return explicit `resolved`, `ambiguous`, and `notFound` outcomes with stable candidate references and machine-readable reasons.
+6. Expose the resolver through the canonical AI-readable surface without creating an AI-only mutation path; do not mutate documents during resolution.
+7. Add adversarial tests for duplicate/random/empty/misleading names, rename stability, wrong-kind references, ambiguous structural matches, deterministic candidate ordering, and exact typed-reference success.
+8. Update the manifest/query contract documentation while preserving supported document compatibility.
+
+### Explicit non-goals
+
+Do not implement AI-owned aliases/tags, semantic inference, dependency-graph expansion, new feature families, T4b resumption, Bézier geometry, or state-machine UI in this TODO.
+
+### Acceptance criteria
+
+- Exact typed-ID resolution succeeds without consulting names.
+- Ambiguous or insufficient evidence never guesses and returns stable candidate refs plus a reason.
+- Duplicate, empty, misleading, and renamed display names are covered by tests.
+- Resolver output is deterministic and DOM-free.
+- Existing tests and supported documents remain functional.
+- `npm test` and `npm run check` pass.
 
 ---
 
@@ -197,8 +231,8 @@ Handoff
 
 Nothing is pre-assigned.
 
-When **M0.1** is completed, Logan tells ChatGPT to verify it. ChatGPT will inspect the actual implementation and tests against `plan.md` and this milestone. Then exactly one of these happens:
+When the current TODO is completed, Logan tells ChatGPT to verify it. ChatGPT will inspect the actual implementation and tests against `plan.md` and this milestone. Then exactly one of these happens:
 
-- verification fails -> M0.1 remains active and exact corrections are requested;
-- verification passes but M0 is incomplete -> M0.1 becomes VERIFIED and ChatGPT adds **one new M0 TODO** based on the remaining highest-priority gap;
+- verification fails -> the current TODO remains active and exact corrections are requested;
+- verification passes but M0 is incomplete -> the current TODO becomes VERIFIED and ChatGPT adds **one new M0 TODO** based on the remaining highest-priority gap;
 - verification proves all M0 criteria are satisfied -> M0 closes and ChatGPT creates the next milestone with its first TODO.
