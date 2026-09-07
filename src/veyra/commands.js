@@ -1,3 +1,11 @@
+import {
+  VEYRA_EASING_TYPES,
+  VEYRA_LOOP_MODES,
+  VEYRA_MACHINE_INPUT_TYPES,
+  VEYRA_NODE_TYPES,
+  VEYRA_PROPERTY_BOUNDS,
+} from './model.js';
+
 // Serializable command bus over the VeyraStore public API.
 //
 // dispatchVeyraCommand(store, descriptor) accepts a plain JSON-safe
@@ -332,6 +340,374 @@ const COMMAND_TABLE = {
     run: (store, args, command) => store.removeAsset(args.assetId, command ?? {}),
   },
 };
+
+function manifestParameter(name, type, required, description, extras = {}) {
+  return { name, type, required, description, ...extras };
+}
+
+const bounds = (key) => ({ bounds: { ...VEYRA_PROPERTY_BOUNDS[key] } });
+
+const COMMAND_MANIFEST_OVERRIDES = {
+  select: {
+    targetKind: 'selection',
+    capabilities: ['selection', 'non-mutating'],
+  },
+  replaceDocument: {
+    targetKind: 'transaction',
+    capabilities: ['document-replacement', 'clears-history'],
+  },
+  begin: { targetKind: 'transaction', capabilities: ['transaction'] },
+  commit: { targetKind: 'transaction', capabilities: ['transaction'] },
+  cancel: { targetKind: 'transaction', capabilities: ['transaction'] },
+  undo: { targetKind: 'history', capabilities: ['history', 'recoverable'] },
+  redo: { targetKind: 'history', capabilities: ['history', 'recoverable'] },
+  removeSelection: {
+    targetKind: 'selection',
+    capabilities: ['selection', 'transactional', 'undoable'],
+  },
+  setProperty: {
+    manifestId: 'write-property',
+    name: 'Write property',
+    targetKind: 'propertyAddress',
+    parameters: [
+      manifestParameter('address', 'propertyAddress', true, 'A property address such as node:<id>/geometry/width.'),
+      manifestParameter('value', 'any', true, 'A value valid for the property.'),
+    ],
+    capabilities: ['writable-only', 'transactional', 'undoable'],
+  },
+  add: {
+    manifestId: 'add-node',
+    name: 'Add node',
+    targetKind: 'node',
+    parameters: [
+      manifestParameter('type', 'enum', true, 'One of the Veyra node types.', { enum: [...VEYRA_NODE_TYPES] }),
+      manifestParameter('name', 'string', false, 'Display name.'),
+      manifestParameter('parentId', 'string', false, 'Id of the parent node.'),
+      manifestParameter('transform', 'object', false, 'Transform overrides.'),
+      manifestParameter('paint', 'object', false, 'Paint overrides.'),
+      manifestParameter('geometry', 'object', false, 'Geometry overrides.'),
+    ],
+    capabilities: ['transactional', 'undoable', 'selects-result'],
+  },
+  remove: {
+    manifestId: 'remove-node',
+    name: 'Remove node',
+    targetKind: 'node',
+    parameters: [manifestParameter('nodeId', 'string', true, 'Id of the node to remove.')],
+    capabilities: ['cascades-descendants', 'transactional', 'undoable'],
+  },
+  addTimeline: {
+    manifestId: 'create-timeline',
+    name: 'Create timeline',
+    targetKind: 'timeline',
+    parameters: [
+      manifestParameter('name', 'string', false, 'Timeline name.'),
+      manifestParameter('duration', 'number', false, 'Duration in frames.', bounds('timeline.duration')),
+      manifestParameter('fps', 'number', false, 'Frames per second.', bounds('timeline.fps')),
+      manifestParameter('loop', 'enum', false, 'Loop mode.', { enum: [...VEYRA_LOOP_MODES] }),
+      manifestParameter('workStart', 'number', false, 'Work area start frame.', bounds('timeline.workStart')),
+      manifestParameter('workEnd', 'number', false, 'Work area end frame.', bounds('timeline.workEnd')),
+    ],
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  updateTimeline: {
+    manifestId: 'update-timeline',
+    name: 'Update timeline',
+    targetKind: 'timeline',
+    parameters: [
+      manifestParameter('timelineId', 'string', true, 'Id of the timeline.'),
+      manifestParameter('name', 'string', false, 'New name.'),
+      manifestParameter('duration', 'number', false, 'New duration in frames.', bounds('timeline.duration')),
+      manifestParameter('fps', 'number', false, 'New frames per second.', bounds('timeline.fps')),
+      manifestParameter('loop', 'enum', false, 'New loop mode.', { enum: [...VEYRA_LOOP_MODES] }),
+      manifestParameter('workStart', 'number', false, 'New work area start frame.', bounds('timeline.workStart')),
+      manifestParameter('workEnd', 'number', false, 'New work area end frame.', bounds('timeline.workEnd')),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  removeTimeline: {
+    manifestId: 'remove-timeline',
+    name: 'Remove timeline',
+    targetKind: 'timeline',
+    parameters: [manifestParameter('timelineId', 'string', true, 'Id of the timeline.')],
+    capabilities: ['blocked-while-used-by-machines', 'transactional', 'undoable'],
+  },
+  setKeyframe: {
+    manifestId: 'set-keyframe',
+    name: 'Set keyframe',
+    targetKind: 'keyframe',
+    parameters: [
+      manifestParameter('timelineId', 'string', true, 'Id of the timeline.'),
+      manifestParameter('address', 'propertyAddress', true, 'An animatable property address.'),
+      manifestParameter('frame', 'number', true, 'Frame of the keyframe.', bounds('keyframe.frame')),
+      manifestParameter('value', 'any', false, 'Value to key. Defaults to the current authored value.'),
+      manifestParameter('easing', 'enum', false, 'Easing toward the next keyframe.', { enum: [...VEYRA_EASING_TYPES] }),
+      manifestParameter('easingParams', 'array', false, 'Four numbers when easing is cubic-bezier; each parameter is bounded.', bounds('keyframe.easingParams.*')),
+    ],
+    capabilities: ['animatable-only', 'creates-track-if-needed', 'transactional', 'undoable'],
+  },
+  removeKeyframe: {
+    manifestId: 'remove-keyframe',
+    name: 'Remove keyframe',
+    targetKind: 'keyframe',
+    parameters: [
+      manifestParameter('timelineId', 'string', true, 'Id of the timeline.'),
+      manifestParameter('address', 'propertyAddress', true, 'Property address of the track.'),
+      manifestParameter('frame', 'number', true, 'Frame of the keyframe.', bounds('keyframe.frame')),
+    ],
+    capabilities: ['removes-empty-track', 'transactional', 'undoable'],
+  },
+  moveKeyframe: {
+    manifestId: 'move-keyframe',
+    name: 'Move keyframe',
+    targetKind: 'keyframe',
+    parameters: [
+      manifestParameter('timelineId', 'string', true, 'Id of the timeline.'),
+      manifestParameter('address', 'propertyAddress', true, 'Property address of the track.'),
+      manifestParameter('fromFrame', 'number', true, 'Current frame of the keyframe.', bounds('keyframe.frame')),
+      manifestParameter('toFrame', 'number', true, 'New frame of the keyframe.', bounds('keyframe.frame')),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  addStateMachine: {
+    manifestId: 'create-state-machine',
+    name: 'Create state machine',
+    targetKind: 'stateMachine',
+    parameters: [
+      manifestParameter('name', 'string', false, 'Machine name.'),
+      manifestParameter('inputs', 'array', false, 'Machine input records.'),
+      manifestParameter('states', 'array', false, 'Machine state records.'),
+      manifestParameter('transitions', 'array', false, 'Machine transition records.'),
+      manifestParameter('initial', 'reference', false, 'machineState reference for the initial state.'),
+    ],
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  updateStateMachine: {
+    manifestId: 'update-state-machine',
+    name: 'Update state machine',
+    targetKind: 'stateMachine',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('name', 'string', false, 'New name.'),
+      manifestParameter('initial', 'reference', false, 'New machineState reference for the initial state.'),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  removeStateMachine: {
+    manifestId: 'remove-state-machine',
+    name: 'Remove state machine',
+    targetKind: 'stateMachine',
+    parameters: [manifestParameter('machineId', 'string', true, 'Id of the machine.')],
+    capabilities: ['transactional', 'undoable'],
+  },
+  addMachineInput: {
+    manifestId: 'add-machine-input',
+    name: 'Add machine input',
+    targetKind: 'machineInput',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('name', 'string', false, 'Unique input name within the machine.'),
+      manifestParameter('type', 'enum', false, 'Input type.', { enum: [...VEYRA_MACHINE_INPUT_TYPES] }),
+      manifestParameter('value', 'any', false, 'Authored value.'),
+    ],
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  addMachineState: {
+    manifestId: 'add-machine-state',
+    name: 'Add machine state',
+    targetKind: 'machineState',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('name', 'string', false, 'State name.'),
+      manifestParameter('timelineId', 'string', true, 'Id of a timeline in the document.'),
+    ],
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  removeMachineState: {
+    manifestId: 'remove-machine-state',
+    name: 'Remove machine state',
+    targetKind: 'machineState',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('stateId', 'string', true, 'Id of the state.'),
+    ],
+    capabilities: ['cascades-transitions', 'transactional', 'undoable'],
+  },
+  addMachineTransition: {
+    manifestId: 'add-machine-transition',
+    name: 'Add machine transition',
+    targetKind: 'machineTransition',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('from', 'string', true, 'Source machine state id.'),
+      manifestParameter('to', 'string', true, 'Target machine state id.'),
+      manifestParameter('duration', 'number', false, 'Transition duration in seconds.', bounds('machineTransition.duration')),
+      manifestParameter('after', 'number', false, 'Optional transition delay.', bounds('machineTransition.after')),
+      manifestParameter('conditions', 'array', false, 'Conditions that gate the transition.'),
+    ],
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  removeMachineTransition: {
+    manifestId: 'remove-machine-transition',
+    name: 'Remove machine transition',
+    targetKind: 'machineTransition',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('transitionId', 'string', true, 'Id of the transition.'),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  updateMachineState: {
+    manifestId: 'update-machine-state',
+    name: 'Update machine state',
+    targetKind: 'machineState',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('stateId', 'string', true, 'Id of the state.'),
+      manifestParameter('name', 'string', false, 'New state name.'),
+      manifestParameter('timelineId', 'string', false, 'Replacement timeline id.'),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  updateMachineInput: {
+    manifestId: 'update-machine-input',
+    name: 'Update machine input',
+    targetKind: 'machineInput',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('inputId', 'string', true, 'Id of the input.'),
+      manifestParameter('name', 'string', false, 'New input name.'),
+      manifestParameter('type', 'enum', false, 'New input type.', { enum: [...VEYRA_MACHINE_INPUT_TYPES] }),
+      manifestParameter('value', 'any', false, 'New authored value.'),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  removeMachineInput: {
+    manifestId: 'remove-machine-input',
+    name: 'Remove machine input',
+    targetKind: 'machineInput',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('inputId', 'string', true, 'Id of the input.'),
+    ],
+    capabilities: ['blocked-while-referenced-by-conditions', 'transactional', 'undoable'],
+  },
+  updateMachineTransition: {
+    manifestId: 'update-machine-transition',
+    name: 'Update machine transition',
+    targetKind: 'machineTransition',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('transitionId', 'string', true, 'Id of the transition.'),
+      manifestParameter('duration', 'number', false, 'New transition duration.', bounds('machineTransition.duration')),
+      manifestParameter('after', 'number', false, 'New transition delay.', bounds('machineTransition.after')),
+      manifestParameter('conditions', 'array', false, 'Replacement transition conditions.'),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  addBone: {
+    targetKind: 'bone',
+    capabilities: ['transactional', 'undoable', 'selects-result'],
+  },
+  addMesh: {
+    targetKind: 'mesh',
+    capabilities: ['transactional', 'undoable', 'selects-result'],
+  },
+  addControl: {
+    targetKind: 'control',
+    capabilities: ['transactional', 'undoable', 'selects-result'],
+  },
+  addConstraint: {
+    targetKind: 'constraint',
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  addAsset: {
+    targetKind: 'asset',
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  removeBone: {
+    targetKind: 'bone',
+    capabilities: ['cascades-dependents', 'transactional', 'undoable'],
+  },
+  removeMesh: {
+    targetKind: 'mesh',
+    capabilities: ['transactional', 'undoable'],
+  },
+  removeControl: {
+    targetKind: 'control',
+    capabilities: ['cascades-constraints', 'transactional', 'undoable'],
+  },
+  removeConstraint: {
+    targetKind: 'constraint',
+    capabilities: ['transactional', 'undoable'],
+  },
+  removeAsset: {
+    targetKind: 'asset',
+    capabilities: ['transactional', 'undoable'],
+  },
+};
+
+const COMMAND_DESCRIPTIONS = Object.freeze({
+  setProperty: 'Set a writable property by address. The write is rejected unless the address is in the target capability list.',
+  add: 'Create a node and append it to the document in draw order.',
+  remove: 'Remove a node, its descendants, and the semantic records and path constraints that point at them.',
+  addTimeline: 'Add a timeline to the document.',
+  updateTimeline: 'Update the metadata of an existing timeline.',
+  removeTimeline: 'Delete a timeline. Blocked while a state machine state still uses it.',
+  setKeyframe: 'Create or replace a keyframe for an animatable property address; the track is created when missing.',
+  removeKeyframe: 'Delete a keyframe by timeline, address, and frame. The track is removed when it becomes empty.',
+  moveKeyframe: 'Move a keyframe to a new frame within the same track.',
+  addStateMachine: 'Add a state machine with its inputs, states, and transitions.',
+  updateStateMachine: 'Update the name or initial state of a machine.',
+  removeStateMachine: 'Delete a state machine.',
+  addMachineInput: 'Add a number, bool, or trigger input to a machine.',
+  addMachineState: 'Add an animation state pointing at a document timeline.',
+  removeMachineState: 'Delete a state and the transitions that reference it; clears initial when it pointed there.',
+  addMachineTransition: 'Add a transition between two states of the same machine.',
+  removeMachineTransition: 'Delete a transition.',
+  updateMachineInput: 'Update an input name, type, or authored value in place. Renames must stay unique within the machine; a type change is refused, naming every dependent condition, unless the operator/type matrix stays satisfied.',
+  removeMachineInput: 'Delete an input. Refused while any transition condition references it — remove those conditions first.',
+  updateMachineState: 'Rename a state or retarget its timeline, in place; the state id is immutable.',
+  updateMachineTransition: 'Update duration, after gate, or conditions (replaced wholesale, validated against the operator/type matrix). Endpoints are immutable — re-add the transition to re-point.',
+});
+
+function kebabCase(value) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
+    .toLowerCase();
+}
+
+function titleCase(value) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function genericManifestParameters(entry) {
+  return entry.params.map((spec) => manifestParameter(
+    spec.name,
+    spec.type === 'string' && spec.name === 'type' ? 'string' : spec.type,
+    spec.required,
+    `${titleCase(spec.name)} for this command.`,
+  ));
+}
+
+for (const [commandName, entry] of Object.entries(COMMAND_TABLE)) {
+  const override = COMMAND_MANIFEST_OVERRIDES[commandName] || {};
+  const manifestId = override.manifestId || kebabCase(commandName);
+  Object.assign(entry, {
+    manifestId,
+    name: override.name || titleCase(manifestId),
+    description: COMMAND_DESCRIPTIONS[commandName] || entry.summary,
+    targetKind: override.targetKind || 'document',
+    parameters: override.parameters || genericManifestParameters(entry),
+    capabilities: override.capabilities || ['transactional', 'undoable'],
+    transport: 'command',
+    hostAvailability: 'available',
+  });
+}
 
 export const VEYRA_COMMAND_TABLE = Object.freeze(COMMAND_TABLE);
 

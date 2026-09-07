@@ -29,6 +29,7 @@ import {
   VEYRA_MANIFEST_FORMAT,
   VEYRA_MANIFEST_VERSION,
 } from '../src/veyra/manifest.js';
+import { VEYRA_COMMAND_TABLE } from '../src/veyra/commands.js';
 import {
   createProjectManifest as indexCreateProjectManifest,
   serializeProjectManifest as indexSerializeProjectManifest,
@@ -288,7 +289,7 @@ assert.deepEqual(
 
 // --- Action schema --------------------------------------------------------------
 const actions = manifest.actions;
-assert.ok(actions.length >= 20, 'Action catalog must be bounded and non-trivial.');
+assert.equal(actions.length, 45, 'Action catalog grows additively from 27 published entries to 45 total affordances.');
 const actionIds = actions.map((item) => item.ref.id);
 assert.equal(new Set(actionIds).size, actionIds.length, 'Action ids must be unique.');
 for (const item of actions) {
@@ -297,7 +298,10 @@ for (const item of actions) {
   assert.ok(item.name.length > 0, `${item.ref.id} needs a name.`);
   assert.ok(item.description.length > 0, `${item.ref.id} needs a description.`);
   assert.ok(typeof item.targetKind === 'string' && item.targetKind.length > 0, `${item.ref.id} needs a targetKind.`);
-  assert.ok(item.parameters.length > 0, `${item.ref.id} needs parameters.`);
+  const noParameterActions = new Set(['begin', 'commit', 'cancel', 'undo', 'redo', 'remove-selection']);
+  assert.ok(item.parameters.length > 0 || noParameterActions.has(item.ref.id), `${item.ref.id} needs parameters unless it is a no-argument transaction/history command.`);
+  assert.ok(item.transport === 'command' || item.transport === 'read' || item.transport === 'runtime', `${item.ref.id} needs a transport classification.`);
+  assert.ok(typeof item.hostAvailability === 'string' && item.hostAvailability.length > 0, `${item.ref.id} needs host availability.`);
   const parameterNames = new Set();
   for (const parameter of item.parameters) {
     assert.ok(parameter.name, `${item.ref.id} has an unnamed parameter.`);
@@ -314,8 +318,12 @@ for (const item of actions) {
   assert.ok(item.capabilities.every((capability) => typeof capability === 'string'));
   if (!item.capabilities.includes('non-mutating')) {
     assert.ok(
-      item.capabilities.includes('undoable') || item.capabilities.includes('runtime-only'),
-      `${item.ref.id} must be tagged 'undoable' (document command) or 'runtime-only' (preview state).`,
+      item.capabilities.includes('undoable')
+      || item.capabilities.includes('runtime-only')
+      || item.capabilities.includes('history')
+      || item.capabilities.includes('transaction')
+      || item.capabilities.includes('clears-history'),
+      `${item.ref.id} must advertise recovery, transaction, runtime, or history semantics.`,
     );
   }
 }
@@ -346,6 +354,41 @@ assert.deepEqual(
   runtimeActions.map((item) => item.ref.id).sort(),
   ['fire-machine-input', 'reset-machine', 'scrub-machine', 'set-machine-input', 'step-machine'],
 );
+
+// The command table is the canonical registry: every dispatchable command is
+// generated exactly once, while the six explicit read/runtime affordances map
+// to no Store command.
+const commandActions = actions.filter((item) => item.transport === 'command');
+assert.equal(commandActions.length, Object.keys(VEYRA_COMMAND_TABLE).length);
+for (const [commandName, command] of Object.entries(VEYRA_COMMAND_TABLE)) {
+  const matches = commandActions.filter((item) => item.command === commandName);
+  assert.equal(matches.length, 1, `${commandName} must generate exactly one manifest action.`);
+  assert.equal(matches[0].ref.id, command.manifestId);
+}
+const nonCommandActions = actions.filter((item) => item.transport !== 'command');
+assert.equal(nonCommandActions.length, 6);
+assert.deepEqual(
+  nonCommandActions.map((item) => item.ref.id).sort(),
+  ['fire-machine-input', 'read-property', 'reset-machine', 'scrub-machine', 'set-machine-input', 'step-machine'],
+);
+assert.ok(!nonCommandActions.some((item) => 'command' in item));
+
+const publishedActionIds = [
+  'read-property', 'write-property', 'add-node', 'remove-node', 'create-timeline',
+  'update-timeline', 'remove-timeline', 'set-keyframe', 'remove-keyframe', 'move-keyframe',
+  'create-state-machine', 'update-state-machine', 'remove-state-machine', 'add-machine-input',
+  'add-machine-state', 'remove-machine-state', 'add-machine-transition', 'remove-machine-transition',
+  'update-machine-input', 'remove-machine-input', 'update-machine-state', 'update-machine-transition',
+  'set-machine-input', 'fire-machine-input', 'step-machine', 'scrub-machine', 'reset-machine',
+];
+for (const id of publishedActionIds) assert.ok(actions.some((item) => item.ref.id === id), `${id} must remain stable.`);
+for (const id of [
+  'add-bone', 'add-mesh', 'add-control', 'add-constraint', 'remove-bone', 'remove-mesh',
+  'remove-control', 'remove-constraint', 'add-asset', 'remove-asset', 'begin', 'commit', 'cancel',
+  'undo', 'redo', 'select', 'replace-document', 'remove-selection',
+ ]) assert.ok(serializeProjectManifest(manifest).includes(`\"id\": \"${id}\"`), `${id} must be discoverable.`);
+assert.equal(manifest.authoring.listener.variants.machine.hostAvailability, 'unsupported');
+assert.equal(manifest.authoring.listener.variants.timeline.hostAvailability, 'available');
 
 // Action parameters must expose the shared validation bounds.
 assert.deepEqual(
