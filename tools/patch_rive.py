@@ -291,8 +291,16 @@ insert = r'''#ifdef ENABLE_QUERY_FLAT_VERTICES
                           result.set("vertexCount", vertices.size());
                           result.set("hasWeightedVertices",
                                      hasWeightedVertices);
-                          result.set("shapeName",
-                                     shape == nullptr ? "" : shape->name());
+                          const std::string shapeName =
+                                     shape == nullptr ? "" : shape->name();
+                          result.set("shapeName", shapeName);
+                          // Most authored Path objects are unnamed; use the
+                          // owning Shape name for a useful editor label.
+                          if (object->as<rive::Component>()->name().empty() &&
+                              !shapeName.empty())
+                          {
+                              result.set("name", shapeName);
+                          }
                           if (shape != nullptr)
                           {
                               for (size_t objectIndex = 0;
