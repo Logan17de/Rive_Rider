@@ -68,11 +68,19 @@
   ],
   "semantics": [
     {
+      "aliases": [],
+      "canonicalRole": "animated-fixture",
       "description": "A deterministic fixture with position, rotation, and color tracks.",
-      "role": "animated-fixture",
+      "id": "semantic_legacy_df2688bc",
+      "namespace": "default",
+      "provenance": {
+        "source": "user"
+      },
+      "relations": [],
+      "status": "confirmed",
       "tags": [
-        "golden",
-        "animation"
+        "animation",
+        "golden"
       ],
       "target": {
         "id": "node_animated_rectangle",

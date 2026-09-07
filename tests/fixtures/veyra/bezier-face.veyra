@@ -130,11 +130,19 @@
   ],
   "semantics": [
     {
+      "aliases": [],
+      "canonicalRole": "mouth",
       "description": "Authored cubic smile used for deterministic path tests.",
-      "role": "mouth",
+      "id": "semantic_legacy_8cdeb3a3",
+      "namespace": "default",
+      "provenance": {
+        "source": "user"
+      },
+      "relations": [],
+      "status": "confirmed",
       "tags": [
-        "face",
-        "expression"
+        "expression",
+        "face"
       ],
       "target": {
         "id": "node_smile",

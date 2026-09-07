@@ -25,7 +25,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 # MILESTONE M1 — Universal Semantic Metadata Layer
 
-**Status:** `READY`
+**Status:** `AWAITING VERIFICATION`
 
 ## Goal
 
@@ -239,14 +239,14 @@ The milestone is complete only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Task-specific checks:
-- Persistence/migration impact:
-- AI/name-independence proof:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Implementation commits: Implement M1 universal semantic metadata [m1-applied]
+- Changed files: src/veyra/semantics.js, references.js, model.js, store.js, capabilities.js, summary.js, manifest.js, tests/veyra-semantics.test.mjs, milestone.md
+- Tests added/changed: tests/veyra-semantics.test.mjs (typed targets, validation, aliases/provenance/status, relations, migration, lifecycle cascade, undo/redo, manifest/summary, name independence)
+- npm test: PASS (required before commit by the M1 workflow)
+- npm run check: PASS (required before commit by the M1 workflow)
+- Task-specific checks: universal typed target policy, stable semantic IDs, multiple records per target, strict alias/provenance/status validation, typed relations, canonical Store CRUD, explicit deletion cascade
+- Persistence/migration impact: legacy node semantic role migrates deterministically to canonicalRole; missing semantic IDs are deterministic and stable after first round-trip; new aliases/relations/provenance/status persist canonically
+- AI/name-independence proof: dedicated suite renames targets to duplicate/empty/misleading names and verifies typed semantic refs remain unchanged; AI aliases never write entity name fields
+- Suggestions added to `suggestions`: none
+- Known limitations: paint semantic refs use the stable owning node/mesh id; inference, natural-language resolution, ranking, and other explicit non-goals remain out of scope
 ```

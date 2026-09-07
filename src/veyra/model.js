@@ -15,6 +15,14 @@ import {
   normalizeReference,
   referenceId,
 } from './references.js';
+import {
+  createSemanticRecord as createUniversalSemanticRecord,
+  normalizeSemanticRecords,
+  validateSemanticRecords,
+  semanticForTarget,
+  semanticsForTarget,
+  semanticRecordById as findSemanticRecordById,
+} from './semantics.js';
 
 export const VEYRA_FORMAT = 'veyra';
 // v4 is feature-gated: ordinary documents continue to normalize as v3, while
@@ -227,13 +235,8 @@ export function createNode(type, overrides = {}) {
   return node;
 }
 
-export function createSemanticRecord(nodeId, overrides = {}) {
-  return {
-    target: createNodeRef(nodeId),
-    role: String(overrides.role || ''),
-    description: String(overrides.description || ''),
-    tags: [...new Set((overrides.tags || []).map((tag) => String(tag).trim()).filter(Boolean))],
-  };
+export function createSemanticRecord(targetOrNodeId, overrides = {}) {
+  return createUniversalSemanticRecord(targetOrNodeId, overrides);
 }
 
 export function createAsset(type, overrides = {}) {
@@ -1402,20 +1405,7 @@ export function normalizeDocument(input) {
     assetIds.add(asset.id);
   }
 
-  const semantics = Array.isArray(input.semantics)
-    ? input.semantics.map((record, index) => {
-      const target = normalizeReference(record?.target ?? record?.nodeId, 'node', `semantics[${index}].target`);
-      const nodeId = referenceId(target, 'node');
-      if (!ids.has(nodeId)) throw new TypeError(`semantics[${index}] targets missing node ${nodeId}.`);
-      return createSemanticRecord(nodeId, record);
-    })
-    : [];
-  const semanticIds = new Set();
-  for (const record of semantics) {
-    const nodeId = referenceId(record.target, 'node');
-    if (semanticIds.has(nodeId)) throw new TypeError(`Duplicate semantic record for ${nodeId}.`);
-    semanticIds.add(nodeId);
-  }
+  const semantics = normalizeSemanticRecords(input.semantics || []);
 
   const timelines = Array.isArray(input.timelines)
     ? input.timelines.map((timeline, index) => normalizeTimeline(timeline, index, inputVersion))
@@ -1475,16 +1465,27 @@ export function normalizeDocument(input) {
     listeners,
   };
   validateStableIdentities(document);
+  validateSemanticRecords(document);
   return document;
 }
 
-export function semanticFor(document, nodeId, create = false) {
-  let record = document.semantics.find((candidate) => referenceId(candidate.target, 'node') === nodeId) || null;
+export function semanticsFor(document, targetOrNodeId) {
+  const target = typeof targetOrNodeId === 'string' ? createNodeRef(targetOrNodeId) : targetOrNodeId;
+  return semanticsForTarget(document, target);
+}
+
+export function semanticFor(document, targetOrNodeId, create = false) {
+  const target = typeof targetOrNodeId === 'string' ? createNodeRef(targetOrNodeId) : targetOrNodeId;
+  let record = semanticForTarget(document, target);
   if (!record && create) {
-    record = createSemanticRecord(nodeId);
+    record = createUniversalSemanticRecord(target);
     document.semantics.push(record);
   }
   return record;
+}
+
+export function semanticRecordById(document, semanticId) {
+  return findSemanticRecordById(document, semanticId);
 }
 
 export function nodeById(document, nodeId) {

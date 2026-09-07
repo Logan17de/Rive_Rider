@@ -22,6 +22,7 @@ export const VEYRA_REFERENCE_KINDS = Object.freeze([
   'machineTransition',
   'machineCondition',
   'listener',
+  'semanticRecord',
 ]);
 
 export function createReference(kind, id) {
@@ -111,8 +112,16 @@ export function createGradientStopRef(id) {
   return createReference('gradientStop', id);
 }
 
-export function createSemanticTargetRef(id) {
-  return createNodeRef(id);
+export function createSemanticRecordRef(id) {
+  return createReference('semanticRecord', id);
+}
+
+export function createSemanticTargetRef(kindOrRefOrId, id = null) {
+  if (kindOrRefOrId && typeof kindOrRefOrId === 'object') {
+    return createReference(kindOrRefOrId.kind, kindOrRefOrId.id);
+  }
+  if (id == null) return createNodeRef(kindOrRefOrId);
+  return createReference(kindOrRefOrId, id);
 }
 
 export function normalizeReference(value, expectedKind, path = 'reference') {

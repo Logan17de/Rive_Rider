@@ -31,6 +31,14 @@ import {
 } from './model.js';
 import { isAnimatableProperty, readProperty, writeProperty } from './properties.js';
 import { createBoneRef, createConstraintRef, createControlRef, createMeshRef, createReference, createTimelineRef, referenceId } from './references.js';
+import {
+  createSemanticRecord,
+  updateSemanticRecordInDocument,
+  deleteSemanticRecordInDocument,
+  addSemanticRelationInDocument,
+  removeSemanticRelationInDocument,
+  cascadeDeletedSemanticRefs,
+} from './semantics.js';
 
 export const VEYRA_COMMAND_SOURCES = Object.freeze(['user', 'ai', 'script', 'import']);
 
@@ -120,6 +128,7 @@ export class VeyraStore {
     try {
       mutation(this.document);
       this.document.updatedAt = new Date().toISOString();
+      cascadeDeletedSemanticRefs(before, this.document);
       this.document = normalizeDocument(this.document);
     } catch (error) {
       this.document = before;
@@ -164,6 +173,7 @@ export class VeyraStore {
     this.#transaction = null;
     try {
       this.document.updatedAt = new Date().toISOString();
+      cascadeDeletedSemanticRefs(transaction.document, this.document);
       this.document = normalizeDocument(this.document);
     } catch (error) {
       this.document = transaction.document;
@@ -239,6 +249,62 @@ export class VeyraStore {
     this.selectedKind = null;
     this.#emit('selection');
     return true;
+  }
+
+
+  // --- Universal semantic metadata -----------------------------------------
+  // Human UI and AI both use these Store commands. Validation and history are
+  // therefore identical to every other authored mutation path.
+  addSemantic(target, overrides = {}, commandDescriptor = {}) {
+    const record = createSemanticRecord(target, overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add semantic ${record.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.semantics.push(record);
+    });
+    return record.id;
+  }
+
+  updateSemantic(semanticId, patch, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update semantic ${semanticId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      updateSemanticRecordInDocument(document, semanticId, patch);
+    });
+    return semanticId;
+  }
+
+  removeSemantic(semanticId, commandDescriptor = {}) {
+    if (!this.document.semantics.some((record) => record.id === semanticId)) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete semantic ${semanticId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      deleteSemanticRecordInDocument(document, semanticId);
+    });
+    return true;
+  }
+
+  addSemanticRelation(semanticId, relation, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add semantic relation ${semanticId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      addSemanticRelationInDocument(document, semanticId, relation);
+    });
+    return semanticId;
+  }
+
+  removeSemanticRelation(semanticId, relation, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Remove semantic relation ${semanticId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      removeSemanticRelationInDocument(document, semanticId, relation);
+    });
+    return semanticId;
   }
 
   get canUndo() {

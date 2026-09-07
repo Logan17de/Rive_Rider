@@ -68,8 +68,16 @@
   ],
   "semantics": [
     {
+      "aliases": [],
+      "canonicalRole": "fixture",
       "description": "A minimal deterministic rectangle fixture.",
-      "role": "fixture",
+      "id": "semantic_legacy_e685c4b6",
+      "namespace": "default",
+      "provenance": {
+        "source": "user"
+      },
+      "relations": [],
+      "status": "confirmed",
       "tags": [
         "golden",
         "rectangle"

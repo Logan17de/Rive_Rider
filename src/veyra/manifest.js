@@ -11,6 +11,7 @@ import {
   machineConditionViolation,
 } from './model.js';
 import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
+import { VEYRA_SEMANTIC_CAPABILITIES } from './capabilities.js';
 import { VEYRA_PROPERTY_TARGET_KINDS } from './properties.js';
 import {
   VEYRA_REFERENCE_KINDS,
@@ -39,6 +40,9 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'scene.summary',
   'scene.evaluation',
   'scene.svg-export',
+  'semantics.universal-read',
+  'semantics.transactional-write',
+  'semantics.typed-relations',
 ]);
 
 function projectCapabilities(document) {
@@ -168,6 +172,17 @@ function machineConditionRules() {
 
 function authoringContract() {
   return {
+
+    semanticRecord: {
+      required: ['id', 'target', 'status'],
+      target: { kind: 'typedReference', kinds: [...VEYRA_SEMANTIC_CAPABILITIES.targetKinds] },
+      readable: [...VEYRA_SEMANTIC_CAPABILITIES.readable],
+      writable: [...VEYRA_SEMANTIC_CAPABILITIES.writable],
+      actions: [...VEYRA_SEMANTIC_CAPABILITIES.actions],
+      status: { enum: [...VEYRA_SEMANTIC_CAPABILITIES.statuses] },
+      provenanceSource: { enum: [...VEYRA_SEMANTIC_CAPABILITIES.provenanceSources] },
+      identity: 'semantic record id and typed target refs; display names are never identity',
+    },
     machineInput: {
       required: ['id', 'type'],
       type: { enum: [...VEYRA_MACHINE_INPUT_TYPES] },

@@ -1,3 +1,6 @@
+import { VEYRA_REFERENCE_KINDS } from './references.js';
+import { VEYRA_SEMANTIC_SOURCES, VEYRA_SEMANTIC_STATUSES } from './semantics.js';
+
 const COMMON_WRITABLE = Object.freeze([
   'name',
   'parent',
@@ -16,9 +19,6 @@ const COMMON_WRITABLE = Object.freeze([
   'paint.fill',
   'paint.stroke',
   'paint.strokeWidth',
-  'semantic.role',
-  'semantic.tags',
-  'semantic.description',
 ]);
 
 const COMMON_ANIMATABLE = Object.freeze([
@@ -151,3 +151,13 @@ export function rigCapabilities(kind, object) {
 export function supportsRigProperty(kind, object, path, mode = 'writable') {
   return rigCapabilities(kind, object)[mode].includes(pathPattern(path));
 }
+
+
+export const VEYRA_SEMANTIC_CAPABILITIES = Object.freeze({
+  targetKinds: Object.freeze([...VEYRA_REFERENCE_KINDS.filter((kind) => kind !== 'semanticRecord')]),
+  readable: Object.freeze(['id', 'target', 'namespace', 'canonicalRole', 'description', 'tags', 'aliases', 'relations', 'provenance', 'status']),
+  writable: Object.freeze(['target', 'namespace', 'canonicalRole', 'description', 'tags', 'aliases', 'relations', 'provenance', 'status']),
+  actions: Object.freeze(['create', 'update', 'delete', 'add-relation', 'remove-relation']),
+  statuses: Object.freeze([...VEYRA_SEMANTIC_STATUSES]),
+  provenanceSources: Object.freeze([...VEYRA_SEMANTIC_SOURCES]),
+});

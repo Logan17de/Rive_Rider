@@ -1,4 +1,4 @@
-import { nodeCapabilities, rigCapabilities } from './capabilities.js';
+import { nodeCapabilities, rigCapabilities, VEYRA_SEMANTIC_CAPABILITIES } from './capabilities.js';
 import { cloneValue, semanticFor } from './model.js';
 import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
 import {
@@ -14,6 +14,7 @@ import {
   createPathVertexRef,
   createStateMachineRef,
   createTimelineRef,
+  createSemanticRecordRef,
   referenceId,
 } from './references.js';
 
@@ -27,6 +28,23 @@ function paintSummary(paint) {
       color: stop.color,
       opacity: stop.opacity,
     })),
+  };
+}
+
+
+function semanticSummary(record) {
+  return {
+    ref: createSemanticRecordRef(record.id),
+    target: cloneValue(record.target),
+    namespace: record.namespace,
+    canonicalRole: record.canonicalRole,
+    description: record.description,
+    tags: [...record.tags],
+    aliases: cloneValue(record.aliases),
+    relations: cloneValue(record.relations),
+    provenance: cloneValue(record.provenance),
+    status: record.status,
+    capabilities: cloneValue(VEYRA_SEMANTIC_CAPABILITIES),
   };
 }
 
@@ -50,6 +68,7 @@ export function createSceneSummary(document, options = {}) {
         constraintCount: document.constraints.length,
       },
     },
+    semantics: document.semantics.map(semanticSummary),
     objects: document.nodes.map((node) => {
       const semantic = semanticFor(document, node.id);
       const summary = {
@@ -61,7 +80,7 @@ export function createSceneSummary(document, options = {}) {
         visible: node.visible,
         locked: node.locked,
         semantics: semantic
-          ? { target: createNodeRef(node.id), role: semantic.role, description: semantic.description, tags: [...semantic.tags] }
+          ? { ...semanticSummary(semantic), role: semantic.canonicalRole, target: createNodeRef(node.id) }
           : null,
         capabilities: nodeCapabilities(node),
       };
