@@ -514,8 +514,9 @@ export class VeyraStore {
         track = createTrack(address);
         timeline.tracks.push(track);
       }
-      const keyframe = createKeyframe({ frame, value: resolvedValue, easing, easingParams });
-      const existingIndex = track.keyframes.findIndex((candidate) => candidate.frame === keyframe.frame);
+      const existingIndex = track.keyframes.findIndex((candidate) => candidate.frame === frame);
+      const existing = existingIndex >= 0 ? track.keyframes[existingIndex] : null;
+      const keyframe = createKeyframe({ id: existing?.id, frame, value: resolvedValue, easing, easingParams });
       if (existingIndex >= 0) track.keyframes[existingIndex] = keyframe;
       else track.keyframes.push(keyframe);
       track.keyframes.sort((a, b) => a.frame - b.frame);

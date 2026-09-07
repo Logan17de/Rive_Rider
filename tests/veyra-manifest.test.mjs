@@ -78,8 +78,8 @@ function buildFixture() {
           createTrack(xAddress, {
             id: 'track_bob_x',
             keyframes: [
-              createKeyframe({ frame: 0, value: 0, easing: 'ease-in-out' }),
-              createKeyframe({ frame: 30, value: 120, easing: 'cubic-bezier', easingParams: [0.42, 0, 0.58, 1] }),
+              createKeyframe({ id: 'keyframe_bob_x_0', frame: 0, value: 0, easing: 'ease-in-out' }),
+              createKeyframe({ id: 'keyframe_bob_x_30', frame: 30, value: 120, easing: 'cubic-bezier', easingParams: [0.42, 0, 0.58, 1] }),
             ],
           }),
         ],
@@ -125,7 +125,9 @@ assert.ok(manifest.capabilities.includes('animation.state-machines'));
 assert.ok(manifest.capabilities.includes('properties.addressed-write'));
 assert.equal(manifest.capabilities.includes('rig.bones'), false, 'Fixture has no rig; rig capabilities must be derived.');
 assert.deepEqual(manifest.references.document, [...VEYRA_REFERENCE_KINDS]);
-assert.deepEqual(manifest.references.manifest, ['action', 'keyframe', 'track']);
+assert.deepEqual(manifest.references.manifest, ['action']);
+assert.ok(manifest.references.document.includes('keyframe'));
+assert.ok(manifest.references.document.includes('track'));
 assert.deepEqual(manifest.references.propertyAddress.grammar, '<kind>:<id>/<segment>[/<segment>]');
 
 // --- Enumerable machine/listener authoring contract ---------------------------
@@ -187,7 +189,7 @@ assert.equal(track.keyframes.length, 2);
 const [firstKeyframe, secondKeyframe] = track.keyframes;
 assert.deepEqual(firstKeyframe.ref, {
   kind: 'keyframe',
-  id: 'timeline_bob:track_bob_x#0',
+  id: 'keyframe_bob_x_0',
   timeline: { kind: 'timeline', id: 'timeline_bob' },
   track: { kind: 'track', id: 'track_bob_x' },
 });
@@ -197,7 +199,7 @@ assert.equal(firstKeyframe.order, 0);
 assert.equal(firstKeyframe.easing, 'ease-in-out');
 assert.equal(firstKeyframe.value, undefined, 'Keyframe values are redacted unless includeKeyframeValues is set.');
 assert.equal(firstKeyframe.easingParams, undefined);
-assert.equal(secondKeyframe.ref.id, 'timeline_bob:track_bob_x#30');
+assert.equal(secondKeyframe.ref.id, 'keyframe_bob_x_30');
 assert.equal(secondKeyframe.order, 1);
 assert.equal(secondKeyframe.easing, 'cubic-bezier');
 
@@ -229,7 +231,10 @@ const rotationTrack = updated.timelines[0].tracks.find((candidate) => candidate.
 assert.ok(rotationTrack, 'Store-created track must appear in the manifest.');
 assert.equal(updated.timelines[0].counts.keyframes, 3);
 assert.equal(rotationTrack.keyframeCount, 1);
-assert.equal(rotationTrack.keyframes[0].ref.id, `timeline_bob:${rotationTrack.ref.id}#15`);
+assert.equal(
+  rotationTrack.keyframes[0].ref.id,
+  store.document.timelines[0].tracks.find((candidate) => candidate.id === rotationTrack.ref.id).keyframes[0].id,
+);
 assert.equal(rotationTrack.keyframes[0].value, 0.5);
 assert.equal(rotationTrack.keyframes[0].order, 0);
 
@@ -268,7 +273,7 @@ assert.deepEqual(font.capabilities.writable, ['name', 'mimeType', 'source.uri'])
 // --- State machines -------------------------------------------------------------
 assert.equal(manifest.stateMachines.length, 1);
 const machine = manifest.stateMachines[0];
-assert.deepEqual(machine.ref, { kind: 'machine', id: 'machine_bob' });
+assert.deepEqual(machine.ref, { kind: 'stateMachine', id: 'machine_bob' });
 assert.equal(machine.name, 'Bob Machine');
 assert.deepEqual(machine.initial, { kind: 'machineState', id: 'state_a' });
 assert.deepEqual(machine.inputs[0].ref, { kind: 'machineInput', id: 'input_hover' });

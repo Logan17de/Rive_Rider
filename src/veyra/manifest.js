@@ -1,5 +1,6 @@
 import {
   cloneValue,
+  normalizeDocument,
   VEYRA_MACHINE_INPUT_TYPES,
   VEYRA_MACHINE_STATE_TYPES,
   VEYRA_CONDITION_OPS,
@@ -11,16 +12,22 @@ import {
 } from './model.js';
 import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
 import { VEYRA_PROPERTY_TARGET_KINDS } from './properties.js';
-import { VEYRA_REFERENCE_KINDS } from './references.js';
+import {
+  VEYRA_REFERENCE_KINDS,
+  createDocumentRef,
+  createKeyframeRef,
+  createTrackRef,
+  createTimelineRef,
+} from './references.js';
 import { VEYRA_COMMAND_TABLE } from './commands.js';
 import { createSceneSummary } from './summary.js';
 
 export const VEYRA_MANIFEST_FORMAT = 'veyra-project-manifest';
 export const VEYRA_MANIFEST_VERSION = 1;
 
-// Reference kinds that exist only inside the manifest (not in authored
-// documents). Document-level kinds come from VEYRA_REFERENCE_KINDS.
-const MANIFEST_ONLY_REFERENCE_KINDS = Object.freeze(['action', 'keyframe', 'track']);
+// Actions are manifest-only; all project entities, including tracks and
+// keyframes, carry typed refs in the authored document itself.
+const MANIFEST_ONLY_REFERENCE_KINDS = Object.freeze(['action']);
 
 const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'properties.addressed-read',
@@ -79,14 +86,12 @@ function summarizeAsset(asset, { includeAssetData }) {
 
 function summarizeKeyframe(timeline, track, keyframe, order, { includeKeyframeValues }) {
   const summary = {
-    // Keyframes have no authored ids; the stable address is the owning
-    // timeline, track, and frame. `order` disambiguates the degenerate case
-    // of two keyframes on the same frame.
+    // Keyframes are first-class authored entities. Their refs are independent
+    // of frame position, track order, timeline names, and duplicate frames.
     ref: {
-      kind: 'keyframe',
-      id: `${timeline.id}:${track.id}#${keyframe.frame}`,
-      timeline: { kind: 'timeline', id: timeline.id },
-      track: { kind: 'track', id: track.id },
+      ...createKeyframeRef(keyframe.id),
+      timeline: createTimelineRef(timeline.id),
+      track: createTrackRef(track.id),
     },
     address: track.address,
     frame: keyframe.frame,
@@ -103,7 +108,7 @@ function summarizeKeyframe(timeline, track, keyframe, order, { includeKeyframeVa
 function summarizeTrack(timeline, track, options) {
   const keyframes = track.keyframes.map((keyframe, order) => summarizeKeyframe(timeline, track, keyframe, order, options));
   return {
-    ref: { kind: 'track', id: track.id, timeline: { kind: 'timeline', id: timeline.id } },
+    ref: { ...createTrackRef(track.id), timeline: createTimelineRef(timeline.id) },
     address: track.address,
     keyframeCount: keyframes.length,
     keyframes,
@@ -123,7 +128,7 @@ const TIMELINE_WRITABLE_PROPERTIES = Object.freeze([
 function summarizeTimeline(timeline, options) {
   const tracks = timeline.tracks.map((track) => summarizeTrack(timeline, track, options));
   return {
-    ref: { kind: 'timeline', id: timeline.id },
+    ref: createTimelineRef(timeline.id),
     name: timeline.name,
     duration: timeline.duration,
     fps: timeline.fps,
@@ -291,6 +296,7 @@ function projectActions() {
  * The document is never mutated.
  */
 export function createProjectManifest(document, options = {}) {
+  document = normalizeDocument(document);
   const manifestOptions = {
     includeGeometry: Boolean(options.includeGeometry),
     includeKeyframeValues: Boolean(options.includeKeyframeValues),
@@ -301,6 +307,7 @@ export function createProjectManifest(document, options = {}) {
     format: VEYRA_MANIFEST_FORMAT,
     version: VEYRA_MANIFEST_VERSION,
     document: {
+      ref: createDocumentRef(document.id),
       id: document.id,
       name: document.name,
       format: document.format,

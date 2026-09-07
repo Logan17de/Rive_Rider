@@ -19,6 +19,14 @@ can, using the same standard workflows, not a special AI-only path.
 **Naming note:** Verya is the product name; `Veyra` remains the technical
 identifier for the `.veyra` file format and persisted contracts for compatibility.
 
+### M0.1 identity contract (implementation handoff)
+Every persistent graph entity uses a typed immutable id/reference, including
+keyframes and nested machine/interaction entities. Legacy keyframes receive a
+deterministic id during normalization and retain it after saving. Value-only
+objects (transforms, geometry parameters, colors, condition values, and
+non-editable derived summaries) intentionally remain addressed through their
+owner rather than receiving standalone identity.
+
 ## 2. Where we are right now (one paragraph)
 
 The pure-runtime interaction milestone (click → play an animation, with or

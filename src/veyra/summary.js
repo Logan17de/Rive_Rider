@@ -1,7 +1,34 @@
 import { nodeCapabilities, rigCapabilities } from './capabilities.js';
 import { cloneValue, semanticFor } from './model.js';
 import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
-import { referenceId } from './references.js';
+import {
+  createDocumentRef,
+  createGradientStopRef,
+  createMachineConditionRef,
+  createMachineInputRef,
+  createMachineStateRef,
+  createMachineTransitionRef,
+  createListenerRef,
+  createMeshVertexRef,
+  createNodeRef,
+  createPathVertexRef,
+  createStateMachineRef,
+  createTimelineRef,
+  referenceId,
+} from './references.js';
+
+function paintSummary(paint) {
+  const stops = paint?.fill?.stops || [];
+  return {
+    fillType: paint?.fill?.type || 'solid',
+    gradientStops: stops.map((stop) => ({
+      ref: createGradientStopRef(stop.id),
+      offset: stop.offset,
+      color: stop.color,
+      opacity: stop.opacity,
+    })),
+  };
+}
 
 export function createSceneSummary(document, options = {}) {
   const includeGeometry = Boolean(options.includeGeometry);
@@ -9,6 +36,7 @@ export function createSceneSummary(document, options = {}) {
     format: 'veyra-scene-summary',
     version: 1,
     document: {
+      ref: createDocumentRef(document.id),
       id: document.id,
       name: document.name,
       artboard: cloneValue(document.artboard),
@@ -29,16 +57,20 @@ export function createSceneSummary(document, options = {}) {
         type: node.type,
         name: node.name,
         parent: cloneValue(node.parent),
+        paint: paintSummary(node.paint),
         visible: node.visible,
         locked: node.locked,
         semantics: semantic
-          ? { role: semantic.role, description: semantic.description, tags: [...semantic.tags] }
+          ? { target: createNodeRef(node.id), role: semantic.role, description: semantic.description, tags: [...semantic.tags] }
           : null,
         capabilities: nodeCapabilities(node),
       };
       if (includeGeometry) summary.geometry = cloneValue(node.geometry);
-      else if (node.type === 'path') summary.geometrySummary = { kind: 'authored-path', vertexCount: node.geometry.vertices.length, closed: node.geometry.closed };
-      else if (node.geometry) summary.geometrySummary = { kind: node.type, parameters: Object.keys(node.geometry) };
+      if (node.type === 'path') summary.geometryRefs = {
+        vertices: node.geometry.vertices.map((vertex) => createPathVertexRef(vertex.id)),
+      };
+      if (!includeGeometry && node.type === 'path') summary.geometrySummary = { kind: 'authored-path', vertexCount: node.geometry.vertices.length, closed: node.geometry.closed };
+      else if (node.geometry && node.type !== 'path') summary.geometrySummary = { kind: node.type, parameters: Object.keys(node.geometry) };
       return summary;
     }),
     rig: {
@@ -52,6 +84,8 @@ export function createSceneSummary(document, options = {}) {
       meshes: document.meshes.map((mesh) => ({
         ref: { kind: 'mesh', id: mesh.id },
         name: mesh.name,
+        paint: paintSummary(mesh.paint),
+        vertexRefs: mesh.vertices.map((vertex) => createMeshVertexRef(vertex.id)),
         vertexCount: mesh.vertices.length,
         triangleCount: mesh.triangles.length,
         capabilities: rigCapabilities('mesh', mesh),
@@ -74,49 +108,49 @@ export function createSceneSummary(document, options = {}) {
       })),
     },
     stateMachines: (document.stateMachines || []).map((machine) => ({
-      ref: { kind: 'machine', id: machine.id },
+      ref: createStateMachineRef(machine.id),
       name: machine.name,
       capabilities: cloneValue(VEYRA_MACHINE_CAPABILITIES),
       initial: machine.initial
-        ? { kind: 'machineState', id: referenceId(machine.initial, 'machineState') }
+        ? createMachineStateRef(referenceId(machine.initial, 'machineState'))
         : null,
       inputs: machine.inputs.map((input) => ({
-        ref: { kind: 'machineInput', id: input.id },
+        ref: createMachineInputRef(input.id),
         name: input.name,
         type: input.type,
         value: input.value,
       })),
       states: machine.states.map((state) => ({
-        ref: { kind: 'machineState', id: state.id },
+        ref: createMachineStateRef(state.id),
         name: state.name,
         type: state.type,
         timeline: state.timeline
-          ? { kind: 'timeline', id: referenceId(state.timeline, 'timeline') }
+          ? createTimelineRef(referenceId(state.timeline, 'timeline'))
           : null,
       })),
       transitions: machine.transitions.map((transition) => ({
-        ref: { kind: 'machineTransition', id: transition.id },
-        from: { kind: 'machineState', id: referenceId(transition.from, 'machineState') },
-        to: { kind: 'machineState', id: referenceId(transition.to, 'machineState') },
+        ref: createMachineTransitionRef(transition.id),
+        from: createMachineStateRef(referenceId(transition.from, 'machineState')),
+        to: createMachineStateRef(referenceId(transition.to, 'machineState')),
         duration: transition.duration,
         after: transition.after,
         conditions: transition.conditions.map((condition) => ({
-          id: condition.id,
-          input: { kind: 'machineInput', id: referenceId(condition.input, 'machineInput') },
+          ref: createMachineConditionRef(condition.id),
+          input: createMachineInputRef(referenceId(condition.input, 'machineInput')),
           op: condition.op,
           ...(condition.value !== undefined ? { value: condition.value } : {}),
         })),
       })),
     })),
     listeners: (document.listeners || []).map((listener) => ({
-      ref: { kind: 'listener', id: listener.id },
+      ref: createListenerRef(listener.id),
       kind: listener.kind,
       event: listener.event,
       target: cloneValue(listener.target),
       action: listener.action,
-      ...(listener.machine ? { machine: listener.machine } : {}),
-      ...(listener.input ? { input: cloneValue(listener.input) } : {}),
-      ...(listener.timeline ? { timeline: cloneValue(listener.timeline) } : {}),
+      ...(listener.machine ? { machine: createStateMachineRef(referenceId(listener.machine, 'stateMachine')) } : {}),
+      ...(listener.input ? { input: createMachineInputRef(referenceId(listener.input, 'machineInput')) } : {}),
+      ...(listener.timeline ? { timeline: createTimelineRef(referenceId(listener.timeline, 'timeline')) } : {}),
       ...(listener.value !== undefined ? { value: cloneValue(listener.value) } : {}),
     })),
   };

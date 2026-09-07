@@ -366,6 +366,7 @@ export function createKeyframe(overrides = {}) {
   const easing = overrides.easing || 'linear';
   if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`Unsupported easing type: ${easing}`);
   const base = {
+    id: overrides.id || createId('keyframe'),
     frame: overrides.frame ?? 0,
     value: cloneValue(overrides.value),
     easing,
@@ -396,15 +397,19 @@ export function createTimeline(overrides = {}) {
     loop,
     workStart,
     workEnd,
-    tracks: cloneValue(overrides.tracks || []),
+    tracks: (overrides.tracks || []).map((track) => createTrack(track.address, track)),
   };
 }
 
 export function createTrack(address, overrides = {}) {
+  const id = overrides.id || createId('track');
   return {
-    id: overrides.id || createId('track'),
+    id,
     address: String(address || ''),
-    keyframes: cloneValue(overrides.keyframes || []),
+    keyframes: (overrides.keyframes || []).map((keyframe, index) => createKeyframe({
+      ...keyframe,
+      id: keyframe.id || `keyframe_${id}_${index}`,
+    })),
   };
 }
 
@@ -696,8 +701,9 @@ function normalizeGeometry(type, geometry, path) {
       }
       if (geometry.vertices.length > 100000) throw new RangeError(`${path}.vertices is too large.`);
       const ids = new Set();
+      const legacyPrefix = path.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
       const vertices = geometry.vertices.map((vertex, index) => {
-        const id = String(vertex.id || createId('vertex'));
+        const id = String(vertex.id || `pathVertex_${legacyPrefix}_${index}`);
         if (ids.has(id)) throw new TypeError(`${path}.vertices contains duplicate id ${id}.`);
         ids.add(id);
         return {
@@ -1009,13 +1015,18 @@ function normalizeKeyframeValue(value, address, inputVersion, path) {
   return cloneValue(value);
 }
 
-function normalizeKeyframe(keyframe, trackPath, index, address, inputVersion) {
+function normalizeKeyframe(keyframe, trackPath, index, address, inputVersion, trackId) {
   const frame = integer(keyframe?.frame ?? 0, `${trackPath}.keyframes[${index}].frame`, 0, 100000);
+  // Legacy keyframes had no identity. The deterministic migration id is written
+  // into the normalized document once, then preserved on every later load;
+  // authored ids always win and are validated for duplicates below.
+  const id = String(keyframe?.id || `keyframe_${trackId}_${index}`);
   const easing = String(keyframe?.easing || 'linear');
   if (!VEYRA_EASING_TYPES.includes(easing)) {
     throw new TypeError(`${trackPath}.keyframes[${index}].easing must be a valid easing type.`);
   }
   const normalized = {
+    id,
     frame,
     value: normalizeKeyframeValue(keyframe?.value, address, inputVersion, `${trackPath}.keyframes[${index}].value`),
     easing,
@@ -1040,7 +1051,7 @@ function normalizeTrack(track, timelinePath, index, inputVersion) {
     throw new TypeError(`${trackPath}.keyframes must be an array.`);
   }
   const keyframes = track.keyframes
-    .map((keyframe, kfIndex) => normalizeKeyframe(keyframe, trackPath, kfIndex, address, inputVersion))
+    .map((keyframe, kfIndex) => normalizeKeyframe(keyframe, trackPath, kfIndex, address, inputVersion, id))
     .sort((a, b) => a.frame - b.frame);
   return { id, address, keyframes };
 }
@@ -1283,6 +1294,64 @@ function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) 
   return result;
 }
 
+function validateStableIdentities(document) {
+  const seen = new Map();
+  const register = (kind, id, path) => {
+    const normalized = String(id || '');
+    if (!normalized) throw new TypeError(`${path} requires a stable ${kind} id.`);
+    const entries = seen.get(kind) || new Map();
+    if (entries.has(normalized)) {
+      throw new TypeError(`Duplicate ${kind} id ${normalized}: ${path} conflicts with ${entries.get(normalized)}.`);
+    }
+    entries.set(normalized, path);
+    seen.set(kind, entries);
+  };
+  const registerPaint = (paint, path) => {
+    const stops = paint?.fill?.stops || [];
+    stops.forEach((stop, index) => register('gradientStop', stop.id, `${path}.fill.stops[${index}]`));
+  };
+
+  register('document', document.id, 'document');
+  document.nodes.forEach((node, index) => {
+    register('node', node.id, `nodes[${index}]`);
+    if (node.type === 'path') {
+      node.geometry.vertices.forEach((vertex, vertexIndex) => register('pathVertex', vertex.id, `nodes[${index}].geometry.vertices[${vertexIndex}]`));
+    }
+    registerPaint(node.paint, `nodes[${index}].paint`);
+  });
+  document.assets.forEach((asset, index) => register('asset', asset.id, `assets[${index}]`));
+  document.bones.forEach((bone, index) => register('bone', bone.id, `bones[${index}]`));
+  document.meshes.forEach((mesh, index) => {
+    register('mesh', mesh.id, `meshes[${index}]`);
+    mesh.vertices.forEach((vertex, vertexIndex) => register('meshVertex', vertex.id, `meshes[${index}].vertices[${vertexIndex}]`));
+    registerPaint(mesh.paint, `meshes[${index}].paint`);
+  });
+  document.controls.forEach((control, index) => register('control', control.id, `controls[${index}]`));
+  document.constraints.forEach((constraint, index) => register('constraint', constraint.id, `constraints[${index}]`));
+  document.timelines.forEach((timeline, timelineIndex) => {
+    register('timeline', timeline.id, `timelines[${timelineIndex}]`);
+    timeline.tracks.forEach((track, trackIndex) => {
+      register('track', track.id, `timelines[${timelineIndex}].tracks[${trackIndex}]`);
+      track.keyframes.forEach((keyframe, keyframeIndex) => register(
+        'keyframe', keyframe.id, `timelines[${timelineIndex}].tracks[${trackIndex}].keyframes[${keyframeIndex}]`,
+      ));
+    });
+  });
+  document.stateMachines.forEach((machine, machineIndex) => {
+    register('stateMachine', machine.id, `stateMachines[${machineIndex}]`);
+    machine.inputs.forEach((input, inputIndex) => register('machineInput', input.id, `stateMachines[${machineIndex}].inputs[${inputIndex}]`));
+    machine.states.forEach((state, stateIndex) => register('machineState', state.id, `stateMachines[${machineIndex}].states[${stateIndex}]`));
+    machine.transitions.forEach((transition, transitionIndex) => {
+      register('machineTransition', transition.id, `stateMachines[${machineIndex}].transitions[${transitionIndex}]`);
+      transition.conditions.forEach((condition, conditionIndex) => register(
+        'machineCondition', condition.id,
+        `stateMachines[${machineIndex}].transitions[${transitionIndex}].conditions[${conditionIndex}]`,
+      ));
+    });
+  });
+  document.listeners.forEach((listener, index) => register('listener', listener.id, `listeners[${index}]`));
+}
+
 export function normalizeDocument(input) {
   if (!input || typeof input !== 'object') throw new TypeError('Veyra document must be an object.');
   if (input.format !== VEYRA_FORMAT) throw new TypeError(`Expected format "${VEYRA_FORMAT}".`);
@@ -1381,7 +1450,7 @@ export function normalizeDocument(input) {
     listenerIds.add(listener.id);
   }
 
-  return {
+  const document = {
     format: VEYRA_FORMAT,
     version: listeners.length > 0 ? VEYRA_LISTENER_VERSION : VEYRA_VERSION,
     conventions,
@@ -1405,6 +1474,8 @@ export function normalizeDocument(input) {
     stateMachines,
     listeners,
   };
+  validateStableIdentities(document);
+  return document;
 }
 
 export function semanticFor(document, nodeId, create = false) {
@@ -1434,6 +1505,70 @@ export function controlById(document, controlId) {
 
 export function constraintById(document, constraintId) {
   return document.constraints.find((constraint) => constraint.id === constraintId) || null;
+}
+
+export function assetById(document, assetId) {
+  return document.assets.find((asset) => asset.id === assetId) || null;
+}
+
+export function meshVertexById(document, vertexId) {
+  for (const mesh of document.meshes) {
+    const vertex = mesh.vertices.find((candidate) => candidate.id === vertexId);
+    if (vertex) return vertex;
+  }
+  return null;
+}
+
+export function gradientStopById(document, stopId) {
+  for (const node of document.nodes) {
+    const stop = node.paint?.fill?.stops?.find((candidate) => candidate.id === stopId);
+    if (stop) return stop;
+  }
+  for (const mesh of document.meshes) {
+    const stop = mesh.paint?.fill?.stops?.find((candidate) => candidate.id === stopId);
+    if (stop) return stop;
+  }
+  return null;
+}
+
+export function trackById(document, trackId) {
+  for (const timeline of document.timelines) {
+    const track = timeline.tracks.find((candidate) => candidate.id === trackId);
+    if (track) return track;
+  }
+  return null;
+}
+
+export function keyframeById(document, keyframeId) {
+  for (const timeline of document.timelines) {
+    for (const track of timeline.tracks) {
+      const keyframe = track.keyframes.find((candidate) => candidate.id === keyframeId);
+      if (keyframe) return keyframe;
+    }
+  }
+  return null;
+}
+
+export function machineTransitionById(document, machineId, transitionId) {
+  const machine = machineById(document, machineId);
+  return machine?.transitions.find((transition) => transition.id === transitionId) || null;
+}
+
+export function machineConditionById(document, machineId, conditionId) {
+  const machine = machineById(document, machineId);
+  for (const transition of machine?.transitions || []) {
+    const condition = transition.conditions.find((candidate) => candidate.id === conditionId);
+    if (condition) return condition;
+  }
+  return null;
+}
+
+export function listenerById(document, listenerId) {
+  return (document.listeners || []).find((listener) => listener.id === listenerId) || null;
+}
+
+export function semanticRecordByTarget(document, nodeId) {
+  return semanticFor(document, nodeId);
 }
 
 export function childrenOf(document, parentId) {
