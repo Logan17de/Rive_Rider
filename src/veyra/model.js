@@ -1519,6 +1519,15 @@ export function meshVertexById(document, vertexId) {
   return null;
 }
 
+export function pathVertexById(document, vertexId) {
+  for (const node of document.nodes) {
+    if (node.type !== 'path') continue;
+    const vertex = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+    if (vertex) return vertex;
+  }
+  return null;
+}
+
 export function gradientStopById(document, stopId) {
   for (const node of document.nodes) {
     const stop = node.paint?.fill?.stops?.find((candidate) => candidate.id === stopId);

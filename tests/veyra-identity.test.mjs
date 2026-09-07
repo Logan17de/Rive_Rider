@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createDocument, createGradientStop, createKeyframe, createMesh, createNode, createStateMachine, createTimeline, createTrack, normalizeDocument, gradientStopById, keyframeById, machineConditionById, meshVertexById } from '../src/veyra/model.js';
+import { createDocument, createGradientStop, createKeyframe, createMesh, createNode, createStateMachine, createTimeline, createTrack, normalizeDocument, gradientStopById, keyframeById, machineConditionById, meshVertexById, pathVertexById } from '../src/veyra/model.js';
 import { createProjectManifest } from '../src/veyra/manifest.js';
 import { parseVeyra, serializeVeyra } from '../src/veyra/io.js';
 import { VeyraStore } from '../src/veyra/store.js';
@@ -47,6 +47,21 @@ const identityDocument = normalizeDocument(createDocument({
 }));
 assert.equal(gradientStopById(identityDocument, 'paint_stop_a').id, 'paint_stop_a');
 assert.equal(meshVertexById(identityDocument, 'identity_vertex_b').id, 'identity_vertex_b');
+const pathDocument = normalizeDocument(createDocument({
+  id: 'path_document',
+  nodes: [createNode('path', {
+    id: 'identity_path',
+    geometry: {
+      closed: true,
+      vertices: [
+        { id: 'identity_path_vertex', x: 0, y: 0 },
+        { id: 'identity_path_vertex_2', x: 10, y: 10 },
+      ],
+    },
+  })],
+}));
+assert.equal(pathVertexById(pathDocument, 'identity_path_vertex').id, 'identity_path_vertex');
+assert.equal(pathVertexById(pathDocument, 'missing_path_vertex'), null);
 
 const document = documentWithTimeline();
 const originalKeyframe = keyframeById(document, 'identity_keyframe');
