@@ -180,12 +180,12 @@ Prove at least:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Commit: d5b4e73
+- Commit: d5b4e73 (identity) + 246daea (pathVertexById correction) + 358da30 (handoff)
 - Changed files: docs/plan.md; src/veyra/manifest.js; src/veyra/model.js; src/veyra/references.js; src/veyra/store.js; src/veyra/summary.js; tests/fixtures/veyra/animated.veyra; tests/veyra-manifest.test.mjs; tests/veyra-identity.test.mjs; milestone.md (handoff status)
 - Tests added/changed: tests/veyra-identity.test.mjs plus persistent-ID fixture/manifest assertions
 - npm test: PASS — 21 of 21 suites passed
 - npm run check: PASS — 30 of 30 source files passed syntax check
-- Task-specific checks: keyframe create/edit/move/round-trip stability; deterministic legacy migration; timeline and machine/state/input rename stability; node listener-target stability; duplicate node/keyframe/entity rejection; manifest typed refs resolve by ID; gradient-stop/path-vertex/mesh-vertex lookup and refs
+- Task-specific checks: keyframe create/edit/move/round-trip stability; deterministic legacy migration; timeline and machine/state/input rename stability; node listener-target stability; duplicate node/keyframe/entity rejection; manifest typed refs resolve by ID; gradient-stop/path-vertex/mesh-vertex lookup and refs; `pathVertexById` regression
 - Persistence/migration impact: normalized legacy keyframes receive deterministic `keyframe_<trackId>_<index>` IDs; existing IDs are preserved through normalize/save/load and same-frame setKeyframe edits. Existing supported documents remain loadable; canonical JSON gains keyframe IDs.
 - AI/name-independence proof: manifest refs use persistent typed IDs for document, timeline, track, keyframe, state machine, machine entities, listeners, geometry vertices, and gradient stops; rename tests resolve graph relationships without human-name lookup.
 - Known limitations: value-only transforms/geometry/colors/condition values remain owner-addressed; semantic inference, aliases, universal metadata, resolver, dependency graph, and editor UI remain out of scope. Independent verification has not yet run.
