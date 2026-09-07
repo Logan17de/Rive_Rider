@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/apply-m1-semantics.yml'
       - 'scripts/apply-m1-semantics.py'
+      - 'scripts/migrate-m1-golden-fixtures.py'
   workflow_dispatch:
 
 permissions:
@@ -23,7 +24,9 @@ jobs:
         with:
           node-version: 22
       - name: Apply milestone patch
-        run: python3 scripts/apply-m1-semantics.py
+        run: |
+          python3 scripts/apply-m1-semantics.py
+          python3 scripts/migrate-m1-golden-fixtures.py
       - name: Run tests
         run: npm test
       - name: Run checks
@@ -32,7 +35,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/veyra tests/veyra-semantics.test.mjs milestone.md
+          git add src/veyra tests/veyra-semantics.test.mjs tests/fixtures/veyra milestone.md
           git diff --cached --check
           git commit -m "Implement M1 universal semantic metadata [m1-applied]"
           git push origin HEAD:main
