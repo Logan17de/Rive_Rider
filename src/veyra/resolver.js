@@ -32,6 +32,7 @@ export const VEYRA_RESOLVER_SCORING = Object.freeze({
   confirmedTag: 30,
   inferredTag: 20,
   structuralRelation: 35,
+  styleSimilarity: 12,
   relatedEntity: 25,
   spatialStructure: 30,
   displayNameHint: 40,
@@ -45,6 +46,7 @@ const DEFAULT_QUERY_LIMIT = 100;
 const DEFAULT_ALTERNATIVE_LIMIT = 5;
 const DEFAULT_MIN_CONFIDENCE = 0.25;
 const DEFAULT_AMBIGUITY_MARGIN = 0.05;
+const MAX_STYLE_SIMILARITY_LINKS_PER_ENTITY = 16;
 
 function refKey(ref) {
   return `${ref.kind}:${ref.id}`;
@@ -97,6 +99,28 @@ function stableObject(value) {
 
 function stableString(value) {
   return JSON.stringify(stableObject(value));
+}
+
+function paintStyleDescriptor(paint = {}) {
+  const fill = paint?.fill || {};
+  const fillDescriptor = Object.fromEntries(
+    Object.entries(fill)
+      .filter(([key]) => key !== 'stops')
+      .map(([key, value]) => [key, cloneValue(value)]),
+  );
+  if (Array.isArray(fill.stops)) {
+    fillDescriptor.stops = fill.stops.map((stop) => ({
+      offset: Number(stop.offset),
+      color: String(stop.color || '').toLowerCase(),
+      opacity: Number(stop.opacity),
+    })).sort((left, right) => left.offset - right.offset || stableString(left).localeCompare(stableString(right)));
+  }
+  const properties = stableObject({
+    fill: fillDescriptor,
+    stroke: String(paint?.stroke ?? '').toLowerCase(),
+    strokeWidth: Number.isFinite(Number(paint?.strokeWidth)) ? Number(paint.strokeWidth) : 0,
+  });
+  return { fingerprint: stableString(properties), properties };
 }
 
 function flattenCapabilities(value, prefix = '', output = new Set()) {
@@ -265,6 +289,35 @@ function applyMirroredPairs(entities, byKey, document) {
   }
 }
 
+function applyStyleSimilarity(entities, byKey) {
+  const groups = new Map();
+  for (const entity of entities) {
+    if (!['node', 'mesh'].includes(entity.kind) || !entity.style?.fingerprint) continue;
+    if (!groups.has(entity.style.fingerprint)) groups.set(entity.style.fingerprint, []);
+    groups.get(entity.style.fingerprint).push(entity);
+  }
+  for (const group of groups.values()) {
+    group.sort((left, right) => compareRefs(left.ref, right.ref));
+    if (group.length < 2) continue;
+    const detail = { fingerprint: group[0].style.fingerprint, basis: 'normalized-paint' };
+    if (group.length <= MAX_STYLE_SIMILARITY_LINKS_PER_ENTITY + 1) {
+      for (let leftIndex = 0; leftIndex < group.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < group.length; rightIndex += 1) {
+          link(byKey, group[leftIndex].ref, 'style_similar', group[rightIndex].ref, 'style_similar', detail, 'style');
+        }
+      }
+      continue;
+    }
+    const half = Math.floor(MAX_STYLE_SIMILARITY_LINKS_PER_ENTITY / 2);
+    for (let index = 0; index < group.length; index += 1) {
+      for (let offset = 1; offset <= half; offset += 1) {
+        const target = group[(index + offset) % group.length];
+        link(byKey, group[index].ref, 'style_similar', target.ref, 'style_similar', detail, 'style');
+      }
+    }
+  }
+}
+
 function buildIndexData(input) {
   const document = normalizeDocument(input);
   const evaluated = evaluateDocument(document);
@@ -287,13 +340,18 @@ function buildIndexData(input) {
   for (const node of document.nodes) {
     const evaluatedNode = evaluatedNodes.get(node.id);
     const nodeRef = createReference('node', node.id);
-    add(makeEntity(nodeRef, node, {
+    const nodeEntity = add(makeEntity(nodeRef, node, {
       type: node.type,
       displayName: node.name,
       geometry: evaluatedNode ? { localBounds: localBounds(evaluatedNode), worldBounds: worldBoundsForNode(evaluatedNode) } : null,
     }));
     const paintRef = createPaintRef('node', node.id);
-    add(makeEntity(paintRef, node.paint, { type: node.paint.fill?.type || 'paint' }));
+    const paintEntity = add(makeEntity(paintRef, node.paint, { type: node.paint.fill?.type || 'paint' }));
+    if (node.type !== 'group') {
+      const style = paintStyleDescriptor(node.paint);
+      nodeEntity.style = cloneValue(style);
+      paintEntity.style = cloneValue(style);
+    }
     if (node.type === 'path') {
       for (const vertex of node.geometry.vertices || []) {
         const point = evaluatedNode ? transformPoint(evaluatedNode.worldMatrix, { x: vertex.x, y: vertex.y }) : { x: vertex.x, y: vertex.y };
@@ -319,11 +377,14 @@ function buildIndexData(input) {
   const evaluatedMeshes = new Map((evaluated.meshes || []).map((mesh) => [mesh.id, mesh]));
   for (const mesh of document.meshes) {
     const state = evaluatedMeshes.get(mesh.id);
-    add(makeEntity(createReference('mesh', mesh.id), mesh, {
+    const meshEntity = add(makeEntity(createReference('mesh', mesh.id), mesh, {
       type: 'mesh', displayName: mesh.name,
       geometry: state ? { worldBounds: boundsFromPoints(state.deformedVertices || []) } : null,
     }));
-    add(makeEntity(createPaintRef('mesh', mesh.id), mesh.paint, { type: mesh.paint.fill?.type || 'paint' }));
+    const meshPaintEntity = add(makeEntity(createPaintRef('mesh', mesh.id), mesh.paint, { type: mesh.paint.fill?.type || 'paint' }));
+    const style = paintStyleDescriptor(mesh.paint);
+    meshEntity.style = cloneValue(style);
+    meshPaintEntity.style = cloneValue(style);
     const stateVertices = new Map((state?.deformedVertices || []).map((vertex) => [vertex.id, vertex]));
     for (const vertex of mesh.vertices || []) {
       const point = stateVertices.get(vertex.id) || vertex;
@@ -483,15 +544,25 @@ function buildIndexData(input) {
     const semanticRef = createReference('semanticRecord', record.id);
     if (targetEntity) link(byKey, semanticRef, 'describes', record.target, 'described_by_semantic');
     for (const relation of record.relations || []) {
+      const semanticDetail = {
+        predicate: relation.predicate,
+        semanticId: record.id,
+        status: record.status,
+        source: record.provenance?.source ?? null,
+        confidence: record.provenance?.confidence ?? null,
+      };
       if (targetEntity && byKey.has(refKey(relation.target))) {
-        addRelationship(targetEntity, relation.predicate, relation.target, { semanticId: record.id, status: record.status }, 'semantic');
+        addRelationship(targetEntity, relation.predicate, relation.target, semanticDetail, 'semantic');
       }
-      if (byKey.has(refKey(relation.target))) addRelationship(byKey.get(refKey(relation.target)), 'semantic_relation_from', record.target, { predicate: relation.predicate, semanticId: record.id }, 'semantic');
+      if (byKey.has(refKey(relation.target))) {
+        addRelationship(byKey.get(refKey(relation.target)), 'semantic_relation_from', record.target, semanticDetail, 'semantic');
+      }
     }
   }
 
   applySpatialDescriptors(entities, byKey, document);
   applyMirroredPairs(entities, byKey, document);
+  applyStyleSimilarity(entities, byKey);
 
   for (const entity of entities) {
     entity.semantics.sort((left, right) => left.id.localeCompare(right.id));
@@ -538,6 +609,8 @@ function semanticMatches(entity, semanticQuery, evidence) {
     if (sources.length && !sources.includes(normalizedToken(record.provenance?.source))) return false;
     return true;
   });
+  const hasSemanticConstraint = aliases.length || roles.length || tags.length || statuses.length || sources.length;
+  if (hasSemanticConstraint && eligible.length === 0) return false;
   if (aliases.length && !eligible.some((record) => record.aliases.some((alias) => aliases.includes(normalizedToken(alias.value))))) return false;
   if (roles.length && !eligible.some((record) => roles.includes(normalizedToken(record.canonicalRole)))) return false;
   if (tags.length && !tags.every((tag) => eligible.some((record) => record.tags.some((value) => normalizedToken(value) === tag)))) return false;
@@ -625,6 +698,13 @@ function semanticWeight(record) {
   return 0;
 }
 
+function semanticRelationWeight(detail = {}) {
+  return semanticWeight({
+    status: detail.status,
+    provenance: { confidence: detail.confidence },
+  });
+}
+
 function addEvidence(output, kind, score, detail = {}) {
   if (!(score > 0)) return;
   output.score += score;
@@ -671,10 +751,30 @@ function scoreCandidate(entity, intent) {
       && (!relatedTo || referencesEqual(item.target, relatedTo)));
     for (const item of matching) {
       if (item.source === 'semantic') {
-        const semanticId = item.detail?.semanticId;
-        const record = entity.semantics.find((candidate) => candidate.id === semanticId);
-        const weight = record ? semanticWeight(record) : 1;
-        addEvidence(output, 'semantic-relation', (record?.status === 'inferred' ? VEYRA_RESOLVER_SCORING.inferredRelation : VEYRA_RESOLVER_SCORING.confirmedRelation) * weight, { relation: item.relation, target: item.target, semanticId: semanticId || null });
+        const detail = item.detail || {};
+        const status = normalizedToken(detail.status);
+        const provenanceSource = normalizedToken(detail.source);
+        if (statuses.length && !statuses.includes(status)) continue;
+        if (sources.length && !sources.includes(provenanceSource)) continue;
+        const weight = semanticRelationWeight(detail);
+        const baseScore = status === 'inferred'
+          ? VEYRA_RESOLVER_SCORING.inferredRelation
+          : VEYRA_RESOLVER_SCORING.confirmedRelation;
+        addEvidence(output, 'semantic-relation', baseScore * weight, {
+          relation: item.relation,
+          predicate: detail.predicate || item.relation,
+          target: item.target,
+          semanticId: detail.semanticId || null,
+          status: detail.status || null,
+          source: detail.source || null,
+          confidence: detail.confidence ?? null,
+        });
+      } else if (item.source === 'style') {
+        addEvidence(output, 'style-similarity', VEYRA_RESOLVER_SCORING.styleSimilarity, {
+          relation: item.relation,
+          target: item.target,
+          detail: item.detail || null,
+        });
       } else {
         addEvidence(output, 'structural-relationship', relation ? VEYRA_RESOLVER_SCORING.structuralRelation : VEYRA_RESOLVER_SCORING.relatedEntity, { relation: item.relation, target: item.target, detail: item.detail || null });
       }
@@ -696,6 +796,11 @@ function scoreCandidate(entity, intent) {
     addEvidence(output, 'display-name-hint', VEYRA_RESOLVER_SCORING.displayNameHint, { value: String(intent.displayName) });
   }
   return output;
+}
+
+function relativeRawScoreGap(top, candidate) {
+  if (!(top?.score > 0) || !(candidate?.score >= 0)) return Infinity;
+  return Math.max(0, (top.score - candidate.score) / top.score);
 }
 
 function publicCandidate(scored) {
@@ -760,11 +865,13 @@ export function resolveSemantic(document, rawIntent, options = {}) {
     return { status: 'notFound', reason: `Best candidate confidence ${top.confidence} is below minimum ${minConfidence}.`, alternatives: candidates.slice(0, alternativesLimit) };
   }
   const second = candidates[1];
-  if (second && second.confidence >= minConfidence && top.confidence - second.confidence <= ambiguityMargin) {
+  if (second && second.confidence >= minConfidence && relativeRawScoreGap(scored[0], scored[1]) <= ambiguityMargin) {
     return {
       status: 'ambiguous',
-      candidates: candidates.filter((candidate) => top.confidence - candidate.confidence <= ambiguityMargin).slice(0, Math.max(2, alternativesLimit || 2)),
-      reason: `Top candidates are within ambiguity margin ${ambiguityMargin}; resolver refuses to guess.`,
+      candidates: candidates.filter((candidate, index) => candidate.confidence >= minConfidence
+        && relativeRawScoreGap(scored[0], scored[index]) <= ambiguityMargin)
+        .slice(0, Math.max(2, alternativesLimit || 2)),
+      reason: `Top candidates are within relative raw-score ambiguity margin ${ambiguityMargin}; resolver refuses to guess.`,
     };
   }
   return {

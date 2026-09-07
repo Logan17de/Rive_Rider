@@ -22,7 +22,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 # MILESTONE M2 — Name-Independent Semantic Indexer & Resolver — CORRECTION PASS
 
-**Status:** `CORRECTIONS REQUIRED`
+**Status:** `AWAITING VERIFICATION`
 
 ## Verification result
 
@@ -228,16 +228,16 @@ M2 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Semantic filter proof:
-- Forward/reverse semantic relation provenance proof:
-- Saturated-score ambiguity proof:
-- Paint/style similarity proof:
-- Name-independence proof:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Correction commits: Implement M2 resolver correctness corrections [m2-corrected]
+- Changed files: src/veyra/resolver.js, tests/veyra-resolver-corrections.test.mjs, milestone.md
+- Tests added/changed: dedicated correction suite covering semantic status/source-only filters, same-record status+source eligibility, forward/reverse semantic-relation provenance and rejected/stale/inferred/confirmed scoring, raw-score ambiguity above saturation, bounded paint/style similarity, name/reorder invariance, semantic-over-style precedence, and read-only ambiguity
+- npm test: PASS (required by correction workflow before commit)
+- npm run check: PASS (required by correction workflow before commit)
+- Semantic filter proof: any supplied semantic qualifier now requires a non-empty eligible semantic-record set; status/source-only filters exclude entities without matching records, and combined status+source filters are applied to the same eligible records
+- Forward/reverse semantic relation provenance proof: both directions carry semanticId/status/source/confidence in edge detail; rejected/stale score zero, inferred uses the same provenance confidence weight, and confirmed uses the same confirmed relation score regardless of traversal direction
+- Saturated-score ambiguity proof: public confidence remains bounded while ambiguity uses relative raw-score gaps; materially different >100 scores resolve to the stronger candidate, equal and configured-near candidates remain ambiguous, and deterministic ordering is unchanged
+- Paint/style similarity proof: current node/mesh paint is canonicalized into a deterministic descriptor/fingerprint; equivalent styles receive explicit bounded style_similar edges scored at weak styleSimilarity weight, materially different styles do not match, and style evidence cannot override confirmed semantics or invent meaning for symmetric unlabeled entities
+- Name-independence proof: style fingerprints and relationships exclude display names; rename/reorder tests preserve style evidence and existing M2 name-invariance tests remain green
+- Suggestions added to `suggestions`: none
+- Known limitations: style similarity is intentionally exact over normalized current paint fields rather than perceptual similarity; large same-style groups expose a deterministic maximum of 16 similarity links per entity
 ```
