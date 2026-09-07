@@ -72,9 +72,11 @@ in T1 and independent acceptance is still pending. This section remains open
 until the committed tree passes both standard commands and the acceptance
 mutation proof.
 
-**Owner:** Asha (implementation). **Acceptance gate:** Sheema (independent,
-adversarial — does not implement, only verifies against the brief).
-**Scope ruling / unblocking:** Akash. **Review:** Logan.
+**Implementation:** Logan (worker). **Independent acceptance:** Alex (tester)
+— verifies and never implements what he accepts. **Scope / debate:** Asha
+(leader) and Sara (debater); Asha rules after Sara answers. The earlier Owner,
+Acceptance gate, Scope ruling, and Review names belonged to a prior session and
+are superseded.
 
 ### 4.1 What's landed so far (not yet accepted)
 | Commit / state | What it did |
