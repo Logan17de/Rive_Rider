@@ -1,0 +1,23 @@
+Verya milestone suggestions
+============================
+
+Current milestone
+-----------------
+- Complete and independently verify M0.1: stable typed identity for every current first-class persistent entity.
+- Treat keyframe IDs as persistent identity: create, move, rename, normalize legacy documents, and round-trip without changing IDs.
+- Keep human display names separate from references; reject duplicate IDs and resolve manifest references without name lookup.
+- Preserve T4b’s paused work in its stash until M0.1 is accepted and explicitly reauthorized.
+
+Next suggestions
+----------------
+1. After M0.1 acceptance, independently verify and reauthorize the paused headless Node API/CLI work before committing it.
+2. Complete Bézier/path hit-testing as a separate bounded milestone: implicit fill closure, transformed non-scaling strokes, deterministic flattening, and near-boundary tests.
+3. Add path-topology commands (`addVertex`/`removeVertex`) and a mechanical editor-to-command parity audit so every human authoring operation is AI-addressable.
+4. Add pointer-events semantics and the remaining opacity/ancestor regressions without coupling opacity to hit participation.
+5. Extend state-machine authoring/runtime and editor parity only after the identity, headless, and geometry contracts are independently verified.
+
+Guardrails
+----------
+- Keep `milestone.md` as the authoritative one-TODO execution queue.
+- Do not put future TODOs into `milestone.md`; these are suggestions only.
+- Preserve stable IDs and human names as separate contracts.
