@@ -20,7 +20,9 @@
  *
  * This test calls those SAME returned handler functions directly with a real
  * `VeyraStore`, spyable fake events, and a fake canvas/renderer-shaped
- * dependency set — proving the real code path, not a reimplementation.
+ * dependency set — proving the real code path, not a reimplementation. T2
+ * additionally composes the real interaction dispatcher through a recording
+ * transport port to prove that a click reaches actual playback operations.
  */
 
 import assert from 'node:assert/strict';
@@ -29,6 +31,7 @@ import {
   createDocument, createNode, createTimeline, createPointerListener, createStateMachine, normalizeDocument,
 } from '../src/veyra/model.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from '../src/veyra/shellBridge.js';
+import { createInteractionDispatcher } from '../src/veyra/interactionTransport.js';
 import { evaluateDocument } from '../src/veyra/evaluation.js';
 
 const checks = [];
@@ -105,15 +108,20 @@ function fakeCanvas({ left = 0, top = 0, width = 800, height = 600 } = {}) {
   };
 }
 
-function makeHandlers({ store, canvas, tool = 'select', preview = true, panGesture = false, playbackEvents, viewCenter = null, zoom = 1 }) {
+function makeHandlers({ store, canvas, tool = 'select', preview = true, panGesture = false, playbackEvents, viewCenter = null, zoom = 1, transport = null }) {
   let evaluatedScene = evaluateDocument(store.document);
   let interactionSceneRevision = 0;
   const diagnostics = [];
+  const interactionDispatcher = transport
+    ? createInteractionDispatcher({ transport, onDiagnostic: (message) => diagnostics.push(message) })
+    : null;
   const interactionBridge = createShellInteractionBridge({
     document: store.document,
     onDiagnostic: (message) => diagnostics.push(message),
     onIntent: (intent) => {
-      if (intent.kind === 'transport') {
+      if (interactionDispatcher) {
+        interactionDispatcher.dispatch(intent);
+      } else if (intent.kind === 'transport') {
         playbackEvents.push(intent);
       } else if (intent.kind === 'runtime') {
         diagnostics.push(`Interaction runtime intent requires a state-machine bridge: ${intent.op}`);
@@ -138,7 +146,99 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
     getArtboardSize: () => ({ width: store.document.artboard.width, height: store.document.artboard.height }),
     onNoHit: () => diagnostics.push('No interaction target under pointer'),
   });
-  return { handlers, diagnostics, refreshScene, interactionBridge };
+  return { handlers, diagnostics, refreshScene, interactionBridge, interactionDispatcher };
+}
+
+/* ------------------------------------------------------------------ *
+ * T2: real handler → bridge → dispatcher → host transport composition.
+ * ------------------------------------------------------------------ */
+
+{
+  const { store } = buildFixture();
+  const calls = [];
+  const transport = {
+    hasTimeline: (timelineId) => store.document.timelines.some((timeline) => timeline.id === timelineId),
+    setActiveTimeline: (timelineId) => calls.push(['setActiveTimeline', timelineId]),
+    play: (options) => calls.push(['play', options]),
+    stop: () => calls.push(['stop']),
+    seek: (frame) => calls.push(['seek', frame]),
+  };
+  const canvas = fakeCanvas();
+  const { handlers, diagnostics, interactionDispatcher } = makeHandlers({
+    store, canvas, transport,
+  });
+  const beforeDocument = store.document;
+  const beforeHistoryLength = store.commandHistory.length;
+  const assertUntouched = () => {
+    assert.strictEqual(store.document, beforeDocument, 'transport intents do not replace the document');
+    assert.equal(store.commandHistory.length, beforeHistoryLength, 'transport intents do not write command history');
+  };
+
+  check('[T2] real preview handler composition reaches transport in ordered set-active then play calls', () => {
+    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 140, clientY: 120 }));
+    assert.deepEqual(calls, [
+      ['setActiveTimeline', 'doorAnim'],
+      ['play', { restart: true }],
+    ], 'click reaches the host port with the exact playback order');
+    assertUntouched();
+  });
+
+  check('[T2] falsy intent is a no-op with no diagnostic or transport call', () => {
+    calls.length = 0;
+    diagnostics.length = 0;
+    const result = interactionDispatcher.dispatch(null);
+    assert.deepEqual(result, { transportApplied: false });
+    assert.deepEqual(calls, []);
+    assert.deepEqual(diagnostics, []);
+    assertUntouched();
+  });
+
+  check('[T2] preview miss produces no transport calls', () => {
+    calls.length = 0;
+    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 5, clientY: 5 }));
+    assert.deepEqual(calls, [], 'a miss never reaches the transport port');
+    assertUntouched();
+  });
+
+  check('[T2] unknown timeline diagnoses and never sets active timeline or plays', () => {
+    calls.length = 0;
+    diagnostics.length = 0;
+    const result = interactionDispatcher.dispatch({ kind: 'transport', op: 'play', timelineId: 'missingTimeline' });
+    assert.deepEqual(result, { transportApplied: false });
+    assert.deepEqual(calls, [], 'unknown timeline is rejected before setActiveTimeline');
+    assert.deepEqual(diagnostics, ['Interaction target timeline not found: missingTimeline']);
+    assertUntouched();
+  });
+
+  check('[T2] non-finite seek diagnoses and never seeks', () => {
+    calls.length = 0;
+    diagnostics.length = 0;
+    const result = interactionDispatcher.dispatch({ kind: 'transport', op: 'seek', timelineId: 'doorAnim', value: Number.NaN });
+    assert.deepEqual(result, { transportApplied: true });
+    assert.deepEqual(calls, [['setActiveTimeline', 'doorAnim']], 'invalid seek does not call seek');
+    assert.deepEqual(diagnostics, ['Interaction seek requires a finite frame value']);
+    assertUntouched();
+  });
+
+  check('[T2] runtime intent diagnoses and never reaches transport', () => {
+    calls.length = 0;
+    diagnostics.length = 0;
+    const result = interactionDispatcher.dispatch({ kind: 'runtime', op: 'fire' });
+    assert.deepEqual(result, { transportApplied: false });
+    assert.deepEqual(calls, [], 'runtime intent has no transport calls');
+    assert.deepEqual(diagnostics, ['Interaction runtime intent requires a state-machine bridge: fire']);
+    assertUntouched();
+  });
+
+  check('[T2] unknown transport op preserves active assignment without diagnostic', () => {
+    calls.length = 0;
+    diagnostics.length = 0;
+    const result = interactionDispatcher.dispatch({ kind: 'transport', op: 'future-op', timelineId: 'doorAnim' });
+    assert.deepEqual(result, { transportApplied: true });
+    assert.deepEqual(calls, [['setActiveTimeline', 'doorAnim']]);
+    assert.deepEqual(diagnostics, [], 'unknown transport operations remain silent per the existing host semantics');
+    assertUntouched();
+  });
 }
 
 /* ------------------------------------------------------------------ *

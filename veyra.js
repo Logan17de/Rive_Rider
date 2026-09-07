@@ -50,6 +50,7 @@ import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
+import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
@@ -151,6 +152,16 @@ function restoredDocument() {
 const restored = restoredDocument();
 const store = new VeyraStore(restored || createStarterDocument());
 if (restored) savedRevision = -1;
+const interactionDispatcher = createInteractionDispatcher({
+  transport: {
+    hasTimeline: (timelineId) => !!timelineById(store.document, timelineId),
+    setActiveTimeline: (timelineId) => { activeTimelineId = timelineId; },
+    play: (options) => playAnimation(options),
+    stop: () => stopAnimation(),
+    seek: (frame) => setCurrentFrame(frame),
+  },
+  onDiagnostic: (message) => showToast(message, true),
+});
 const interactionBridge = createShellInteractionBridge({
   document: store.document,
   onDiagnostic: (message) => showToast(message, true),
@@ -1575,24 +1586,8 @@ function stopAnimation() {
 }
 
 function dispatchInteractionIntent(intent) {
-  if (!intent) return;
-  if (intent.kind === 'transport') {
-    const timelineId = intent.timelineId;
-    if (!timelineById(store.document, timelineId)) {
-      showToast(`Interaction target timeline not found: ${timelineId}`, true);
-      return;
-    }
-    activeTimelineId = timelineId;
-    if (intent.op === 'play') playAnimation({ restart: true });
-    else if (intent.op === 'stop') stopAnimation();
-    else if (intent.op === 'seek' && Number.isFinite(intent.value)) setCurrentFrame(intent.value);
-    else if (intent.op === 'seek') showToast('Interaction seek requires a finite frame value', true);
-    renderTimeline();
-    return;
-  }
-  if (intent.kind === 'runtime') {
-    showToast(`Interaction runtime intent requires a state-machine bridge: ${intent.op}`, true);
-  }
+  const result = interactionDispatcher.dispatch(intent);
+  if (result.transportApplied) renderTimeline();
 }
 
 function recordKeyframeFor(address) {
