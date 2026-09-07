@@ -14,3 +14,11 @@ export {
   createProjectManifest,
   serializeProjectManifest,
 } from './veyra/manifest.js';
+
+export {
+  VEYRA_RESOLVER_CAPABILITIES,
+  VEYRA_RESOLVER_SCORING,
+  buildSemanticIndex,
+  queryEntities,
+  resolveSemantic,
+} from './veyra/resolver.js';

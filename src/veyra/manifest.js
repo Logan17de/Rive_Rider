@@ -22,6 +22,7 @@ import {
 } from './references.js';
 import { VEYRA_COMMAND_TABLE } from './commands.js';
 import { createSceneSummary } from './summary.js';
+import { VEYRA_RESOLVER_CAPABILITIES, VEYRA_RESOLVER_SCORING } from './resolver.js';
 
 export const VEYRA_MANIFEST_FORMAT = 'veyra-project-manifest';
 export const VEYRA_MANIFEST_VERSION = 1;
@@ -43,6 +44,9 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'semantics.universal-read',
   'semantics.transactional-write',
   'semantics.typed-relations',
+  'semantics.indexed-query',
+  'semantics.deterministic-resolution',
+  'semantics.name-independent',
 ]);
 
 function projectCapabilities(document) {
@@ -183,6 +187,16 @@ function semanticActionRefs() {
 function authoringContract() {
   return {
 
+    semanticResolver: {
+      functions: [...VEYRA_RESOLVER_CAPABILITIES.functions],
+      outcomes: [...VEYRA_RESOLVER_CAPABILITIES.outcomes],
+      displayNamePolicy: VEYRA_RESOLVER_CAPABILITIES.displayNamePolicy,
+      deterministic: VEYRA_RESOLVER_CAPABILITIES.deterministic,
+      readOnly: VEYRA_RESOLVER_CAPABILITIES.readOnly,
+      evidenceRequired: VEYRA_RESOLVER_CAPABILITIES.evidenceRequired,
+      scoring: { ...VEYRA_RESOLVER_SCORING },
+      identity: 'stable typed refs + semantic/structural evidence; display names contribute zero unless explicitly requested',
+    },
     semanticRecord: {
       required: ['id', 'target', 'status'],
       target: { kind: 'typedReference', kinds: [...VEYRA_SEMANTIC_CAPABILITIES.targetKinds] },

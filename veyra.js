@@ -49,6 +49,7 @@ import { VeyraStore } from './src/veyra/store.js';
 import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
+import { buildSemanticIndex, queryEntities, resolveSemantic } from './src/veyra/resolver.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
 
@@ -2400,6 +2401,9 @@ function machineRuntime(machineId) {
 
 globalThis.veyra = Object.freeze({
   getSceneSummary: (options = {}) => createSceneSummary(store.document, options),
+  getSemanticIndex: (options = {}) => buildSemanticIndex(store.document, options),
+  queryEntities: (query = {}, options = {}) => queryEntities(store.document, query, options),
+  resolveSemantic: (intent, options = {}) => resolveSemantic(store.document, intent, options),
   getDocument: () => cloneValue(store.document),
   getEvaluatedScene: () => cloneValue(evaluateDocument(store.document)),
   readProperty: (address) => readProperty(store.document, address),
