@@ -1,4 +1,4 @@
-import { localBounds } from './geometry.js';
+import { localBounds, regularPolygonPoints, starPoints } from './geometry.js';
 import { referenceId } from './references.js';
 import { transformMatrix } from './contracts.js';
 
@@ -28,6 +28,90 @@ function inverse(matrix) {
 
 function apply(matrix, point) {
   return { x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] };
+}
+
+function screenPoint(worldPoint, viewport) {
+  return {
+    x: (worldPoint.x - viewport.centerX) * viewport.zoom + viewport.width / 2,
+    y: (worldPoint.y - viewport.centerY) * viewport.zoom + viewport.height / 2,
+  };
+}
+
+function polygonPoints(node) {
+  if (node.type === 'polygon') {
+    return regularPolygonPoints(node.geometry.radius, node.geometry.sides);
+  }
+  if (node.type === 'star') {
+    return starPoints(node.geometry.outerRadius, node.geometry.innerRadius, node.geometry.points);
+  }
+  return null;
+}
+
+function fillEnabled(node) {
+  const fill = node.paint?.fill;
+  return !(fill === 'none' || (fill && typeof fill === 'object' && fill.type === 'solid' && fill.color === 'none'));
+}
+
+function strokeEnabled(node) {
+  const stroke = node.paint?.stroke;
+  return stroke !== 'none' && Number.isFinite(Number(node.paint?.strokeWidth)) && Number(node.paint.strokeWidth) > 0;
+}
+
+function pointOnSegment(point, start, end, epsilon = 1e-9) {
+  const cross = (point.x - start.x) * (end.y - start.y) - (point.y - start.y) * (end.x - start.x);
+  if (Math.abs(cross) > epsilon) return false;
+  return point.x >= Math.min(start.x, end.x) - epsilon
+    && point.x <= Math.max(start.x, end.x) + epsilon
+    && point.y >= Math.min(start.y, end.y) - epsilon
+    && point.y <= Math.max(start.y, end.y) + epsilon;
+}
+
+// SVG's default fill-rule is nonzero, rather than evenodd. Winding-number
+// containment preserves that rule for polygon and star geometry.
+function nonzeroContains(point, points) {
+  let winding = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const start = points[index];
+    const end = points[(index + 1) % points.length];
+    if (pointOnSegment(point, start, end)) return true;
+    if (start.y <= point.y) {
+      if (end.y > point.y && (end.x - start.x) * (point.y - start.y) - (point.x - start.x) * (end.y - start.y) > 0) winding += 1;
+    } else if (end.y <= point.y && (end.x - start.x) * (point.y - start.y) - (point.x - start.x) * (end.y - start.y) < 0) {
+      winding -= 1;
+    }
+  }
+  return winding !== 0;
+}
+
+function distanceSquaredToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= 1e-18) {
+    const px = point.x - start.x;
+    const py = point.y - start.y;
+    return px * px + py * py;
+  }
+  const projection = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  const nearestX = start.x + projection * dx;
+  const nearestY = start.y + projection * dy;
+  const px = point.x - nearestX;
+  const py = point.y - nearestY;
+  return px * px + py * py;
+}
+
+function hitPolygon(node, localPoint, matrix, screen, viewport) {
+  const points = polygonPoints(node);
+  if (!points || points.length < 3) return false;
+  if (fillEnabled(node) && nonzeroContains(localPoint, points)) return true;
+  if (!strokeEnabled(node)) return false;
+  const screenPoints = points.map((point) => screenPoint(apply(matrix, point), viewport));
+  const strokeRadius = Math.abs(Number(node.paint.strokeWidth)) / 2;
+  const threshold = strokeRadius * strokeRadius + 1e-7;
+  for (let index = 0; index < screenPoints.length; index += 1) {
+    if (distanceSquaredToSegment(screen, screenPoints[index], screenPoints[(index + 1) % screenPoints.length]) <= threshold) return true;
+  }
+  return false;
 }
 
 function worldMatrices(document) {
@@ -77,16 +161,24 @@ export function hitTestPoint(point, document, viewport = {}) {
   const height = finite(viewport.height, finite(document.artboard?.height, 0));
   const centerX = finite(viewport.centerX, finite(viewport.panX, width / 2));
   const centerY = finite(viewport.centerY, finite(viewport.panY, height / 2));
+  const screen = { x: finite(point.x), y: finite(point.y) };
   const worldPoint = {
-    x: (finite(point.x) - width / 2) / zoom + centerX,
-    y: (finite(point.y) - height / 2) / zoom + centerY,
+    x: (screen.x - width / 2) / zoom + centerX,
+    y: (screen.y - height / 2) / zoom + centerY,
   };
+  const viewportTransform = { width, height, zoom, centerX, centerY };
   const { byId, resolve } = worldMatrices(document);
   for (let index = document.nodes.length - 1; index >= 0; index -= 1) {
     const node = document.nodes[index];
     if (!visibleThroughAncestors(node, byId) || node.type === 'group') continue;
-    const matrix = inverse(resolve(node));
-    if (matrix && inside(node, apply(matrix, worldPoint))) return { kind: 'node', id: node.id };
+    const worldMatrix = resolve(node);
+    const matrix = inverse(worldMatrix);
+    if (!matrix) continue;
+    const localPoint = apply(matrix, worldPoint);
+    const hit = node.type === 'polygon' || node.type === 'star'
+      ? hitPolygon(node, localPoint, worldMatrix, screen, viewportTransform)
+      : inside(node, localPoint);
+    if (hit) return { kind: 'node', id: node.id };
   }
   return null;
 }

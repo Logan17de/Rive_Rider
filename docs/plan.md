@@ -160,10 +160,11 @@ re-verified as a full green battery before that status changes.
 
 These are real, known, and intentionally **not** blocking current work:
 
-- **Hit-testing geometry:** only ellipses get exact hit-testing; every other
-  shape (star, polygon, custom path) hit-tests against its axis-aligned
-  bounding box. A star's empty bbox corner currently registers as a hit.
-  Not fixed yet; not part of this milestone.
+- **Hit-testing geometry:** B1 gives polygons and stars exact nonzero fill
+  containment plus straight-edge stroke-band hits in transformed screen space;
+  rectangles and ellipses retain their existing exact tests. Custom Bézier paths
+  intentionally remain on axis-aligned bounds until B2, including the starter's
+  open, stroke-only mouth path. Path flattening is a separate known gap.
 - **Runtime API robustness:** `resolveListenerIntents`/`createListenerResolver`
   silently ignore an unrecognized option key instead of throwing. Found when
   the leader passed a plausible-but-wrong `resolver:` option and got

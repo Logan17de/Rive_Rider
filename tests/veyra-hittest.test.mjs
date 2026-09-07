@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createDocument, createNode, normalizeDocument } from '../src/veyra/model.js';
 import { hitTestPoint } from '../src/veyra/hitTest.js';
+import { regularPolygonPoints, starPoints } from '../src/veyra/geometry.js';
+import { transformMatrix } from '../src/veyra/contracts.js';
 
 const document = normalizeDocument(createDocument({
   nodes: [
@@ -54,5 +56,78 @@ assert.deepEqual(
   { kind: 'node', id: 'transparentHitTarget' },
   'opacity zero does not disable an explicit hit target',
 );
+
+// B1: polygon and star fills use SVG's nonzero winding region rather than the
+// local bounding box. The corners below are outside the rendered geometry.
+const polygonDocument = normalizeDocument(createDocument({
+  nodes: [createNode('polygon', {
+    id: 'diamond',
+    transform: { x: 200, y: 100 },
+    geometry: { radius: 50, sides: 4 },
+  })],
+}));
+assert.deepEqual(
+  hitTestPoint({ x: 200, y: 100 }, polygonDocument, viewport),
+  { kind: 'node', id: 'diamond' },
+  'polygon center is inside its nonzero fill region',
+);
+assert.equal(
+  hitTestPoint({ x: 249, y: 149 }, polygonDocument, viewport),
+  null,
+  'polygon bbox corner is not a false hit',
+);
+
+const starDocument = normalizeDocument(createDocument({
+  nodes: [createNode('star', {
+    id: 'star',
+    transform: { x: 350, y: 100 },
+    geometry: { outerRadius: 80, innerRadius: 34, points: 5 },
+  })],
+}));
+assert.deepEqual(
+  hitTestPoint({ x: 350, y: 100 }, starDocument, viewport),
+  { kind: 'node', id: 'star' },
+  'star center is inside its nonzero fill region',
+);
+assert.equal(
+  hitTestPoint({ x: 429, y: 179 }, starDocument, viewport),
+  null,
+  'star bbox corner is not a false hit',
+);
+
+// B1 stroke semantics are tested in screen space after a non-uniform, rotated
+// transform. This keeps the 10px non-scaling stroke band isotropic on screen.
+const strokedNode = createNode('polygon', {
+  id: 'strokedPolygon',
+  transform: { x: 600, y: 200, rotation: Math.PI / 6, scaleX: 2, scaleY: 0.5 },
+  geometry: { radius: 40, sides: 4 },
+  paint: { fill: 'none', stroke: '#000000', strokeWidth: 10 },
+});
+const strokedDocument = normalizeDocument(createDocument({ nodes: [strokedNode] }));
+const strokePoints = regularPolygonPoints(40, 4);
+const strokeMatrix = transformMatrix(strokedNode.transform);
+const toWorld = (point) => ({
+  x: strokeMatrix[0] * point.x + strokeMatrix[2] * point.y + strokeMatrix[4],
+  y: strokeMatrix[1] * point.x + strokeMatrix[3] * point.y + strokeMatrix[5],
+});
+const strokeStart = toWorld(strokePoints[0]);
+const strokeEnd = toWorld(strokePoints[1]);
+const strokeMidpoint = { x: (strokeStart.x + strokeEnd.x) / 2, y: (strokeStart.y + strokeEnd.y) / 2 };
+const strokeLength = Math.hypot(strokeEnd.x - strokeStart.x, strokeEnd.y - strokeStart.y);
+const normal = { x: -(strokeEnd.y - strokeStart.y) / strokeLength, y: (strokeEnd.x - strokeStart.x) / strokeLength };
+assert.deepEqual(
+  hitTestPoint({ x: strokeMidpoint.x + normal.x * 4, y: strokeMidpoint.y + normal.y * 4 }, strokedDocument, viewport),
+  { kind: 'node', id: 'strokedPolygon' },
+  'transformed polygon stroke is hittable within its screen-space band',
+);
+assert.equal(
+  hitTestPoint({ x: strokeMidpoint.x + normal.x * 8, y: strokeMidpoint.y + normal.y * 8 }, strokedDocument, viewport),
+  null,
+  'transformed polygon stroke rejects points outside its screen-space band',
+);
+
+// A star's alternating vertices exercise the same straight-edge winding and
+// stroke path without relying on its bbox approximation.
+assert.ok(starPoints(80, 34, 5).length === 10, 'star geometry remains a straight-edged ten-vertex polygon');
 
 console.log('All hit-test tests passed!');
