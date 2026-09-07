@@ -11,242 +11,180 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 1. Preserve the validation boundary: malformed documents, dangling refs, illegal semantic relations, unsupported writes, and ambiguous targets must fail before committed state.
 2. Human names are display metadata, never identity. Stable typed refs are authoritative.
 3. AI aliases/tags must never rename user objects.
-4. Human UI and AI must share the same Store/command/property mutation paths; do not add an AI-only mutation implementation.
-5. Persisted schema changes require deterministic migration/normalization and round-trip tests.
-6. Every new persistent editable entity must be machine-readable through summary/manifest/query surfaces and must have an honest capability contract.
-7. Do not mutate derived/evaluated outputs as authored source state.
-8. Add positive, negative, compatibility, undo/redo, round-trip, and name-independence tests where relevant.
-9. Do not weaken existing tests or capability declarations to make the milestone pass.
-10. Run `npm test` and `npm run check` before handoff.
-11. Keep unrelated refactors, dependency churn, geometry work, headless/CLI work, and future roadmap features out of this milestone.
-12. Follow-up ideas belong in `suggestions`.
+4. Human UI and AI must share the same Store **and JSON-safe command bus** mutation path. Do not advertise an AI capability that the canonical dispatcher cannot execute.
+5. Persisted schema/reference changes require deterministic migration/normalization and round-trip tests.
+6. Every machine-readable capability declaration must match the real executable path.
+7. Do not weaken existing tests or capability declarations to obtain green tests.
+8. Run `npm test` and `npm run check` before handoff.
+9. Follow-up ideas belong in `suggestions`.
 
 ---
 
-# MILESTONE M1 — Universal Semantic Metadata Layer
+# MILESTONE M1 — Universal Semantic Metadata Layer — CORRECTION PASS
 
-**Status:** `AWAITING VERIFICATION`
+**Status:** `CORRECTIONS REQUIRED`
 
-## Goal
+## Verification result
 
-Replace Veyra's current node-only semantic annotations with a universal, typed semantic layer that can describe **any current first-class entity** without depending on human-authored names.
+The main M1 implementation is accepted in principle:
 
-The result must let AI attach its own stable understanding—roles, aliases, tags, relations, provenance, and confidence—to nodes, rig entities, animation entities, state-machine entities, listeners, geometry sub-entities, assets, and other current typed references while preserving the user's original names exactly.
+- semantic records now have persistent IDs;
+- typed targets cover the existing graph;
+- aliases, roles, tags, provenance, confidence, status, and typed relations are implemented;
+- legacy node semantics migrate deterministically;
+- Store-level semantic CRUD participates in validation and undo/redo;
+- summary/manifest visibility and adversarial name-independence tests exist;
+- latest main-branch CI is green.
 
-This milestone is the semantic foundation required before a reliable name-independent resolver can be built.
+Do **not** rework those completed parts unless needed by the corrections below.
 
-## Why this milestone is next
-
-Stable typed identity is now implemented and verified for the current graph, including real persistent keyframe IDs and typed refs for animation, machine, listener, geometry, and paint sub-entities.
-
-The remaining semantic layer is still node-specific: `createSemanticRecord()` creates a node ref, `normalizeDocument()` requires semantic targets to be nodes, and `semanticFor()` accepts only a node ID. The next milestone must remove that architectural restriction rather than building resolver logic on top of it.
+The milestone cannot be marked VERIFIED yet because independent review found contract mismatches that affect AI control and stable identity.
 
 ---
 
-## Task 1 — Universal semantic-record identity and target contract
+## Correction 1 — Put semantic CRUD on the canonical JSON-safe command bus
 
-Replace the node-specific semantic record with a first-class persistent semantic record.
+### Problem
 
-Required minimum shape:
+`VeyraStore` now exposes semantic mutations, but `src/veyra/commands.js` does not expose corresponding dispatch actions. At the same time the project manifest advertises semantic transactional writes.
 
-```js
-{
-  id: 'semantic_...',
-  target: { kind: '<typed-kind>', id: '<stable-id>' },
-  canonicalRole: '',
-  description: '',
-  tags: [],
-  aliases: [],
-  relations: [],
-  provenance: {},
-  status: 'confirmed | inferred | rejected | stale'
-}
-```
+This creates exactly the drift the architecture is intended to prevent: direct JavaScript callers can mutate semantics, while an AI using the canonical JSON-safe command/manifest path cannot execute the advertised actions.
+
+### Required implementation
+
+Add first-class command-bus actions mapping **1:1** to the existing Store methods:
+
+- `addSemantic`
+- `updateSemantic`
+- `removeSemantic`
+- `addSemanticRelation`
+- `removeSemanticRelation`
 
 Requirements:
 
-- semantic records have their own stable persistent IDs;
-- `target` accepts any currently supported first-class typed reference whose entity exists;
-- target validation is generic and kind-aware;
-- missing/wrong-kind targets fail precisely;
-- duplicate semantic-record IDs are rejected;
-- multiple semantic records may target the same entity when their namespaces/provenance differ;
-- old node semantics remain loadable through deterministic migration.
+- no mutation logic duplicated in `commands.js`;
+- typed target refs and relation refs cross the JSON boundary safely;
+- command provenance (`source: ai`, labels, etc.) is forwarded to the Store;
+- invalid references/patches fail before committed state;
+- command table, generated manifest action catalog, and advertised semantic capabilities agree mechanically;
+- semantic actions appear in the same canonical action surface an agent uses for other editor mutations.
 
-## Task 2 — AI aliases, roles, tags, provenance, confidence
+### Mandatory tests
 
-Support machine-owned semantic metadata without touching human display names.
+Prove through `dispatchVeyraCommand`, not direct Store calls only, that:
 
-At minimum support:
+1. an AI command can add a semantic record to a non-node typed target;
+2. an AI command can update aliases/role/status without changing the target's human name;
+3. an AI command can add/remove a typed semantic relation;
+4. an AI command can remove a semantic record;
+5. undo/redo works after dispatched semantic mutations;
+6. invalid typed refs/invalid semantic patches return failure and leave document + revision/history unchanged;
+7. the manifest/action catalog advertises exactly the semantic actions that are actually dispatchable.
 
-- `canonicalRole`;
-- `description`;
-- `tags[]`;
-- `aliases[]` with namespace/owner and value;
-- provenance/source such as `user`, `ai`, `import`, `system`;
-- optional agent identifier;
-- optional confidence;
-- optional evidence/basis list;
-- semantic status: `confirmed`, `inferred`, `rejected`, `stale`.
+---
 
-Rules:
+## Correction 2 — Make `paint` semantic identity unambiguous
 
-- alias namespaces must coexist without overwriting one another;
-- AI aliases never write to entity `name` fields;
-- tags/aliases are normalized deterministically;
-- invalid confidence/status/alias records fail validation rather than being silently repaired.
+### Problem
 
-## Task 3 — Typed semantic relations
-
-Add semantic relations between entities using typed refs.
-
-Example:
+Current semantic `paint` refs use this shape:
 
 ```js
-{
-  predicate: 'part_of',
-  target: { kind: 'node', id: 'node_face' }
-}
+{ kind: 'paint', id: <owning-node-or-mesh-id> }
 ```
 
-Requirements:
+`node` IDs and `mesh` IDs are different typed namespaces, so a node and a mesh may legally share the same ID. With the current `paint` representation, both become the same `paint:<id>` reference. `entityByReference()` then resolves one by search order rather than by stable identity.
 
-- relation targets must resolve to real current entities;
-- dangling relation refs are rejected or removed only through an explicit documented cascade operation;
-- predicates are normalized deterministically;
-- relations survive rename/save/load;
-- deleting an entity cannot silently leave corrupted semantic relations.
+That violates the name-independent/stable-reference contract.
 
-Do not build inference logic in this milestone; only the storage/validation/control contract.
+### Required implementation
 
-## Task 4 — Generic semantic lookup and canonical editing path
+Define one canonical, persisted or owner-qualified paint identity that is **globally unambiguous** for semantic targeting.
 
-Replace node-only helpers such as `semanticFor(document, nodeId, ...)` with generic typed-reference APIs.
+Acceptable approaches include:
 
-Provide a clear canonical way to:
+- real persistent paint IDs; or
+- an owner-qualified paint reference/address that encodes the owning typed ref without relying on display names.
 
-- find semantic records by record ID;
-- find semantics for a typed target ref;
-- create semantic records;
-- update roles/descriptions/tags/aliases/provenance/status;
-- add/remove semantic relations;
-- delete semantic records.
+Do not simply prohibit node/mesh IDs from matching each other; those are separate typed namespaces and cross-kind ID equality should remain legal.
 
-All mutations must use the existing canonical Store/command/transaction architecture so they participate in:
+Update all affected reference, normalization, semantic lookup, summary/manifest, lifecycle-cascade, and compatibility paths consistently.
 
+### Mandatory tests
+
+Create a document where:
+
+- a node has ID `shared_owner`;
+- a mesh also has ID `shared_owner`;
+- both have paints.
+
+Then prove:
+
+1. each paint has a distinct stable semantic target;
+2. semantics resolve to the correct paint deterministically;
+3. save/load preserves the distinction;
+4. deleting one owner cascades only semantics/relations for that owner's paint;
+5. renaming either owner changes nothing;
+6. manifest/summary refs remain unambiguous.
+
+---
+
+## Correction 3 — Make the `semanticRecord` target policy explicit and enforced
+
+### Problem
+
+`semanticRecord` is now a typed reference kind. The capability contract excludes it from semantic target kinds, but generic target normalization/entity lookup can still accept a `semanticRecord` target.
+
+The declared contract and executable behavior must not disagree.
+
+### Required implementation
+
+Choose and enforce exactly one policy:
+
+- **Supported:** semantic records may themselves be semantic targets; expose this in capabilities/manifest and add lifecycle/cycle tests; or
+- **Unsupported:** reject `semanticRecord` as a semantic-record `target` with a precise validation error while still allowing semantic relations to reference semantic records if that remains intentional.
+
+The chosen policy must be identical in:
+
+- creation/normalization;
 - validation;
-- undo/redo;
-- command provenance;
-- AI/human parity.
-
-Do not introduce a separate AI semantic mutation backend.
-
-## Task 5 — Manifest, summary, capabilities, and query visibility
-
-Expose universal semantics to AI through the existing machine-readable surfaces.
-
-Requirements:
-
-- summary/manifest include semantic-record refs and typed target refs;
-- semantics are visible for non-node entities, including representative rig, timeline/keyframe, state-machine/condition, listener, asset, and geometry entities;
-- capability declarations accurately describe which semantic fields/actions are readable/writable;
-- semantic records can be located without consulting entity display names;
-- no capability may claim universal semantics until its real path exists.
-
-## Task 6 — Backward compatibility and lifecycle behavior
-
-Migrate the existing semantic format safely.
-
-Existing records like:
-
-```js
-{
-  target: { kind: 'node', id: 'node_...' },
-  role: '...',
-  description: '...',
-  tags: []
-}
-```
-
-must continue to load deterministically.
-
-Define and test:
-
-- legacy `role` -> new canonical role behavior;
-- deterministic creation of missing semantic-record IDs;
-- repeated normalization does not regenerate IDs;
-- entity deletion behavior;
-- duplicate/copy behavior where applicable;
-- round-trip serialization stability.
-
-Do not silently reinterpret malformed semantic data.
-
-## Task 7 — Adversarial name-independence and validation tests
-
-Add a dedicated semantic test suite proving at least:
-
-1. semantics can target node, bone/control/constraint, timeline/track/keyframe, state machine/state/input/transition/condition, listener, asset, mesh/path vertex, and gradient stop refs where supported;
-2. renaming a target does not change semantic targeting;
-3. duplicate human names do not change semantic targeting;
-4. empty human names do not change semantic targeting;
-5. deliberately misleading names do not override typed semantic targets;
-6. AI aliases never mutate human `name` fields;
-7. multiple alias namespaces coexist;
-8. missing/wrong-kind target refs fail precisely;
-9. dangling relation refs fail precisely;
-10. legacy node semantic records migrate and remain stable on the next round-trip;
-11. semantic edits are undoable/redoable through the canonical mutation path;
-12. manifest/summary semantic refs resolve without name lookup.
-
----
-
-## Explicit non-goals
-
-Do not implement in this milestone:
-
-- semantic inference from geometry/rigging/animation;
-- natural-language entity resolution;
-- candidate ranking or ambiguity scoring;
-- headless Node API / CLI work from `suggestions`;
-- Bézier/path hit-testing;
-- path-topology commands;
-- pointer-events expansion;
-- state-machine feature expansion;
-- View Models/Data Binding;
-- components/layout/text/scripting/new Rive feature families.
+- capabilities;
+- manifest/summary contract;
+- tests/documentation.
 
 ---
 
 ## Acceptance criteria
 
-The milestone is complete only when:
+M1 is complete only when all of the following are true:
 
-- semantics are no longer node-only;
-- every current first-class typed entity kind has a defined semantic-target policy;
-- semantic records have stable IDs;
-- AI aliases/tags/roles/provenance/status can be stored without changing human names;
-- typed semantic relations validate correctly;
-- legacy node semantics migrate deterministically;
-- semantic CRUD uses canonical Store/command paths with undo/redo;
-- summary/manifest/capabilities expose the implemented semantic contract honestly;
-- rename/duplicate/empty/misleading-name tests prove name independence;
-- all new and existing tests pass;
+- the original M1 semantic tests remain green;
+- semantic CRUD is dispatchable through the canonical JSON-safe command bus;
+- command-bus actions and manifest semantic-write capabilities cannot drift;
+- `paint` semantic identity is unambiguous even when node and mesh owner IDs collide;
+- `semanticRecord` target support/exclusion is explicit and enforced consistently;
+- invalid semantic commands fail atomically;
+- AI aliases still never alter human names;
+- round-trip compatibility remains deterministic;
 - `npm test` passes;
-- `npm run check` passes.
+- `npm run check` passes;
+- latest GitHub Actions Tests run passes.
 
 ## Handoff
 
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits: Implement M1 universal semantic metadata [m1-applied]
-- Changed files: src/veyra/semantics.js, references.js, model.js, store.js, capabilities.js, summary.js, manifest.js, tests/veyra-semantics.test.mjs, milestone.md
-- Tests added/changed: tests/veyra-semantics.test.mjs (typed targets, validation, aliases/provenance/status, relations, migration, lifecycle cascade, undo/redo, manifest/summary, name independence)
-- npm test: PASS (required before commit by the M1 workflow)
-- npm run check: PASS (required before commit by the M1 workflow)
-- Task-specific checks: universal typed target policy, stable semantic IDs, multiple records per target, strict alias/provenance/status validation, typed relations, canonical Store CRUD, explicit deletion cascade
-- Persistence/migration impact: legacy node semantic role migrates deterministically to canonicalRole; missing semantic IDs are deterministic and stable after first round-trip; new aliases/relations/provenance/status persist canonically
-- AI/name-independence proof: dedicated suite renames targets to duplicate/empty/misleading names and verifies typed semantic refs remain unchanged; AI aliases never write entity name fields
-- Suggestions added to `suggestions`: none
-- Known limitations: paint semantic refs use the stable owning node/mesh id; inference, natural-language resolution, ranking, and other explicit non-goals remain out of scope
+- Correction commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Command-bus semantic CRUD proof:
+- Paint identity collision proof:
+- semanticRecord target policy:
+- Persistence/migration impact:
+- AI/name-independence proof:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
