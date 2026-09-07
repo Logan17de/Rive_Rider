@@ -1,6 +1,6 @@
 # Verya Plan & Live Status
 
-**Owner:** Sheema (critic). Updated every time something meaningfully changes — a
+**Maintainer:** Asha (leader). Updated every time something meaningfully changes — a
 commit lands, a block clears, acceptance moves, or scope shifts. This is the
 single place to check "where are we."
 
@@ -123,7 +123,7 @@ propagation/default-prevention rules. It is now part of T1's deterministic
 battery rather than a hand-maintained runner exception.
 
 
-### 4.4 Acceptance gate list (Sheema checks all of these before ACCEPT)
+### 4.4 Acceptance gate list (Alex checks these independently before ACCEPT)
 1. Standard `npm test` + `npm run check` green on the settled tree.
 2. Real shell route: preview click on a `play` listener emits the expected
    transport intent; no-hit/no-listener is a no-op — proven via the exact
