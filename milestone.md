@@ -1,6 +1,6 @@
 # Veyra — Current Milestone
 
-`plan.md` is the product roadmap. This file contains only the **current implementation milestone**.
+`plan.md` is the authoritative product roadmap. This file contains only the **current implementation milestone**.
 
 Agents may complete every task inside this milestone, but must not start work outside its scope. Follow-up ideas belong in `suggestions`.
 
@@ -8,217 +8,400 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 ## Mandatory agent rules
 
-1. Preserve the validation boundary. Resolver/query code is read-only and ambiguity must fail closed.
-2. Human names remain display metadata only; names have zero semantic weight unless explicit display-name mode is requested.
-3. Stable typed refs and M1 semantic records are authoritative.
-4. Rejected/stale semantics must never become positive resolver evidence through forward **or reverse** graph relationships.
-5. Semantic status/source filters must be real filters, not metadata-only annotations.
-6. Candidate ranking and ambiguity decisions must use a non-lossy deterministic comparison; do not collapse materially different scores into an artificial tie.
-7. Do not weaken existing M0/M1/M2 tests or capability declarations.
-8. Run `npm test` and `npm run check` before handoff.
-9. Follow-up ideas belong in `suggestions`.
+1. Preserve the validation boundary. Invalid commands, dangling refs, unsupported writes, ownership conflicts, and ambiguous targets must fail before committed state.
+2. Human names are display metadata only. Stable typed refs, property addresses, semantic records, and canonical command IDs are authoritative.
+3. Do not create a second AI-only model, command system, dependency graph, or mutation path.
+4. Human UI, browser AI, future MCP/headless adapters, scripts, and tests must reuse the same canonical services.
+5. Authored values and evaluated/derived values must remain distinct. Never mutate evaluated output as if it were authored source.
+6. Dependency and ownership results must be deterministic, JSON-safe, evidence-backed, and name-independent.
+7. Preview/dry-run operations must never mutate document, revision, history, selection, runtime state, or semantic records.
+8. Multi-command plans must be atomic: either the authorized plan commits completely or committed state remains unchanged.
+9. Do not silently invent ownership for systems that are not active or whose runtime state is unavailable. Return explicit `unknown`, `inactive`, or `runtime-context-required` information instead.
+10. Do not implement new Rive feature families, MCP, CLI/headless transport, Components, View Models/Data Binding, Layout, Text, advanced state machines, scripting/WGSL, or geometry hit-testing in this milestone.
+11. Do not weaken existing M0/M1/M2 tests or capability declarations.
+12. Run `npm test` and `npm run check` before handoff.
 
 ---
 
-# MILESTONE M2 — Name-Independent Semantic Indexer & Resolver — CORRECTION PASS
+# MILESTONE M3 — Unified AI/Human Control Plane + Dependency & Ownership Graph
 
-**Status:** `AWAITING VERIFICATION`
+**Status:** `READY`
 
-## Verification result
+## Goal
 
-The main M2 implementation is accepted in principle:
+Close the remaining P0 control-plane gap before adding major Rive feature families.
 
-- a DOM-free deterministic semantic/structural index exists;
-- `queryEntities()` and `resolveSemantic()` are implemented;
-- resolver outcomes are explicit (`resolved`, `ambiguous`, `notFound`);
-- stable refs, semantic aliases/roles/tags, hierarchy, rig, animation, machines and listeners are indexed;
-- display names are ignored by default and exposed only through explicit display-name matching;
-- browser and manifest read surfaces use the same resolver module;
-- adversarial rename/duplicate/empty/misleading-name tests exist;
-- latest main-branch GitHub Actions Tests run is green.
+After M3, Veyra must have one canonical machine-readable service layer through which an AI or human-facing adapter can:
 
-Do not rewrite those completed parts unless required by the corrections below.
+- inspect the project manifest;
+- query/resolve stable entities;
+- read authored and evaluated values;
+- inspect dependencies and dependents;
+- understand who currently owns/overrides a property;
+- preview a command without side effects;
+- dispatch one validated command;
+- dispatch an atomic multi-command plan;
+- validate the document;
+- verify the result of an edit.
 
----
+The browser-facing `globalThis.veyra` surface must become a thin adapter over those same canonical services rather than an independently maintained feature list.
 
-## Correction 1 — Enforce semantic status/source filters and relation provenance in both directions
-
-### Problem A — status/source-only queries are not actually filtering
-
-In `semanticMatches()`, records are filtered into `eligible`, but if the query contains only:
-
-```js
-{ semantic: { status: 'confirmed' } }
-```
-
-or only:
-
-```js
-{ semantic: { source: 'ai' } }
-```
-
-there is no requirement that `eligible.length > 0`. The function therefore returns `true` for entities with no matching semantic records and even entities with no semantic records at all.
-
-### Required behavior
-
-If any semantic filter is supplied (`alias`, `role`, `tags`, `status`, `source`, or future semantic qualifiers), an entity must satisfy that semantic constraint from actual matching semantic record(s).
-
-At minimum:
-
-- `status: confirmed` excludes entities whose semantics are only inferred/rejected/stale;
-- `source: ai` excludes entities with no AI semantic record;
-- combined status/source filters apply to the same eligible semantic set used for alias/role/tag matching;
-- entities with no semantics do not match a semantic-only query.
-
-### Problem B — reverse semantic relations can lose provenance/status
-
-The index currently adds a forward semantic relation to the described entity and a reverse `semantic_relation_from` relationship to the relation target.
-
-For forward resolution, the semantic record can be found on the entity and its status/confidence is used. On the reverse side, the semantic record is owned by the *other* entity, so `scoreCandidate()` may fail to find it locally and falls back to full/confirmed relation weight.
-
-That means an **inferred, rejected, or stale** semantic record can become confirmed-strength evidence when traversed in reverse.
-
-### Required behavior
-
-Semantic relation evidence must carry enough provenance to score identically regardless of traversal direction.
-
-For every semantic relation edge, preserve or recover at least:
-
-- semantic record ID;
-- status;
-- provenance source;
-- provenance confidence where applicable.
-
-Hard rules:
-
-- rejected/stale relation evidence contributes zero positive resolver score in either direction;
-- inferred relation evidence is confidence-weighted in either direction;
-- confirmed relation evidence receives confirmed weight in either direction;
-- forward/reverse traversal must not change semantic strength merely because the semantic record is stored on the other endpoint.
-
-### Mandatory tests
-
-Add tests proving:
-
-1. `queryEntities(..., { semantic: { status: 'confirmed' } })` returns only entities with confirmed semantic records;
-2. `source: 'ai'` alone is a real semantic filter;
-3. status + source combinations work together;
-4. an entity with no semantic records does not match semantic-only filters;
-5. a rejected semantic relation produces no positive resolver evidence forward or reverse;
-6. a stale semantic relation produces no positive resolver evidence forward or reverse;
-7. an inferred relation with confidence `0.2` receives the same confidence-weighted strength in both directions;
-8. a confirmed relation receives the same semantic strength in both directions.
+This milestone covers **current Veyra entity kinds and current evaluation systems only**. Future Components, Data Binding, Layout, scripts, etc. must be able to plug into the same contracts later.
 
 ---
 
-## Correction 2 — Fix ambiguity ranking after score saturation
+## Task 1 — Create one canonical Veyra service/control registry
 
-### Problem
+Introduce a DOM-free canonical service module/registry that composes the existing authoritative systems rather than duplicating them:
 
-`publicCandidate()` currently derives:
+- `createProjectManifest()`;
+- `buildSemanticIndex()` / `queryEntities()` / `resolveSemantic()`;
+- property addressing/read APIs;
+- `VEYRA_COMMAND_TABLE` / `dispatchVeyraCommand()`;
+- document validation/normalization;
+- dependency/ownership services added by this milestone.
 
-```js
-confidence = min(1, score / 100)
-```
-
-and `resolveSemantic()` decides ambiguity using the **clamped confidence** difference.
-
-Once two candidates both score above 100, both confidence values become `1.0`, even if their raw scores are materially different.
-
-Example class of failure:
+Target public direction from `plan.md`:
 
 ```text
-candidate A score = 175
-candidate B score = 120
-
-public confidence A = 1.0
-public confidence B = 1.0
+veyra.getManifest(options)
+veyra.queryEntities(query, options)
+veyra.resolveSemantic(intent, options)
+veyra.read(refOrAddress, options)
+veyra.previewCommand(command, options)
+veyra.dispatchCommand(command)
+veyra.dispatchPlan(commands, policy)
+veyra.validateDocument()
+veyra.verifyChange(expected, options)
+veyra.getDependencyGraph(refOrAddress?, options)
+veyra.getOwnership(refOrAddress, options)
 ```
 
-The resolver can therefore return `ambiguous` even though the scoring model itself strongly prefers A. This violates the M2 rule that only close competitors should remain ambiguous.
+### Requirements
 
-### Required behavior
+- one implementation per operation;
+- JSON-safe inputs/outputs;
+- no DOM dependency in the core service layer;
+- browser/MCP/headless layers are adapters only;
+- capability metadata and real callable services agree mechanically;
+- service names/actions cannot drift from the manifest/command table silently.
 
-Use a deterministic, non-lossy ranking/ambiguity metric.
-
-Acceptable designs include:
-
-- compare raw scores for ambiguity and expose a separately normalized confidence;
-- normalize candidate scores with a monotonic non-saturating comparison model;
-- otherwise preserve ordering distance after scores exceed 100.
-
-Requirements:
-
-- public confidence remains bounded `[0, 1]`;
-- materially different evidence totals must not collapse into a tie;
-- truly equal/near-equal candidates still return `ambiguous`;
-- changing presentation normalization must not change deterministic candidate ordering;
-- thresholds/margins remain explicit and testable.
-
-### Mandatory tests
-
-Construct candidates where:
-
-1. both raw scores exceed 100 but one is materially stronger -> resolver must choose the stronger candidate;
-2. both exceed 100 and are genuinely equal -> resolver returns `ambiguous`;
-3. the weaker candidate is within the configured ambiguity margin -> resolver returns `ambiguous`;
-4. deterministic ordering/output is unchanged across repeated calls.
+Do not delete useful existing APIs merely to satisfy naming. Preserve compatibility through thin aliases/adapters where sensible.
 
 ---
 
-## Correction 3 — Implement the required weak paint/style-similarity evidence
+## Task 2 — Build the deterministic current-graph dependency model
 
-### Problem
+Create a reusable dependency graph for current persistent entities and relevant property addresses.
 
-M2 Task 5 explicitly required current-scene structural evidence to include **paint/style similarity as weak evidence**.
+The graph must distinguish at least:
 
-The current index exposes paint ownership (`owner`, `owns_paint`, gradient-stop ownership), but independent review found no deterministic paint/style-similarity descriptor or relationship used by query/resolution.
+```text
+dependsOn
+usedBy / dependents
+owns / ownedBy
+reads
+writes / controls
+animates / animatedBy
+references / referencedBy
+runtimeUses
+semanticRelation
+```
 
-### Required implementation
+Cover current relationships where applicable:
 
-Add conservative deterministic style similarity for current Veyra paint capabilities only.
+### Scene / hierarchy / paint
 
-A suitable minimal implementation may use a canonical style fingerprint derived from currently authored paint fields such as:
+- node parent/child;
+- paint owner and gradient-stop owner;
+- path/mesh-vertex ownership;
+- asset references that exist in the current model.
 
-- fill type/value/gradient structure;
-- stroke value/width where supported;
-- other current normalized paint properties that are semantically stable.
+### Rigging
 
-Requirements:
+- bone parent/child;
+- mesh weights -> bones;
+- constraints -> bones/controls/paths;
+- control/constraint relationships.
 
-- no display-name input;
-- no visual/LLM inference;
-- deterministic canonical comparison;
-- similarity is **weak evidence**, below explicit semantics and strong structural relationships;
-- do not infer anatomy or meaning from matching color/style;
-- paint similarity must be queryable/inspectable as evidence rather than hidden magic;
-- bounded behavior on large documents.
+### Animation
 
-### Mandatory tests
+- timeline -> tracks -> keyframes;
+- track -> property address -> target entity/property;
+- machine state -> timeline.
 
-Prove that:
+### State machines / interactions
 
-1. two current entities with equivalent normalized paint/style receive a deterministic weak similarity relationship/descriptor;
-2. a materially different style does not match;
-3. renaming/reordering entities does not change style-similarity evidence;
-4. style similarity alone cannot override confirmed semantic evidence;
-5. style similarity between otherwise symmetric/unlabeled candidates does not manufacture semantic meaning and may still remain ambiguous.
+- machine -> states/inputs/transitions/conditions;
+- transitions -> endpoint states;
+- conditions -> machine inputs;
+- listeners -> targets/timelines/machines/inputs.
+
+### Semantics
+
+- semantic record -> target;
+- semantic relation edges;
+- semantic record lifecycle dependencies.
+
+### Requirements
+
+- stable typed refs/property addresses only;
+- names never participate in graph identity;
+- deterministic ordering;
+- forward and reverse traversal;
+- bounded traversal (`depth`, `maxNodes`, `maxEdges` or equivalent);
+- missing/invalid refs fail precisely;
+- no document mutation.
+
+Do not duplicate resolver relationship logic blindly. Extract/share graph construction where practical so semantic indexing and dependency inspection cannot contradict each other.
+
+---
+
+## Task 3 — Implement authored/evaluated ownership inspection
+
+Add a canonical ownership API for a property address or supported entity/property target.
+
+For a property, an AI must be able to ask:
+
+```text
+What is the authored value?
+What is the evaluated value?
+Which systems can affect it?
+Which system currently supplies/overrides the evaluated value?
+What would overwrite a direct authored edit?
+```
+
+For the systems Veyra currently implements, ownership analysis must recognize where applicable:
+
+- direct authored property;
+- timeline track/keyframe animation;
+- active/current state-machine timeline contribution when sufficient runtime context is supplied;
+- rig constraints / evaluated transforms;
+- mesh deformation / bone influence where relevant;
+- runtime/listener-driven state when the necessary runtime context is available.
+
+### Result contract
+
+Use a machine-readable shape that separates potential controllers from active ownership, for example:
+
+```js
+{
+  target: { address: 'node:.../transform/x' },
+  authoredValue: 100,
+  evaluatedValue: 140,
+  activeOwner: {
+    kind: 'animation-track',
+    ref: { kind: 'track', id: '...' },
+    evidence: [...]
+  },
+  ownerStack: [...],
+  potentialControllers: [...],
+  writableSource: { ... },
+  warnings: [...]
+}
+```
+
+Exact shape may evolve, but it must explicitly communicate when runtime context is required rather than guessing.
+
+### Hard rule
+
+If the visible/evaluated value is derived, the API must identify the authored source an edit should target instead of encouraging writes to derived output.
+
+---
+
+## Task 4 — Canonical read API with source/ownership context
+
+Implement `read(refOrAddress, options)` or an equivalent canonical service.
+
+For property addresses, support at least:
+
+- authored value;
+- evaluated value when requested;
+- capability information;
+- ownership result;
+- direct dependencies/dependents where requested.
+
+For entity refs, return a bounded machine-readable entity view containing:
+
+- stable typed ref;
+- advisory display metadata;
+- semantics;
+- capabilities;
+- dependency summary;
+- ownership/source summary where meaningful.
+
+### Requirements
+
+- read-only;
+- name-independent;
+- JSON-safe;
+- bounded options;
+- precise unknown/missing/unsupported results;
+- no need for callers to scrape internal Store/model objects.
+
+---
+
+## Task 5 — Side-effect-free command preview / dry run
+
+Implement canonical command preview using the same real command validation/mutation path as execution.
+
+A preview must answer, as applicable:
+
+- would the command succeed?;
+- what stable entities/property addresses would change?;
+- authored before/after values;
+- relevant evaluated before/after values where deterministic;
+- dependencies/dependents affected;
+- ownership conflicts or overwrite warnings;
+- lifecycle cascades;
+- validation errors;
+- whether the change is reversible/undoable.
+
+### Hard requirements
+
+- do not reimplement command mutation logic;
+- run against an isolated clone/sandbox Store or equivalent;
+- real dispatcher validation must be exercised;
+- original Store document/revision/history/selection/runtime state remain byte-for-byte/logically unchanged;
+- preview result is deterministic for the same document + command + options.
+
+---
+
+## Task 6 — Atomic multi-command plan dispatch
+
+Implement `dispatchPlan(commands, policy)` over the canonical command system.
+
+Minimum requirements:
+
+- ordered JSON-safe command descriptors;
+- preflight validation/preview of the full plan;
+- atomic application;
+- rollback of the entire plan if any command fails;
+- one machine-readable result containing each step outcome;
+- command provenance preserved;
+- no partial document/history state after failure;
+- stable refs produced by earlier plan steps can be referenced by later steps through an explicit, deterministic mechanism if supported; otherwise explicitly declare that limitation rather than guessing.
+
+The plan API must not resolve human names during execution. Semantic intent must already have been resolved to stable refs/addresses before destructive application.
+
+---
+
+## Task 7 — Verification and change assertions
+
+Add a canonical `verifyChange(expected, options)` service suitable for both AI and tests.
+
+It must support deterministic assertions over current Veyra capabilities such as:
+
+- entity exists / does not exist by stable ref;
+- authored property equals expected value;
+- evaluated property equals expected value;
+- semantic record/relation exists;
+- dependency edge exists / does not exist;
+- ownership matches expected controller/source;
+- command/plan produced no unexpected dangling refs or validation errors.
+
+Return structured pass/fail evidence rather than only booleans.
+
+This service is read-only and must never "fix" failed expectations.
+
+---
+
+## Task 8 — Browser adapter + command/manifest/UI drift prevention
+
+Refactor `globalThis.veyra` so the new services are thin calls into the canonical control plane.
+
+At minimum expose/reuse:
+
+```text
+getManifest
+queryEntities
+resolveSemantic
+read
+previewCommand
+dispatchCommand
+dispatchPlan
+validateDocument
+verifyChange
+getDependencyGraph
+getOwnership
+```
+
+### Drift prevention
+
+Add mechanical tests proving:
+
+- every dispatchable command advertised to AI maps to a real `VEYRA_COMMAND_TABLE` action;
+- browser `dispatchCommand` uses the same dispatcher;
+- browser query/resolution uses the same resolver implementation;
+- manifest capability/service declarations map to real callable services;
+- newly added current-editor mutation commands cannot be exposed in one machine-readable surface but absent from the others.
+
+Audit current human editor mutation paths. For current operations that already have command-table equivalents, route the UI through the canonical dispatcher/service path where practical in this milestone. Where a direct Store mutation remains temporarily necessary, document it in a **machine-readable parity audit** rather than hiding it.
+
+The goal is measurable convergence toward one mutation plane, not a cosmetic wrapper around several divergent APIs.
+
+---
+
+## Task 9 — Adversarial integration suite
+
+Add dedicated tests covering at least:
+
+1. dependency graph is identical after human names are randomized;
+2. dependency reverse edges agree with forward edges;
+3. timeline-track ownership of an animated property is reported correctly;
+4. an unanimated authored property reports authored ownership;
+5. constraint/rig-derived ownership or influence is reported without pretending derived values are directly writable;
+6. runtime-context-required ownership is reported explicitly when state-machine/runtime state is absent;
+7. `read()` distinguishes authored and evaluated values;
+8. preview of a valid command reports changes but mutates nothing;
+9. preview of an invalid command fails with zero side effects;
+10. a successful plan applies all commands in order;
+11. a failing plan leaves document/revision/history unchanged;
+12. verifyChange returns structured evidence for pass and fail cases;
+13. browser service adapters return the same results as direct canonical services;
+14. service/manifest/command registry drift tests are mechanical rather than hard-coded duplicate lists;
+15. serialize/load + rename/reorder preserves dependency and ownership identity;
+16. all M0/M1/M2 tests remain green.
+
+---
+
+## Explicit non-goals
+
+Do not implement in M3:
+
+- MCP server;
+- headless CLI/transport;
+- new component/artboard system;
+- View Models/Data Binding;
+- new layout system;
+- richer listener/state-machine feature parity;
+- Bézier/path hit-testing;
+- path-topology authoring;
+- Text;
+- scripting/WGSL;
+- collaboration;
+- runtime SDK/export work.
+
+Those systems will plug into this control/ownership contract later rather than inventing their own AI surfaces.
 
 ---
 
 ## Acceptance criteria
 
-M2 is VERIFIED only when:
+M3 is complete only when:
 
-- all original M2 tests remain green;
-- semantic status/source-only query filters behave correctly;
-- rejected/stale semantic relations contribute zero positive evidence in both directions;
-- inferred/confirmed semantic relation strength is direction-invariant;
-- ambiguity uses a non-lossy deterministic comparison and does not create false ties after score saturation;
-- genuine close/equal candidates still fail closed;
-- current paint/style similarity exists as explicit weak structural evidence;
-- display names remain zero-weight by default;
-- resolver/index/query remain read-only;
+- one canonical DOM-free control/service layer exists for the current project model;
+- dependency graph supports deterministic forward/reverse inspection over the current graph;
+- ownership inspection clearly separates authored, evaluated, potential and active controllers;
+- canonical read exposes source/ownership context;
+- command preview uses the real dispatcher with zero side effects;
+- multi-command plans are atomic and rollback completely on failure;
+- deterministic change verification exists;
+- browser AI APIs are thin adapters over the same services;
+- manifest/service/command capability drift is mechanically tested;
+- names never participate in dependency/ownership identity;
+- derived output is never presented as a directly writable authored source;
+- all existing tests remain green;
 - `npm test` passes;
 - `npm run check` passes;
 - latest GitHub Actions Tests run passes.
@@ -228,16 +411,21 @@ M2 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits: Implement M2 resolver correctness corrections [m2-corrected]
-- Changed files: src/veyra/resolver.js, tests/veyra-resolver-corrections.test.mjs, milestone.md
-- Tests added/changed: dedicated correction suite covering semantic status/source-only filters, same-record status+source eligibility, forward/reverse semantic-relation provenance and rejected/stale/inferred/confirmed scoring, raw-score ambiguity above saturation, bounded paint/style similarity, name/reorder invariance, semantic-over-style precedence, and read-only ambiguity
-- npm test: PASS (required by correction workflow before commit)
-- npm run check: PASS (required by correction workflow before commit)
-- Semantic filter proof: any supplied semantic qualifier now requires a non-empty eligible semantic-record set; status/source-only filters exclude entities without matching records, and combined status+source filters are applied to the same eligible records
-- Forward/reverse semantic relation provenance proof: both directions carry semanticId/status/source/confidence in edge detail; rejected/stale score zero, inferred uses the same provenance confidence weight, and confirmed uses the same confirmed relation score regardless of traversal direction
-- Saturated-score ambiguity proof: public confidence remains bounded while ambiguity uses relative raw-score gaps; materially different >100 scores resolve to the stronger candidate, equal and configured-near candidates remain ambiguous, and deterministic ordering is unchanged
-- Paint/style similarity proof: current node/mesh paint is canonicalized into a deterministic descriptor/fingerprint; equivalent styles receive explicit bounded style_similar edges scored at weak styleSimilarity weight, materially different styles do not match, and style evidence cannot override confirmed semantics or invent meaning for symmetric unlabeled entities
-- Name-independence proof: style fingerprints and relationships exclude display names; rename/reorder tests preserve style evidence and existing M2 name-invariance tests remain green
-- Suggestions added to `suggestions`: none
-- Known limitations: style similarity is intentionally exact over normalized current paint fields rather than perceptual similarity; large same-style groups expose a deterministic maximum of 16 similarity links per entity
+- Implementation commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Canonical service registry proof:
+- Dependency graph proof:
+- Ownership/source proof:
+- Authored-vs-evaluated read proof:
+- Preview zero-side-effect proof:
+- Atomic plan/rollback proof:
+- verifyChange proof:
+- Browser/manifest/command drift proof:
+- UI mutation parity audit:
+- Name-independence proof:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
