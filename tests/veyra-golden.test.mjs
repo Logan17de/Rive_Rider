@@ -7,11 +7,11 @@ import { renderSvgString } from '../src/veyra/geometry.js';
 import { parseVeyra, serializeVeyra } from '../src/veyra/io.js';
 
 const fixtures = {
-  animated: 'e73a39cc65aa41f7b35369cf21008de7485172cddde2619b1b0ac1325d9a5712',
-  rectangle: 'f5ffcd82208ae60e67459ff6d29b4ef098c418e6341ab2e6480331085e379810',
-  'bezier-face': '5ce88bf9652213542f7a6c11bcca7d7994f03571e5a2625bccac1205b19497a0',
-  gradients: '1d6a0d34fc95fbb4ba52a484d73a5db26a28acd75cd8fce2e9b74d4fca9f3c43',
-  'ik-arm': '9447c8d798df4512515a79819ecec5742f05bf43b88acd28fe43cd252d15b943',
+  animated: 'aa989c4bf157db1ae2b11e36d01d4601bc84e8e329f402a1b478ccc37e08b670',
+  rectangle: '8819fbbbd1712fb3c6063589c33368926675018cfd95cc7a9336d7d22ba86ace',
+  'bezier-face': 'e514408bcbce113b1db5f93f9f89c2d9b2fc1892ee362dcba68e533852f40db1',
+  gradients: '59ef23a11dfeffa08be8970113bfcc958d2d51e3cfdb09515975e13d7408492f',
+  'ik-arm': 'a036c47d8b51da8f6699d04f1185721ad39970897e7b2a1e47333cf8ae4aeef2',
 };
 
 function hash(value) {
@@ -35,8 +35,12 @@ function check(label, assertion) {
 for (const [name, expectedSvgHash] of Object.entries(fixtures)) {
   const raw = fs.readFileSync(new URL(`./fixtures/veyra/${name}.veyra`, import.meta.url), 'utf8');
   const document = parseVeyra(raw);
-  check(`${name} remains canonical JSON`, () => {
-    assert.equal(serializeVeyra(document), raw.trimEnd(), `${name} must remain canonical JSON.`);
+  check(`${name} migrates to stable canonical v5 JSON`, () => {
+    const once = serializeVeyra(document);
+    const twice = serializeVeyra(parseVeyra(once));
+    assert.equal(document.version, 5, `${name} must migrate to v5.`);
+    assert.ok(Number(JSON.parse(raw).version) < 5, `${name} remains a legacy migration fixture.`);
+    assert.equal(once, twice, `${name} migration must stabilize after the first canonical write.`);
   });
   const firstRender = renderSvgString(evaluateDocument(document));
   const secondRender = renderSvgString(evaluateDocument(document));
@@ -105,7 +109,7 @@ const animatedFrame = renderSvgString(evaluateDocument(animated, { animation: ha
 check('animation frame matches its golden hash', () => {
   assert.equal(
     hash(animatedFrame),
-    '0710dbfbb72c460b0a1dab14501869bbaa6e7c662728e5fd9299effb4460d8fe',
+    'dca81ba512028470b426ffb7022c190f05b1f3b2b65e4593cfe9edc2c469afca',
     'Known fixture-driven animation frame changed.',
   );
 });

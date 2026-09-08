@@ -245,9 +245,10 @@ export function evaluateComponentInstances({
       depth: depth + 1,
       componentPath: [...componentPath, component.id],
     });
-    const sourceById = new Map(sourceScene.nodes.map((node) => [node.id, node]));
+    const directSourceNodes = sourceScene.nodes.filter((node) => !node.componentInstanceRef);
+    const sourceById = new Map(directSourceNodes.map((node) => [node.id, node]));
     const evaluatedId = (sourceId) => `componentEval:${instance.id}:${sourceId}`;
-    for (const sourceNode of sourceScene.nodes) {
+    for (const sourceNode of directSourceNodes) {
       const mappedWorld = multiplyMatrices(wrapper, sourceNode.worldMatrix);
       const sourceParentId = sourceNode.parent?.id;
       let localMatrix;
@@ -269,7 +270,7 @@ export function evaluateComponentInstances({
         parent,
         localMatrix,
         worldMatrix: mappedWorld,
-        opacity: Math.max(0, Math.min(1, opacityProduct(sourceNode, sourceById) * instance.opacity)),
+        opacity: Math.max(0, Math.min(1, Number(sourceNode.opacity ?? 1) * (sourceNode.parent?.id ? 1 : instance.opacity))),
         sourceRef: { kind: 'node', id: sourceNode.sourceRef?.id || sourceNode.id },
         componentRef: { kind: 'component', id: component.id },
         componentInstanceRef: { kind: 'componentInstance', id: instance.id },

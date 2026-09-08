@@ -1,4 +1,3 @@
-import { cloneValue } from './model.js';
 import {
   createArtboardRef,
   createComponentRef,
@@ -8,6 +7,10 @@ import {
   normalizeReference,
   referenceId,
 } from './references.js';
+
+function cloneValue(value) {
+  return globalThis.structuredClone ? globalThis.structuredClone(value) : JSON.parse(JSON.stringify(value));
+}
 
 export const VEYRA_PROJECT_VERSION = 5;
 export const VEYRA_COMPONENT_FIT_MODES = Object.freeze(['none', 'contain', 'cover', 'stretch']);
@@ -160,7 +163,7 @@ export function createComponentInstance(overrides = {}) {
     fit,
     alignX,
     alignY,
-    clip: Boolean(overrides.clip),
+    clip: (() => { if (overrides.clip) throw new TypeError('componentInstance.clip=true is not supported in M6; use clip=false.'); return false; })(),
     overrides: (overrides.overrides || []).map((item, index) => normalizeOverride(item, index, id)),
     runtime,
   };
@@ -219,8 +222,13 @@ function assignOwner(items, rawItems, artboards, label, infer = null) {
         ? normalizeReference(item.artboard, 'artboard', `${label}[${index}].artboard`)
         : inferred || fallback;
     if (!owner) throw new TypeError(`${label}[${index}].artboard is required when a project has multiple artboards.`);
-    if (!artboardIds.has(owner.id)) throw new TypeError(`${label}[${index}].artboard references missing artboard ${owner.id}.`);
-    return { ...item, artboard: owner };
+    const resolvedOwner = !artboardIds.has(owner.id)
+      && fallback
+      && String(owner.id).startsWith('artboard_legacy_')
+      ? fallback
+      : owner;
+    if (!artboardIds.has(resolvedOwner.id)) throw new TypeError(`${label}[${index}].artboard references missing artboard ${resolvedOwner.id}.`);
+    return { ...item, artboard: resolvedOwner };
   });
 }
 
@@ -356,6 +364,13 @@ export function validateProjectGraph(document) {
   for (const constraint of document.constraints) {
     const refs = [constraint.bone, ...(constraint.bones || []), constraint.target, constraint.path].filter(Boolean);
     validateSameOwner(document, constraint.artboard.id, refs, `Constraint ${constraint.id}`);
+  }
+  for (const timeline of document.timelines) {
+    for (const track of timeline.tracks) {
+      const match = /^([^:]+):([^/]+)\//.exec(track.address);
+      if (!match) continue; // Preserve the verified pre-M6 opaque-address animation contract.
+      validateSameOwner(document, timeline.artboard.id, [{ kind: match[1], id: match[2] }], `Timeline ${timeline.id}`);
+    }
   }
   for (const machine of document.stateMachines) {
     validateSameOwner(document, machine.artboard.id, machine.states.map((state) => state.timeline), `State machine ${machine.id}`);
@@ -557,12 +572,43 @@ export function duplicateArtboardIntoDocument(document, sourceArtboardId, option
     idMap.set(`${entry.kind}:${entry.id}`, deterministicProjectId(entry.prefix, seed, `${entry.kind}:${entry.id}`));
   }
 
+  const rewriteNestedIds = (kind, source, copy) => {
+    const mapped = (childKind, id) => idMap.get(`${childKind}:${id}`) || id;
+    const rewriteStops = (sourcePaint, copyPaint) => {
+      for (let index = 0; index < (sourcePaint?.fill?.stops || []).length; index += 1) {
+        copyPaint.fill.stops[index].id = mapped('gradientStop', sourcePaint.fill.stops[index].id);
+      }
+    };
+    if (kind === 'node') {
+      if (source.type === 'path') source.geometry.vertices.forEach((vertex, index) => { copy.geometry.vertices[index].id = mapped('pathVertex', vertex.id); });
+      rewriteStops(source.paint, copy.paint);
+    } else if (kind === 'mesh') {
+      source.vertices.forEach((vertex, index) => { copy.vertices[index].id = mapped('meshVertex', vertex.id); });
+      rewriteStops(source.paint, copy.paint);
+    } else if (kind === 'timeline') {
+      source.tracks.forEach((track, trackIndex) => {
+        copy.tracks[trackIndex].id = mapped('track', track.id);
+        track.keyframes.forEach((keyframe, keyframeIndex) => { copy.tracks[trackIndex].keyframes[keyframeIndex].id = mapped('keyframe', keyframe.id); });
+      });
+    } else if (kind === 'stateMachine') {
+      source.inputs.forEach((item, index) => { copy.inputs[index].id = mapped('machineInput', item.id); });
+      source.states.forEach((item, index) => { copy.states[index].id = mapped('machineState', item.id); });
+      source.transitions.forEach((item, index) => {
+        copy.transitions[index].id = mapped('machineTransition', item.id);
+        item.conditions.forEach((condition, conditionIndex) => { copy.transitions[index].conditions[conditionIndex].id = mapped('machineCondition', condition.id); });
+      });
+    } else if (kind === 'componentInstance') {
+      source.overrides.forEach((item, index) => { copy.overrides[index].id = mapped('componentOverride', item.id); });
+    }
+  };
+
   const duplicateCollection = (kind, key) => {
     const copies = [];
     for (const item of document[key].filter((entry) => entry.artboard?.id === sourceArtboardId)) {
       const copy = deepRemap(cloneValue(item), idMap);
       copy.id = idMap.get(`${kind}:${item.id}`);
       copy.artboard = createArtboardRef(targetId);
+      rewriteNestedIds(kind, item, copy);
       copies.push(copy);
     }
     document[key].push(...copies);
@@ -599,7 +645,7 @@ export function projectGraphCapabilities() {
     alignY: [...VEYRA_COMPONENT_ALIGN_Y],
     nestedComponents: true,
     maxComponentDepth: VEYRA_COMPONENT_MAX_DEPTH,
-    clipping: 'instance-frame-flag',
+    clipping: 'none-only',
     overrideTargets: ['node', 'bone', 'mesh', 'control', 'constraint'],
     runtimeIsolation: 'per-component-instance',
   };

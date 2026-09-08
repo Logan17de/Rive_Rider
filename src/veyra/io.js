@@ -15,10 +15,9 @@ function canonicalize(value) {
 export function canonicalVeyraValue(documentModel) {
   const normalized = normalizeDocument(documentModel);
   const canonical = canonicalize(normalized);
-  // x/y=0 are the legacy implicit defaults. Omitting only those default values
-  // keeps old canonical files byte-stable; any moved frame persists explicitly.
-  if (canonical.artboard?.x === 0) delete canonical.artboard.x;
-  if (canonical.artboard?.y === 0) delete canonical.artboard.y;
+  // `artboard` is a runtime compatibility alias for M0-M5 code. v5 persistence
+  // has exactly one source of truth: the stable `artboards[]` registry.
+  delete canonical.artboard;
   return canonical;
 }
 

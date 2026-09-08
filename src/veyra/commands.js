@@ -386,6 +386,64 @@ const COMMAND_TABLE = {
     params: [param('assetId', 'string', true)],
     run: (store, args, command) => store.removeAsset(args.assetId, command ?? {}),
   },
+  addArtboard: {
+    summary: 'Add a stable authored artboard.', params: [param('overrides','object',true)],
+    run: (store,args,command) => store.addArtboard(args.overrides, command ?? {}),
+  },
+  updateArtboard: {
+    summary: 'Update artboard display/frame/background metadata by stable id.',
+    params: [param('artboardId','string',true), param('changes','object',true)],
+    run: (store,args,command) => store.updateArtboard(args.artboardId,args.changes,command ?? {}),
+  },
+  reorderArtboard: {
+    summary: 'Reorder artboard presentation order without changing identity.',
+    params: [param('artboardId','string',true), param('index','number',true)],
+    run: (store,args,command) => store.reorderArtboard(args.artboardId,args.index,command ?? {}),
+  },
+  duplicateArtboard: {
+    summary: 'Duplicate an artboard with deterministic fresh persistent ids.',
+    params: [param('artboardId','string',true), param('options','object',false)],
+    run: (store,args,command) => store.duplicateArtboard(args.artboardId,args.options ?? {},command ?? {}),
+  },
+  removeArtboard: {
+    summary: 'Delete an artboard; live component dependents block unless explicit cascade.',
+    params: [param('artboardId','string',true), param('options','object',false)],
+    run: (store,args,command) => store.removeArtboard(args.artboardId,args.options ?? {},command ?? {}),
+  },
+  createComponent: {
+    summary: 'Mark an eligible artboard as a reusable Component source.',
+    params: [param('artboardId','string',true), param('overrides','object',true)],
+    run: (store,args,command) => store.createComponent(args.artboardId,args.overrides,command ?? {}),
+  },
+  removeComponent: {
+    summary: 'Remove a Component identity; live instances block unless explicit cascade.',
+    params: [param('componentId','string',true), param('options','object',false)],
+    run: (store,args,command) => store.removeComponent(args.componentId,args.options ?? {},command ?? {}),
+  },
+  addComponentInstance: {
+    summary: 'Place an authored Component instance on an artboard.',
+    params: [param('componentId','string',true), param('overrides','object',true)],
+    run: (store,args,command) => store.addComponentInstance(args.componentId,args.overrides,command ?? {}),
+  },
+  updateComponentInstance: {
+    summary: 'Update a Component instance transform/frame/fit/runtime configuration.',
+    params: [param('instanceId','string',true), param('changes','object',true)],
+    run: (store,args,command) => store.updateComponentInstance(args.instanceId,args.changes,command ?? {}),
+  },
+  removeComponentInstance: {
+    summary: 'Remove a Component instance by stable id.', params: [param('instanceId','string',true)],
+    run: (store,args,command) => store.removeComponentInstance(args.instanceId,command ?? {}),
+  },
+  setComponentOverride: {
+    summary: 'Set one bounded source-property override on a Component instance.',
+    params: [param('instanceId','string',true), param('override','object',true)],
+    run: (store,args,command) => store.setComponentOverride(args.instanceId,args.override,command ?? {}),
+  },
+  removeComponentOverride: {
+    summary: 'Remove one Component instance override.',
+    params: [param('instanceId','string',true), param('overrideId','string',true)],
+    run: (store,args,command) => store.removeComponentOverride(args.instanceId,args.overrideId,command ?? {}),
+  },
 };
 
 function manifestParameter(name, type, required, description, extras = {}) {
@@ -395,6 +453,18 @@ function manifestParameter(name, type, required, description, extras = {}) {
 const bounds = (key) => ({ bounds: { ...VEYRA_PROPERTY_BOUNDS[key] } });
 
 const COMMAND_MANIFEST_OVERRIDES = {
+  addArtboard: { targetKind: 'artboard', capabilities: ['project-graph-write','transactional','undoable','returns-id'] },
+  updateArtboard: { targetKind: 'artboard', capabilities: ['project-graph-write','transactional','undoable'] },
+  reorderArtboard: { targetKind: 'artboard', capabilities: ['presentation-order','identity-preserving','transactional','undoable'] },
+  duplicateArtboard: { targetKind: 'artboard', capabilities: ['deep-duplicate','fresh-stable-ids','transactional','undoable'] },
+  removeArtboard: { targetKind: 'artboard', capabilities: ['dependency-checked','explicit-cascade','transactional','undoable'] },
+  createComponent: { targetKind: 'component', capabilities: ['component-source','transactional','undoable','returns-id'] },
+  removeComponent: { targetKind: 'component', capabilities: ['dependency-checked','explicit-cascade','transactional','undoable'] },
+  addComponentInstance: { targetKind: 'componentInstance', capabilities: ['component-instance','transactional','undoable','returns-id'] },
+  updateComponentInstance: { targetKind: 'componentInstance', capabilities: ['component-instance','transactional','undoable'] },
+  removeComponentInstance: { targetKind: 'componentInstance', capabilities: ['component-instance','transactional','undoable'] },
+  setComponentOverride: { targetKind: 'componentOverride', capabilities: ['instance-override','source-safe','transactional','undoable','returns-id'] },
+  removeComponentOverride: { targetKind: 'componentOverride', capabilities: ['instance-override','transactional','undoable'] },
   select: {
     targetKind: 'selection',
     capabilities: ['selection', 'non-mutating'],

@@ -154,6 +154,26 @@ function graphData(input, explicitAddress = null) {
         addPair('references', 'referencedBy', from, to, detail, 'semantic-lifecycle');
         continue;
       }
+      if (entity.kind === 'component' && relationship.relation === 'source_artboard') {
+        addPair('dependsOn', 'usedBy', from, to, detail, 'component');
+        continue;
+      }
+      if (entity.kind === 'componentInstance' && relationship.relation === 'instance_of') {
+        addPair('dependsOn', 'usedBy', from, to, detail, 'component');
+        continue;
+      }
+      if (entity.kind === 'componentInstance' && ['runtime_timeline','runtime_machine','remap_timeline','remap_machine'].includes(relationship.relation)) {
+        addPair('runtimeUses', 'usedBy', from, to, detail, 'component-runtime');
+        continue;
+      }
+      if (entity.kind === 'componentOverride' && relationship.relation === 'override_target') {
+        if (relationship.detail?.address) {
+          addAddressNode(relationship.detail.address);
+          addPair('writes', 'usedBy', from, { address: relationship.detail.address }, detail, 'component-override');
+        }
+        addPair('references', 'referencedBy', from, to, detail, 'component-override');
+        continue;
+      }
       if (entity.kind === 'listener' && ['targets', 'uses_timeline', 'uses_machine', 'uses_input'].includes(relationship.relation)) {
         addPair('runtimeUses', 'usedBy', from, to, detail, 'runtime');
         continue;

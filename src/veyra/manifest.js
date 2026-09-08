@@ -24,6 +24,7 @@ import { VEYRA_COMMAND_ACTIONS, VEYRA_COMMAND_PROVENANCE_AUDIT, VEYRA_COMMAND_TA
 import { createSceneSummary } from './summary.js';
 import { VEYRA_RESOLVER_CAPABILITIES, VEYRA_RESOLVER_SCORING } from './resolver.js';
 import { VEYRA_BROWSER_MUTATION_COMPATIBILITY, VEYRA_SERVICE_DEFINITIONS, VEYRA_UI_MUTATION_PARITY_AUDIT } from './serviceRegistry.js';
+import { projectGraphCapabilities } from './projectGraph.js';
 
 export const VEYRA_MANIFEST_FORMAT = 'veyra-project-manifest';
 export const VEYRA_MANIFEST_VERSION = 1;
@@ -58,6 +59,12 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'interaction.machine-runtime-bridge',
   'interaction.pointer-click-lifecycle',
   'interaction.evaluated-geometry-hit-test',
+  'project.multi-artboard',
+  'project.explicit-artboard-ownership',
+  'components.sources-instances',
+  'components.instance-overrides',
+  'components.independent-runtime',
+  'components.name-independent',
 ]);
 
 function projectCapabilities(document) {
@@ -197,6 +204,12 @@ function semanticActionRefs() {
 
 function authoringContract() {
   return {
+    projectGraph: {
+      ...projectGraphCapabilities(),
+      identity: 'artboard/component/componentInstance stable refs; human names are advisory only',
+      authoredVsEvaluated: 'source artboard and instance records are authored; expanded instance descendants are evaluated-only',
+      deletionPolicy: 'live dependents block unless the command explicitly requests cascade',
+    },
     controlPlane: {
       services: Object.entries(VEYRA_SERVICE_DEFINITIONS)
         .map(([name, metadata]) => ({ name, ...cloneValue(metadata) }))
@@ -387,8 +400,14 @@ export function createProjectManifest(document, options = {}) {
       format: document.format,
       version: document.version,
       artboard: cloneValue(document.artboard),
+      artboards: document.artboards.map((artboard) => ({ ref: { kind: 'artboard', id: artboard.id }, ...cloneValue(artboard) })),
+      components: document.components.map((component) => ({ ref: { kind: 'component', id: component.id }, ...cloneValue(component), displayNameAdvisory: true })),
+      componentInstances: document.componentInstances.map((instance) => ({ ref: { kind: 'componentInstance', id: instance.id }, ...cloneValue(instance), displayNameAdvisory: true })),
       conventions: cloneValue(document.conventions),
       counts: {
+        artboards: document.artboards.length,
+        components: document.components.length,
+        componentInstances: document.componentInstances.length,
         assets: document.assets.length,
         nodes: document.nodes.length,
         semantics: document.semantics.length,

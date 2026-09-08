@@ -154,6 +154,10 @@ function baseCapabilityTokens(kind, object) {
   if (kind === 'keyframe') output.add('animation-keyframe');
   if (kind === 'stateMachine') output.add('state-machine');
   if (kind.startsWith('machine')) output.add('state-machine-member');
+  if (kind === 'artboard') output.add('project-artboard');
+  if (kind === 'component') output.add('component-source');
+  if (kind === 'componentInstance') output.add('component-instance');
+  if (kind === 'componentOverride') output.add('component-override');
   if (kind === 'listener') output.add('interaction-listener');
   if (kind === 'asset') output.add('asset');
   if (kind === 'paint' || kind === 'gradientStop') output.add('paint');
@@ -240,7 +244,8 @@ function ownerCenterFor(entity, byKey, document) {
   const ownerRel = entity.relationships.find((item) => ['parent', 'owner'].includes(item.relation));
   const owner = ownerRel ? byKey.get(refKey(ownerRel.target)) : null;
   if (owner?.geometry?.worldBounds?.center) return owner.geometry.worldBounds.center;
-  return { x: document.artboard.width / 2, y: document.artboard.height / 2 };
+  const artboard = document.artboards?.[0] || document.artboard;
+  return { x: artboard.x + artboard.width / 2, y: artboard.y + artboard.height / 2 };
 }
 
 function applySpatialDescriptors(entities, byKey, document) {
@@ -271,7 +276,8 @@ function applyMirroredPairs(entities, byKey, document) {
   }
   for (const [ownerKey, siblings] of groups) {
     const owner = ownerKey === '__root__' ? null : byKey.get(ownerKey);
-    const axis = owner?.geometry?.worldBounds?.center?.x ?? document.artboard.width / 2;
+    const artboard = document.artboards?.[0] || document.artboard;
+    const axis = owner?.geometry?.worldBounds?.center?.x ?? (artboard.x + artboard.width / 2);
     for (const left of siblings) {
       const lb = left.geometry.worldBounds;
       const matches = siblings.filter((right) => {
@@ -320,7 +326,12 @@ function applyStyleSimilarity(entities, byKey) {
 
 function buildIndexData(input) {
   const document = normalizeDocument(input);
-  const evaluated = evaluateDocument(document);
+  const evaluatedScenes = document.artboards.map((artboard) => evaluateDocument(document, {}, null, { artboardId: artboard.id }));
+  const evaluated = {
+    nodes: evaluatedScenes.flatMap((scene) => scene.nodes.filter((node) => !node.componentInstanceRef)),
+    bones: evaluatedScenes.flatMap((scene) => scene.bones || []),
+    meshes: evaluatedScenes.flatMap((scene) => scene.meshes || []),
+  };
   const entities = [];
   const byKey = new Map();
   const add = (entity) => {
@@ -331,10 +342,27 @@ function buildIndexData(input) {
     return entity;
   };
 
+  const projectBounds = {
+    minX: Math.min(...document.artboards.map((item) => item.x)),
+    minY: Math.min(...document.artboards.map((item) => item.y)),
+    maxX: Math.max(...document.artboards.map((item) => item.x + item.width)),
+    maxY: Math.max(...document.artboards.map((item) => item.y + item.height)),
+  };
+  projectBounds.width = projectBounds.maxX - projectBounds.minX;
+  projectBounds.height = projectBounds.maxY - projectBounds.minY;
+  projectBounds.center = { x: (projectBounds.minX + projectBounds.maxX) / 2, y: (projectBounds.minY + projectBounds.maxY) / 2 };
   add(makeEntity(createReference('document', document.id), document, {
-    type: 'document', displayName: document.name,
-    geometry: { worldBounds: { minX: 0, minY: 0, maxX: document.artboard.width, maxY: document.artboard.height, width: document.artboard.width, height: document.artboard.height, center: { x: document.artboard.width / 2, y: document.artboard.height / 2 } } },
+    type: 'document', displayName: document.name, geometry: { worldBounds: projectBounds },
   }));
+  for (const artboard of document.artboards) add(makeEntity(createReference('artboard', artboard.id), artboard, {
+    type: 'artboard', displayName: artboard.name,
+    geometry: { worldBounds: { minX: artboard.x, minY: artboard.y, maxX: artboard.x + artboard.width, maxY: artboard.y + artboard.height, width: artboard.width, height: artboard.height, center: { x: artboard.x + artboard.width / 2, y: artboard.y + artboard.height / 2 } } },
+  }));
+  for (const component of document.components || []) add(makeEntity(createReference('component', component.id), component, { type: 'component', displayName: component.name }));
+  for (const instance of document.componentInstances || []) {
+    add(makeEntity(createReference('componentInstance', instance.id), instance, { type: 'componentInstance', displayName: instance.name }));
+    for (const override of instance.overrides || []) add(makeEntity(createReference('componentOverride', override.id), override, { type: 'componentOverride' }));
+  }
 
   const evaluatedNodes = new Map(evaluated.nodes.map((node) => [node.id, node]));
   for (const node of document.nodes) {
@@ -428,11 +456,32 @@ function buildIndexData(input) {
   for (const record of document.semantics || []) add(makeEntity(createReference('semanticRecord', record.id), record, { type: 'semanticRecord' }));
 
   const documentRef = createReference('document', document.id);
+  for (const artboard of document.artboards) link(byKey, createReference('artboard', artboard.id), 'owner', documentRef, 'owns');
+  for (const component of document.components || []) {
+    const componentRef = createReference('component', component.id);
+    link(byKey, componentRef, 'owner', documentRef, 'owns');
+    link(byKey, componentRef, 'source_artboard', component.source, 'component_source');
+  }
+  for (const instance of document.componentInstances || []) {
+    const instanceRef = createReference('componentInstance', instance.id);
+    link(byKey, instanceRef, 'owner', instance.artboard, 'owns');
+    link(byKey, instanceRef, 'instance_of', instance.component, 'instantiated_by');
+    if (instance.parent) link(byKey, instanceRef, 'parent', instance.parent, 'child_instance');
+    for (const override of instance.overrides || []) {
+      const overrideRef = createReference('componentOverride', override.id);
+      link(byKey, overrideRef, 'owner', instanceRef, 'override');
+      link(byKey, overrideRef, 'override_target', override.target, 'overridden_by_instance', { address: override.address });
+    }
+    for (const [relation, ref] of [
+      ['runtime_timeline', instance.runtime?.timeline], ['runtime_machine', instance.runtime?.stateMachine],
+      ['remap_timeline', instance.runtime?.remap?.timeline], ['remap_machine', instance.runtime?.remap?.stateMachine],
+    ]) if (ref) link(byKey, instanceRef, relation, ref, 'used_by_component_instance');
+  }
   for (const node of document.nodes) {
     const nodeRef = createReference('node', node.id);
     const parentId = referenceId(node.parent, 'node');
     if (parentId) link(byKey, nodeRef, 'parent', createReference('node', parentId), 'child');
-    else link(byKey, nodeRef, 'owner', documentRef, 'owns');
+    else link(byKey, nodeRef, 'owner', node.artboard, 'owns');
     const paintRef = createPaintRef('node', node.id);
     link(byKey, paintRef, 'owner', nodeRef, 'owns_paint');
     for (const vertex of node.type === 'path' ? node.geometry.vertices || [] : []) link(byKey, createReference('pathVertex', vertex.id), 'owner', nodeRef, 'owns');
@@ -445,12 +494,12 @@ function buildIndexData(input) {
     const boneRef = createReference('bone', bone.id);
     const parentId = referenceId(bone.parent, 'bone');
     if (parentId) link(byKey, boneRef, 'parent', createReference('bone', parentId), 'child');
-    else link(byKey, boneRef, 'owner', documentRef, 'owns');
+    else link(byKey, boneRef, 'owner', bone.artboard, 'owns');
   }
 
   for (const mesh of document.meshes) {
     const meshRef = createReference('mesh', mesh.id);
-    link(byKey, meshRef, 'owner', documentRef, 'owns');
+    link(byKey, meshRef, 'owner', mesh.artboard, 'owns');
     const paintRef = createPaintRef('mesh', mesh.id);
     link(byKey, paintRef, 'owner', meshRef, 'owns_paint');
     for (const stop of mesh.paint?.fill?.stops || []) link(byKey, createReference('gradientStop', stop.id), 'owner', paintRef, 'owns_stop');
@@ -469,10 +518,10 @@ function buildIndexData(input) {
     for (const [boneId, weight] of influencedBones) link(byKey, meshRef, 'influenced_by', createReference('bone', boneId), 'influences_mesh', { maxWeight: weight });
   }
 
-  for (const control of document.controls) link(byKey, createReference('control', control.id), 'owner', documentRef, 'owns');
+  for (const control of document.controls) link(byKey, createReference('control', control.id), 'owner', control.artboard, 'owns');
   for (const constraint of document.constraints) {
     const constraintRef = createReference('constraint', constraint.id);
-    link(byKey, constraintRef, 'owner', documentRef, 'owns');
+    link(byKey, constraintRef, 'owner', constraint.artboard, 'owns');
     const refs = [];
     if (constraint.bone) refs.push(['uses_bone', constraint.bone, 'used_by_constraint']);
     for (const bone of constraint.bones || []) refs.push(['uses_bone', bone, 'used_by_constraint']);
@@ -485,7 +534,7 @@ function buildIndexData(input) {
 
   for (const timeline of document.timelines) {
     const timelineRef = createReference('timeline', timeline.id);
-    link(byKey, timelineRef, 'owner', documentRef, 'owns');
+    link(byKey, timelineRef, 'owner', timeline.artboard, 'owns');
     for (const track of timeline.tracks || []) {
       const trackRef = createReference('track', track.id);
       link(byKey, trackRef, 'owner', timelineRef, 'track');
@@ -502,7 +551,7 @@ function buildIndexData(input) {
 
   for (const machine of document.stateMachines || []) {
     const machineRef = createReference('stateMachine', machine.id);
-    link(byKey, machineRef, 'owner', documentRef, 'owns');
+    link(byKey, machineRef, 'owner', machine.artboard, 'owns');
     for (const input of machine.inputs || []) link(byKey, createReference('machineInput', input.id), 'owner', machineRef, 'input');
     for (const state of machine.states || []) {
       const stateRef = createReference('machineState', state.id);
@@ -528,7 +577,7 @@ function buildIndexData(input) {
 
   for (const listener of document.listeners || []) {
     const listenerRef = createReference('listener', listener.id);
-    link(byKey, listenerRef, 'owner', documentRef, 'owns');
+    link(byKey, listenerRef, 'owner', listener.artboard, 'owns');
     if (listener.target?.kind && listener.target?.id) link(byKey, listenerRef, 'targets', listener.target, 'listener_target', { action: listener.action, event: listener.event });
     const timelineId = referenceId(listener.timeline, 'timeline');
     const machineId = referenceId(listener.machine, 'stateMachine');

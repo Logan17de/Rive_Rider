@@ -226,6 +226,15 @@ export function entityByReference(document, reference) {
   const find = (items) => (items || []).find((item) => item.id === ref.id) || null;
   switch (ref.kind) {
     case 'document': return document.id === ref.id ? document : null;
+    case 'artboard': return find(document.artboards);
+    case 'component': return find(document.components);
+    case 'componentInstance': return find(document.componentInstances);
+    case 'componentOverride':
+      for (const instance of document.componentInstances || []) {
+        const override = find(instance.overrides);
+        if (override) return override;
+      }
+      return null;
     case 'node': return find(document.nodes);
     case 'pathVertex':
       for (const node of document.nodes || []) {

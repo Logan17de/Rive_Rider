@@ -102,12 +102,25 @@ function prepareCommandDescriptor(document, descriptor, salt = '0') {
   if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) return descriptor;
   const next = cloneValue(descriptor);
   next.args = next.args || {};
-  const seed = stableString({ documentId: document.id, generation: stableIdGeneration(document), descriptor: next, salt });
+  // Human-facing command metadata is provenance/display context, not executable identity.
+  // Preview and dispatch on the same stable snapshot therefore derive the same implicit IDs
+  // even when their labels differ.
+  const identityDescriptor = cloneValue(next);
+  delete identityDescriptor.command;
+  const seed = stableString({ documentId: document.id, generation: stableIdGeneration(document), descriptor: identityDescriptor, salt });
 
   if (next.action === 'add') next.args.options = withId(next.args.options, next.args.type || 'node', seed, 'node');
   if (next.action === 'addSemantic') next.args.overrides = withId(next.args.overrides, 'semantic', seed, 'semantic');
   if (next.action === 'addTimeline') next.args.overrides = withId(next.args.overrides, 'timeline', seed, 'timeline');
   if (next.action === 'addListener') next.args.overrides = withId(next.args.overrides, 'listener', seed, 'listener');
+  if (next.action === 'addArtboard') next.args.overrides = withId(next.args.overrides, 'artboard', seed, 'artboard');
+  if (next.action === 'duplicateArtboard') {
+    next.args.options = withId(next.args.options, 'artboard', seed, `duplicate:${next.args.artboardId || ''}`);
+    if (!next.args.options.seed) next.args.options.seed = seed;
+  }
+  if (next.action === 'createComponent') next.args.overrides = withId(next.args.overrides, 'component', seed, 'component');
+  if (next.action === 'addComponentInstance') next.args.overrides = withId(next.args.overrides, 'componentInstance', seed, 'componentInstance');
+  if (next.action === 'setComponentOverride') next.args.override = withId(next.args.override, 'componentOverride', seed, 'componentOverride');
   if (next.action === 'addBone') next.args.overrides = withId(next.args.overrides, 'bone', seed, 'bone');
   if (next.action === 'addMesh') next.args.overrides = withId(next.args.overrides, 'mesh', seed, 'mesh');
   if (next.action === 'addControl') next.args.overrides = withId(next.args.overrides, 'control', seed, 'control');

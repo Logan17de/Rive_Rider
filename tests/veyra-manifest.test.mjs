@@ -107,8 +107,11 @@ assert.equal(manifest.version, VEYRA_MANIFEST_VERSION);
 assert.equal(manifest.version, 1);
 assert.equal(manifest.document.id, 'document_manifest');
 assert.equal(manifest.document.format, 'veyra');
-assert.equal(manifest.document.version, 3);
+assert.equal(manifest.document.version, 5);
 assert.deepEqual(manifest.document.counts, {
+  artboards: 1,
+  components: 0,
+  componentInstances: 0,
   assets: 3,
   nodes: 1,
   semantics: 0,
@@ -295,7 +298,7 @@ assert.deepEqual(
 
 // --- Action schema --------------------------------------------------------------
 const actions = manifest.actions;
-assert.equal(actions.length, 53, 'Action catalog grows additively with canonical semantic CRUD plus M4 listener CRUD.');
+assert.equal(actions.length, 65, 'Action catalog grows additively with the 12 canonical M6 project/Component mutations.');
 const actionIds = actions.map((item) => item.ref.id);
 assert.equal(new Set(actionIds).size, actionIds.length, 'Action ids must be unique.');
 for (const item of actions) {

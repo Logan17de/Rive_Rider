@@ -22,6 +22,7 @@ export function createArtboardResizeGesture({
   store,
   start,
   startArtboard,
+  artboardId = null,
   direction,
   mode,
   scaleX = 1,
@@ -65,10 +66,15 @@ export function createArtboardResizeGesture({
     last = { x, y, width, height, direction: resolvedDirection };
 
     store.mutate((documentModel) => {
-      documentModel.artboard.x = last.x;
-      documentModel.artboard.y = last.y;
-      documentModel.artboard.width = last.width;
-      documentModel.artboard.height = last.height;
+      const target = artboardId
+        ? documentModel.artboards?.find((item) => item.id === artboardId)
+        : documentModel.artboard;
+      if (!target) throw new TypeError(`Resize artboard ${artboardId || '(legacy)'} does not exist.`);
+      target.x = last.x;
+      target.y = last.y;
+      target.width = last.width;
+      target.height = last.height;
+      documentModel.artboard = documentModel.artboards?.[0] || target;
     }, 'drag');
     onMove?.(last);
     return { started: true, moved: true, ...last };

@@ -25,12 +25,22 @@ import {
   semanticRecordById as findSemanticRecordById,
 } from './semantics.js';
 
+import {
+  VEYRA_PROJECT_VERSION,
+  normalizeProjectDocument,
+  artboardById as projectArtboardById,
+  componentById as projectComponentById,
+  componentInstanceById as projectComponentInstanceById,
+} from './projectGraph.js';
+
+export { VEYRA_PROJECT_VERSION };
+
 export const VEYRA_FORMAT = 'veyra';
 // v4 is feature-gated: ordinary documents continue to normalize as v3, while
 // listener-bearing documents are loud to readers that predate the registry.
 export const VEYRA_VERSION = 3;
 export const VEYRA_LISTENER_VERSION = 4;
-export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4]);
+export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4, 5]);
 export const VEYRA_LISTENER_KINDS = Object.freeze(['pointer']);
 export const VEYRA_LISTENER_EVENTS = Object.freeze([
   'pointerdown', 'pointerup', 'pointermove', 'pointerenter', 'pointerleave', 'click',
@@ -560,6 +570,9 @@ export function createDocument(overrides = {}) {
       background: '#fff7fc',
       ...(overrides.artboard || {}),
     },
+    ...(overrides.artboards ? { artboards: cloneValue(overrides.artboards) } : {}),
+    components: cloneValue(overrides.components || []),
+    componentInstances: cloneValue(overrides.componentInstances || []),
     assets: cloneValue(overrides.assets || []),
     nodes: cloneValue(overrides.nodes || []),
     semantics: cloneValue(overrides.semantics || []),
@@ -1336,6 +1349,12 @@ function validateStableIdentities(document) {
   };
 
   register('document', document.id, 'document');
+  document.artboards.forEach((artboard, index) => register('artboard', artboard.id, `artboards[${index}]`));
+  document.components.forEach((component, index) => register('component', component.id, `components[${index}]`));
+  document.componentInstances.forEach((instance, index) => {
+    register('componentInstance', instance.id, `componentInstances[${index}]`);
+    instance.overrides.forEach((override, overrideIndex) => register('componentOverride', override.id, `componentInstances[${index}].overrides[${overrideIndex}]`));
+  });
   document.nodes.forEach((node, index) => {
     register('node', node.id, `nodes[${index}]`);
     if (node.type === 'path') {
@@ -1489,9 +1508,10 @@ export function normalizeDocument(input) {
     stateMachines,
     listeners,
   };
-  validateStableIdentities(document);
-  validateSemanticRecords(document);
-  return document;
+  const projectDocument = normalizeProjectDocument(input, document);
+  validateStableIdentities(projectDocument);
+  validateSemanticRecords(projectDocument);
+  return projectDocument;
 }
 
 export function semanticsFor(document, targetOrNodeId) {
@@ -1512,6 +1532,10 @@ export function semanticFor(document, targetOrNodeId, create = false) {
 export function semanticRecordById(document, semanticId) {
   return findSemanticRecordById(document, semanticId);
 }
+
+export function artboardById(document, artboardId) { return projectArtboardById(document, artboardId); }
+export function componentById(document, componentId) { return projectComponentById(document, componentId); }
+export function componentInstanceById(document, instanceId) { return projectComponentInstanceById(document, instanceId); }
 
 export function nodeById(document, nodeId) {
   return document.nodes.find((node) => node.id === nodeId) || null;

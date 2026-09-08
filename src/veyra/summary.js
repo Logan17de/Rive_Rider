@@ -3,6 +3,10 @@ import { cloneValue, semanticFor } from './model.js';
 import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
 import {
   createDocumentRef,
+  createArtboardRef,
+  createComponentRef,
+  createComponentInstanceRef,
+  createComponentOverrideRef,
   createGradientStopRef,
   createMachineConditionRef,
   createMachineInputRef,
@@ -60,6 +64,7 @@ export function createSceneSummary(document, options = {}) {
       id: document.id,
       name: document.name,
       artboard: cloneValue(document.artboard),
+      artboards: document.artboards.map((artboard) => ({ ref: createArtboardRef(artboard.id), ...cloneValue(artboard) })),
       conventions: cloneValue(document.conventions),
       assetCount: document.assets.length,
       objectCount: document.nodes.length,
@@ -71,6 +76,27 @@ export function createSceneSummary(document, options = {}) {
       },
     },
     semantics: document.semantics.map(semanticSummary),
+    components: (document.components || []).map((component) => ({
+      ref: createComponentRef(component.id),
+      name: component.name,
+      displayNameAdvisory: true,
+      source: cloneValue(component.source),
+      semantics: document.semantics.filter((record) => record.target.kind === 'component' && record.target.id === component.id).map(semanticSummary),
+    })),
+    componentInstances: (document.componentInstances || []).map((instance) => ({
+      ref: createComponentInstanceRef(instance.id),
+      name: instance.name,
+      artboard: cloneValue(instance.artboard),
+      component: cloneValue(instance.component),
+      parent: cloneValue(instance.parent),
+      transform: cloneValue(instance.transform),
+      frame: cloneValue(instance.frame),
+      fit: instance.fit, alignX: instance.alignX, alignY: instance.alignY, clip: instance.clip,
+      opacity: instance.opacity, visible: instance.visible,
+      overrides: instance.overrides.map((override) => ({ ref: createComponentOverrideRef(override.id), ...cloneValue(override) })),
+      runtime: cloneValue(instance.runtime),
+      semantics: document.semantics.filter((record) => record.target.kind === 'componentInstance' && record.target.id === instance.id).map(semanticSummary),
+    })),
     objects: document.nodes.map((node) => {
       const semantic = semanticFor(document, node.id);
       const summary = {
@@ -78,6 +104,7 @@ export function createSceneSummary(document, options = {}) {
         type: node.type,
         name: node.name,
         parent: cloneValue(node.parent),
+        artboard: cloneValue(node.artboard),
         paint: paintSummary(node.paint, 'node', node.id),
         visible: node.visible,
         locked: node.locked,
@@ -99,12 +126,14 @@ export function createSceneSummary(document, options = {}) {
         ref: { kind: 'bone', id: bone.id },
         name: bone.name,
         parent: cloneValue(bone.parent),
+        artboard: cloneValue(bone.artboard),
         length: bone.length,
         capabilities: rigCapabilities('bone', bone),
       })),
       meshes: document.meshes.map((mesh) => ({
         ref: { kind: 'mesh', id: mesh.id },
         name: mesh.name,
+        artboard: cloneValue(mesh.artboard),
         paint: paintSummary(mesh.paint, 'mesh', mesh.id),
         vertexRefs: mesh.vertices.map((vertex) => createMeshVertexRef(vertex.id)),
         vertexCount: mesh.vertices.length,
@@ -115,6 +144,7 @@ export function createSceneSummary(document, options = {}) {
       controls: document.controls.map((control) => ({
         ref: { kind: 'control', id: control.id },
         kind: control.kind,
+        artboard: cloneValue(control.artboard),
         name: control.name,
         position: cloneValue(control.position),
         capabilities: rigCapabilities('control', control),
@@ -122,6 +152,7 @@ export function createSceneSummary(document, options = {}) {
       constraints: document.constraints.map((constraint) => ({
         ref: { kind: 'constraint', id: constraint.id },
         type: constraint.type,
+        artboard: cloneValue(constraint.artboard),
         name: constraint.name,
         enabled: constraint.enabled,
         strength: constraint.strength,
@@ -131,6 +162,7 @@ export function createSceneSummary(document, options = {}) {
     stateMachines: (document.stateMachines || []).map((machine) => ({
       ref: createStateMachineRef(machine.id),
       name: machine.name,
+      artboard: cloneValue(machine.artboard),
       capabilities: cloneValue(VEYRA_MACHINE_CAPABILITIES),
       initial: machine.initial
         ? createMachineStateRef(referenceId(machine.initial, 'machineState'))
@@ -166,6 +198,7 @@ export function createSceneSummary(document, options = {}) {
     listeners: (document.listeners || []).map((listener) => ({
       ref: createListenerRef(listener.id),
       kind: listener.kind,
+      artboard: cloneValue(listener.artboard),
       event: listener.event,
       target: cloneValue(listener.target),
       action: listener.action,

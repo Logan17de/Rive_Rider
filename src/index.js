@@ -80,3 +80,13 @@ export {
   workspaceCssVariables,
   zoomViewportAtScreen,
 } from './veyra/workspace.js';
+
+// M6 project graph and Component primitives share the same authored model and runtime evaluation seams.
+export {
+  VEYRA_PROJECT_VERSION, VEYRA_COMPONENT_FIT_MODES, VEYRA_COMPONENT_ALIGN_X, VEYRA_COMPONENT_ALIGN_Y, VEYRA_COMPONENT_MAX_DEPTH,
+  createArtboard, createComponent, createComponentInstance, artboardById, componentById, componentInstanceById,
+  entityArtboardId, duplicateArtboardIntoDocument, projectGraphCapabilities,
+} from './veyra/projectGraph.js';
+export {
+  ComponentRuntimeRegistry, createComponentRuntimeRegistry, componentInstanceSourceMatrix, evaluateComponentInstances,
+} from './veyra/components.js';

@@ -68,7 +68,7 @@ delete legacy.nodes[1].parent;
 legacy.semantics[0].nodeId = referenceId(legacy.semantics[0].target, 'node');
 delete legacy.semantics[0].target;
 const migrated = normalizeDocument(legacy);
-assert.equal(migrated.version, 3);
+assert.equal(migrated.version, 5);
 assert.equal(migrated.nodes[0].paint.fill.type, 'solid');
 assert.deepEqual(
   { bones: migrated.bones, meshes: migrated.meshes, controls: migrated.controls, constraints: migrated.constraints },
@@ -98,7 +98,7 @@ legacyV2.timelines = [{
   }],
 }];
 const migratedV2 = normalizeDocument(legacyV2);
-assert.equal(migratedV2.version, 3);
+assert.equal(migratedV2.version, 5);
 assert.deepEqual(migratedV2.nodes[0].paint.fill, { type: 'solid', color: legacyV2.nodes[0].paint.fill });
 assert.deepEqual(migratedV2.timelines[0].tracks[0].keyframes[1].value, { type: 'solid', color: '#22d3ee' });
 

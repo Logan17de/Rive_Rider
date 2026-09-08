@@ -31,7 +31,15 @@ import {
   VEYRA_MACHINE_INPUT_TYPES,
 } from './model.js';
 import { isAnimatableProperty, readProperty, writeProperty } from './properties.js';
-import { createBoneRef, createConstraintRef, createControlRef, createMeshRef, createReference, createTimelineRef, referenceId } from './references.js';
+import {
+  createArtboardRef, createBoneRef, createComponentRef, createComponentInstanceRef,
+  createConstraintRef, createControlRef, createMeshRef, createReference, createTimelineRef, referenceId,
+} from './references.js';
+import {
+  artboardById, componentById, componentInstanceById, createArtboard as createProjectArtboard,
+  createComponent as createProjectComponent, createComponentInstance as createProjectComponentInstance,
+  duplicateArtboardIntoDocument, entityArtboardId,
+} from './projectGraph.js';
 import {
   createSemanticRecord,
   updateSemanticRecordInDocument,
@@ -63,6 +71,9 @@ function normalizeCommand(command) {
 
 function objectFor(document, kind, id) {
   return {
+    artboard: artboardById,
+    component: componentById,
+    componentInstance: componentInstanceById,
     node: nodeById,
     bone: boneById,
     mesh: meshById,
@@ -302,6 +313,189 @@ export class VeyraStore {
     return true;
   }
 
+  // --- M6 project graph authored CRUD ---------------------------------------
+  addArtboard(overrides = {}, commandDescriptor = {}) {
+    const artboard = createProjectArtboard(overrides);
+    if (!artboard.id) throw new TypeError('Artboard id is required.');
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add artboard ${artboard.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => { document.artboards.push(artboard); });
+    this.select(createArtboardRef(artboard.id));
+    return artboard.id;
+  }
+
+  updateArtboard(artboardId, changes = {}, commandDescriptor = {}) {
+    const current = artboardById(this.document, artboardId);
+    if (!current) return false;
+    if (changes.id !== undefined && changes.id !== artboardId) throw new TypeError('Artboard id is immutable.');
+    const allowed = new Set(['name', 'x', 'y', 'width', 'height', 'background']);
+    for (const key of Object.keys(changes)) if (!allowed.has(key)) throw new TypeError(`Unsupported artboard field ${key}.`);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update artboard ${artboardId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => Object.assign(artboardById(document, artboardId), cloneValue(changes)));
+    return artboardId;
+  }
+
+  reorderArtboard(artboardId, index, commandDescriptor = {}) {
+    const currentIndex = this.document.artboards.findIndex((item) => item.id === artboardId);
+    if (currentIndex < 0) return false;
+    const nextIndex = Math.max(0, Math.min(this.document.artboards.length - 1, Math.trunc(Number(index))));
+    if (!Number.isFinite(Number(index))) throw new TypeError('Artboard order index must be finite.');
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Reorder artboard ${artboardId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const from = document.artboards.findIndex((item) => item.id === artboardId);
+      const [item] = document.artboards.splice(from, 1);
+      document.artboards.splice(nextIndex, 0, item);
+      document.artboard = document.artboards[0];
+    });
+    return artboardId;
+  }
+
+  duplicateArtboard(artboardId, options = {}, commandDescriptor = {}) {
+    if (!artboardById(this.document, artboardId)) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Duplicate artboard ${artboardId}`, source: 'user', ...commandDescriptor };
+    let result;
+    this.execute(descriptor, (document) => { result = duplicateArtboardIntoDocument(document, artboardId, options); });
+    this.select(createArtboardRef(result.artboardId));
+    return result;
+  }
+
+  removeArtboard(artboardId, options = {}, commandDescriptor = {}) {
+    if (!artboardById(this.document, artboardId)) return false;
+    if (this.document.artboards.length <= 1) throw new TypeError('Cannot remove the final artboard.');
+    const components = this.document.components.filter((item) => item.source.id === artboardId);
+    const componentIds = new Set(components.map((item) => item.id));
+    const dependentInstances = this.document.componentInstances.filter((item) => componentIds.has(item.component.id));
+    if (dependentInstances.length && !options.cascade) {
+      throw new TypeError(`Artboard ${artboardId} is a component source used by instances: ${dependentInstances.map((item) => item.id).sort().join(', ')}.`);
+    }
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete artboard ${artboardId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const sourceComponentIds = new Set(document.components.filter((item) => item.source.id === artboardId).map((item) => item.id));
+      if (options.cascade) document.componentInstances = document.componentInstances.filter((item) => !sourceComponentIds.has(item.component.id));
+      document.componentInstances = document.componentInstances.filter((item) => item.artboard.id !== artboardId);
+      document.components = document.components.filter((item) => item.source.id !== artboardId);
+      for (const key of ['nodes','bones','meshes','controls','constraints','timelines','stateMachines','listeners']) {
+        document[key] = document[key].filter((item) => item.artboard?.id !== artboardId);
+      }
+      document.artboards = document.artboards.filter((item) => item.id !== artboardId);
+      document.artboard = document.artboards[0];
+    });
+    if (this.selectedKind === 'artboard' && this.selectedId === artboardId) this.select(null);
+    return true;
+  }
+
+  createComponent(artboardId, overrides = {}, commandDescriptor = {}) {
+    const artboard = artboardById(this.document, artboardId);
+    if (!artboard) throw new TypeError(`Unknown artboard ${artboardId}.`);
+    if (this.document.components.some((item) => item.source.id === artboardId)) throw new TypeError(`Artboard ${artboardId} is already a Component source.`);
+    const component = createProjectComponent({ ...overrides, source: createArtboardRef(artboardId) });
+    if (!component.id) throw new TypeError('Component id is required.');
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Create component ${component.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => document.components.push(component));
+    this.select(createComponentRef(component.id));
+    return component.id;
+  }
+
+  removeComponent(componentId, options = {}, commandDescriptor = {}) {
+    if (!componentById(this.document, componentId)) return false;
+    const dependents = this.document.componentInstances.filter((item) => item.component.id === componentId);
+    if (dependents.length && !options.cascade) throw new TypeError(`Component ${componentId} is used by instances: ${dependents.map((item) => item.id).sort().join(', ')}.`);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Remove component ${componentId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      if (options.cascade) document.componentInstances = document.componentInstances.filter((item) => item.component.id !== componentId);
+      document.components = document.components.filter((item) => item.id !== componentId);
+    });
+    return true;
+  }
+
+  addComponentInstance(componentId, overrides = {}, commandDescriptor = {}) {
+    const component = componentById(this.document, componentId);
+    if (!component) throw new TypeError(`Unknown component ${componentId}.`);
+    const source = artboardById(this.document, component.source.id);
+    const owningArtboard = overrides.artboard || createArtboardRef(this.document.artboards[0].id);
+    const instance = createProjectComponentInstance({
+      ...overrides, component: createComponentRef(componentId), artboard: owningArtboard,
+      frame: overrides.frame || { width: source.width, height: source.height },
+    });
+    if (!instance.id) throw new TypeError('Component instance id is required.');
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add component instance ${instance.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => document.componentInstances.push(instance));
+    this.select(createComponentInstanceRef(instance.id));
+    return instance.id;
+  }
+
+  updateComponentInstance(instanceId, changes = {}, commandDescriptor = {}) {
+    const current = componentInstanceById(this.document, instanceId);
+    if (!current) return false;
+    if (changes.id !== undefined && changes.id !== instanceId) throw new TypeError('Component instance id is immutable.');
+    const candidate = createProjectComponentInstance({ ...cloneValue(current), ...cloneValue(changes), id: instanceId });
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update component instance ${instanceId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const index = document.componentInstances.findIndex((item) => item.id === instanceId);
+      document.componentInstances[index] = candidate;
+    });
+    return instanceId;
+  }
+
+  removeComponentInstance(instanceId, commandDescriptor = {}) {
+    if (!componentInstanceById(this.document, instanceId)) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Remove component instance ${instanceId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => { document.componentInstances = document.componentInstances.filter((item) => item.id !== instanceId); });
+    return true;
+  }
+
+  setComponentOverride(instanceId, override, commandDescriptor = {}) {
+    const current = componentInstanceById(this.document, instanceId);
+    if (!current) throw new TypeError(`Unknown component instance ${instanceId}.`);
+    if (!override || typeof override !== 'object' || Array.isArray(override)) throw new TypeError('Component override must be an object.');
+    if (!override.id) throw new TypeError('Component override id is required.');
+    const next = cloneValue(current);
+    const index = next.overrides.findIndex((item) => item.id === override.id);
+    if (index >= 0) next.overrides[index] = cloneValue(override); else next.overrides.push(cloneValue(override));
+    const candidate = createProjectComponentInstance(next);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Set component override ${override.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const targetIndex = document.componentInstances.findIndex((item) => item.id === instanceId);
+      document.componentInstances[targetIndex] = candidate;
+    });
+    return override.id;
+  }
+
+  removeComponentOverride(instanceId, overrideId, commandDescriptor = {}) {
+    const current = componentInstanceById(this.document, instanceId);
+    if (!current) return false;
+    if (!current.overrides.some((item) => item.id === overrideId)) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Remove component override ${overrideId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const instance = componentInstanceById(document, instanceId);
+      instance.overrides = instance.overrides.filter((item) => item.id !== overrideId);
+    });
+    return true;
+  }
+
   // --- Universal semantic metadata -----------------------------------------
   // Human UI and AI both use these Store commands. Validation and history are
   // therefore identical to every other authored mutation path.
@@ -379,6 +573,9 @@ export class VeyraStore {
       : null;
   }
 
+  get selectedArtboard() { return this.selectedKind === 'artboard' ? this.selectedObject : null; }
+  get selectedComponent() { return this.selectedKind === 'component' ? this.selectedObject : null; }
+  get selectedComponentInstance() { return this.selectedKind === 'componentInstance' ? this.selectedObject : null; }
   get selectedBone() { return this.selectedKind === 'bone' ? this.selectedObject : null; }
   get selectedMesh() { return this.selectedKind === 'mesh' ? this.selectedObject : null; }
   get selectedControl() { return this.selectedKind === 'control' ? this.selectedObject : null; }
@@ -388,6 +585,9 @@ export class VeyraStore {
     const reference = this.selectedRef;
     const object = this.selectedObject;
     if (!reference || !object) return false;
+    if (reference.kind === 'artboard') return this.removeArtboard(reference.id, {}, commandDescriptor);
+    if (reference.kind === 'component') return this.removeComponent(reference.id, {}, commandDescriptor);
+    if (reference.kind === 'componentInstance') return this.removeComponentInstance(reference.id, commandDescriptor);
     if (reference.kind === 'node') return this.remove(reference.id, commandDescriptor);
     if (reference.kind === 'bone') return this.removeBone(reference.id, commandDescriptor);
     if (reference.kind === 'mesh') return this.removeMesh(reference.id, commandDescriptor);

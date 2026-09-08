@@ -39,7 +39,7 @@ const base = createDocument({
     target: node.id, machine: machine.id, input: 'Tap', action: 'fire',
   });
   const normalized = normalizeDocument({ ...base, listeners: [authored] });
-  assert.equal(normalized.version, 4, 'listener feature projects to v4');
+  assert.equal(normalized.version, 5, 'M6 project graph supersedes the legacy listener-v4 emitted format');
   assert.deepEqual(normalized.listeners[0].target, { kind: 'node', id: node.id });
   assert.deepEqual(normalized.listeners[0].input, { kind: 'machineInput', id: 'tap_input' });
   assert.deepEqual(normalized.listeners[0].machine, { kind: 'stateMachine', id: machine.id });
@@ -56,16 +56,16 @@ const base = createDocument({
   console.log('✓ malformed listeners are refused, never dropped');
 }
 
-// Plain documents remain v3 and normalize with an additive empty registry.
+// Plain legacy documents now migrate to the canonical v5 project graph with an additive empty listener registry.
 {
   const plain = normalizeDocument(base);
-  assert.equal(plain.version, 3);
+  assert.equal(plain.version, 5);
   assert.deepEqual(plain.listeners, []);
   const oldAccepts = (value) => [1, 2, 3].includes(Number(value.version));
-  assert.equal(oldAccepts(plain), true);
+  assert.equal(oldAccepts(plain), false, 'pre-project readers reject canonical v5 output');
   assert.ok(VEYRA_SUPPORTED_VERSIONS.includes(VEYRA_VERSION), 'default emitted version is readable');
   assert.ok(VEYRA_SUPPORTED_VERSIONS.includes(VEYRA_LISTENER_VERSION), 'listener emitted version is readable');
-  console.log('✓ listener-free documents remain v3-compatible and emitted versions are readable');
+  console.log('✓ listener-free legacy documents migrate to v5 while historical versions remain readable');
 }
 
 // Cross-version contract: this models the verified old reader gate only; it
@@ -74,16 +74,16 @@ const base = createDocument({
   const listener = createPointerListener({ id: 'listener_tap', target: node.id, machine: machine.id, input: 'Tap', event: 'pointerdown', action: 'fire' });
   const listenerDoc = normalizeDocument({ ...base, listeners: [listener] });
   const oldAccepts = (value) => [1, 2, 3].includes(Number(value.version));
-  assert.equal(oldAccepts(listenerDoc), false, 'old reader rejects v4 before normalization');
+  assert.equal(oldAccepts(listenerDoc), false, 'old reader rejects canonical v5 before normalization');
   const current = parseVeyra(JSON.stringify(listenerDoc));
-  assert.equal(current.listeners.length, 1, 'current reader preserves listener-bearing v4');
+  assert.equal(current.listeners.length, 1, 'current reader preserves listener-bearing v5');
 
   const once = serializeVeyra(listenerDoc);
   const twice = serializeVeyra(normalizeDocument(JSON.parse(once)));
   assert.equal(once, twice, 'listener serialization is byte-stable');
   const downgraded = normalizeDocument({ ...listenerDoc, listeners: [] });
-  assert.equal(downgraded.version, 3, 'intentional removal projects back to v3');
-  console.log('✓ v4 rejection boundary and deterministic downgrade');
+  assert.equal(downgraded.version, 5, 'listener removal keeps the canonical v5 project graph');
+  console.log('✓ legacy reader rejection boundary and deterministic v5 serialization');
 }
 
 console.log('All listener tests passed!');

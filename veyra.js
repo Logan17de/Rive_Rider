@@ -36,6 +36,9 @@ import { AnimationPlayback, evaluateTimeline, normalizeFrame } from './src/veyra
 import { parseVeyra, downloadSvg, downloadVeyra, serializeVeyra } from './src/veyra/io.js';
 import { isAnimatableProperty, nodePropertyAddress, readProperty, rigPropertyAddress, writeProperty } from './src/veyra/properties.js';
 import {
+  createArtboardRef,
+  createComponentRef,
+  createComponentInstanceRef,
   createBoneRef,
   createControlRef,
   createMachineInputRef,
@@ -56,6 +59,7 @@ import { createVeyraControlPlane } from './src/veyra/controlPlane.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
 import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
+import { createComponentRuntimeRegistry } from './src/veyra/components.js';
 import {
   VEYRA_WORKSPACE_LAYOUT_DEFAULTS,
   artboardResizeCursor,
@@ -168,6 +172,7 @@ let savedRevision = 0;
 let evaluatedScene = null;
 let animationPlayback = null;
 let activeTimelineId = null;
+let activeArtboardId = null;
 let currentFrame = 0;
 let interactionSceneRevision = 0;
 let selectedTrackAddress = null;
@@ -193,7 +198,15 @@ function restoredDocument() {
 
 const restored = restoredDocument();
 const store = new VeyraStore(restored || createStarterDocument());
+activeArtboardId = store.document.artboards[0].id;
 if (restored) savedRevision = -1;
+const componentRuntimeRegistry = createComponentRuntimeRegistry(() => store.document);
+
+function activeArtboard() {
+  return store.document.artboards.find((item) => item.id === activeArtboardId) || store.document.artboards[0];
+}
+function activeArtboardRef() { return createArtboardRef(activeArtboard().id); }
+function onActiveArtboard(item) { return item?.artboard?.id === activeArtboard().id; }
 const machineInteractionBridge = createMachineInteractionBridge({
   getDocument: () => store.document,
   onInvalidate: () => {
@@ -413,7 +426,7 @@ function setTool(tool, selectComponent = true) {
 function renderHierarchy() {
   hierarchy.replaceChildren();
   const children = new Map();
-  for (const node of store.document.nodes) {
+  for (const node of store.document.nodes.filter(onActiveArtboard)) {
     const key = referenceId(node.parent, 'node') || '__root__';
     if (!children.has(key)) children.set(key, []);
     children.get(key).push(node);
@@ -492,9 +505,80 @@ function renderHierarchy() {
     hierarchy.appendChild(label);
   };
 
+  sectionLabel('Artboards');
+  for (const artboard of store.document.artboards) {
+    const row = document.createElement('div');
+    row.className = 'treeRow';
+    row.classList.toggle('isSelected', artboard.id === activeArtboardId);
+    const select = document.createElement('button');
+    select.className = 'treeSelect';
+    select.textContent = artboard.name;
+    select.title = `${artboard.name} · ${artboard.id}`;
+    select.onclick = () => {
+      activeArtboardId = artboard.id;
+      store.select(createArtboardRef(artboard.id));
+      activeTimelineId = store.document.timelines.find((item) => item.artboard.id === artboard.id)?.id || null;
+      componentRuntimeRegistry.prune();
+      renderAll('active artboard changed');
+      fitCanvas();
+    };
+    const duplicate = document.createElement('button');
+    duplicate.className = 'treeUtility'; duplicate.title = 'Duplicate artboard'; duplicate.textContent = '⧉';
+    duplicate.onclick = () => {
+      const result = dispatchCompatibilityCommand('duplicateArtboard', { artboardId: artboard.id, options: {} }, { label: `Duplicate ${artboard.name}`, source: 'user' });
+      activeArtboardId = result.artboardId;
+      fitCanvas();
+    };
+    const component = store.document.components.find((item) => item.source.id === artboard.id);
+    const componentToggle = document.createElement('button');
+    componentToggle.className = 'treeUtility'; componentToggle.title = component ? 'Unmark Component' : 'Mark as Component'; componentToggle.textContent = component ? '◆' : '◇';
+    componentToggle.onclick = () => {
+      if (component) dispatchCompatibilityCommand('removeComponent', { componentId: component.id, options: {} }, { label: `Unmark ${artboard.name} Component`, source: 'user' });
+      else dispatchCompatibilityCommand('createComponent', { artboardId: artboard.id, overrides: { name: artboard.name } }, { label: `Mark ${artboard.name} Component`, source: 'user' });
+    };
+    const remove = document.createElement('button');
+    remove.className = 'treeUtility'; remove.title = 'Delete artboard'; remove.textContent = '×'; remove.disabled = store.document.artboards.length <= 1;
+    remove.onclick = () => {
+      try {
+        dispatchCompatibilityCommand('removeArtboard', { artboardId: artboard.id, options: {} }, { label: `Delete ${artboard.name}`, source: 'user' });
+        if (activeArtboardId === artboard.id) activeArtboardId = store.document.artboards[0].id;
+      } catch (error) { showToast(error.message, true); }
+    };
+    row.append(select, duplicate, componentToggle, remove); hierarchy.appendChild(row);
+  }
+  const projectActions = document.createElement('div'); projectActions.className = 'inlineActions';
+  projectActions.append(inspectorAction('New artboard', 'plus', () => {
+    const current = activeArtboard();
+    const result = dispatchCompatibilityCommand('addArtboard', { overrides: { name: `Artboard ${store.document.artboards.length + 1}`, x: current.x + current.width + 80, y: current.y, width: current.width, height: current.height, background: current.background } }, { label: 'Add artboard', source: 'user' });
+    activeArtboardId = result; fitCanvas();
+  }));
+  hierarchy.appendChild(projectActions);
+
+  if (store.document.components.length) {
+    sectionLabel('Components');
+    for (const component of store.document.components) {
+      const row = document.createElement('div'); row.className = 'treeRow';
+      const select = document.createElement('button'); select.className = 'treeSelect'; select.textContent = component.name;
+      select.onclick = () => store.select(createComponentRef(component.id));
+      const addInstance = document.createElement('button'); addInstance.className = 'treeUtility'; addInstance.title = 'Place instance'; addInstance.textContent = '+';
+      addInstance.onclick = () => dispatchCompatibilityCommand('addComponentInstance', { componentId: component.id, overrides: { name: `${component.name} Instance`, artboard: activeArtboardRef(), transform: { x: activeArtboard().x + 40, y: activeArtboard().y + 40 } } }, { label: `Place ${component.name}`, source: 'user' });
+      row.append(select, addInstance); hierarchy.appendChild(row);
+    }
+  }
+  const instances = store.document.componentInstances.filter(onActiveArtboard);
+  if (instances.length) {
+    sectionLabel('Component instances');
+    for (const instance of instances) {
+      const row = document.createElement('div'); row.className = 'treeRow';
+      const select = document.createElement('button'); select.className = 'treeSelect'; select.textContent = instance.name;
+      select.onclick = () => store.select(createComponentInstanceRef(instance.id));
+      row.append(select); hierarchy.appendChild(row);
+    }
+  }
+
   sectionLabel('Artwork');
   for (const root of children.get('__root__') || []) appendNode(root, 0);
-  if (!store.document.nodes.length) {
+  if (!store.document.nodes.some(onActiveArtboard)) {
     const empty = document.createElement('p');
     empty.className = 'geometryNote';
     empty.textContent = 'No objects yet. Add a shape above.';
@@ -542,7 +626,7 @@ function renderHierarchy() {
   };
 
   const boneChildren = new Map();
-  for (const bone of store.document.bones) {
+  for (const bone of store.document.bones.filter(onActiveArtboard)) {
     const key = referenceId(bone.parent, 'bone') || '__root__';
     if (!boneChildren.has(key)) boneChildren.set(key, []);
     boneChildren.get(key).push(bone);
@@ -551,14 +635,14 @@ function renderHierarchy() {
     appendRigItem('bone', bone, depth);
     for (const child of boneChildren.get(bone.id) || []) appendBone(child, depth + 1);
   };
-  rigCategoryLabel('Bones', store.document.bones.length);
+  rigCategoryLabel('Bones', store.document.bones.filter(onActiveArtboard).length);
   for (const bone of boneChildren.get('__root__') || []) appendBone(bone, 0);
-  rigCategoryLabel('Meshes & weights', store.document.meshes.length);
-  for (const mesh of store.document.meshes) appendRigItem('mesh', mesh);
-  rigCategoryLabel('Controls', store.document.controls.length);
-  for (const control of store.document.controls) appendRigItem('control', control);
-  rigCategoryLabel('Constraints', store.document.constraints.length);
-  for (const constraint of store.document.constraints) appendRigItem('constraint', constraint);
+  rigCategoryLabel('Meshes & weights', store.document.meshes.filter(onActiveArtboard).length);
+  for (const mesh of store.document.meshes.filter(onActiveArtboard)) appendRigItem('mesh', mesh);
+  rigCategoryLabel('Controls', store.document.controls.filter(onActiveArtboard).length);
+  for (const control of store.document.controls.filter(onActiveArtboard)) appendRigItem('control', control);
+  rigCategoryLabel('Constraints', store.document.constraints.filter(onActiveArtboard).length);
+  for (const constraint of store.document.constraints.filter(onActiveArtboard)) appendRigItem('constraint', constraint);
 
   if (!store.document.bones.length && !store.document.meshes.length && !store.document.controls.length && !store.document.constraints.length) {
     const empty = document.createElement('p');
@@ -725,33 +809,62 @@ function inspectorAction(label, iconName, onClick) {
   return button;
 }
 
-function renderDocumentInspector() {
-  inspectorTitle.textContent = 'Document';
-  selectedType.textContent = 'ARTBOARD';
-  const artboard = section('Artboard');
-  artboard.grid.append(
-    field('Width', store.document.artboard.width, (value) => commit('Resize artboard', (documentModel) => {
-      documentModel.artboard.width = value;
-    }), { type: 'number', number: true, min: 1, step: 1 }),
-    field('Height', store.document.artboard.height, (value) => commit('Resize artboard', (documentModel) => {
-      documentModel.artboard.height = value;
-    }), { type: 'number', number: true, min: 1, step: 1 }),
-    field('Background', store.document.artboard.background, (value) => commit('Change artboard background', (documentModel) => {
-      documentModel.artboard.background = value;
-    }), { placeholder: '#fff7fc' }),
-  );
-  appendNote(artboard.fieldset, 'The artboard and authored objects are saved in the .veyra file. Selection, solved poses, and deformation overlays are never serialized.');
-  inspector.appendChild(artboard.fieldset);
-
-  const rig = section('Rig overview');
-  const counts = document.createElement('div');
-  counts.className = 'vertexSummary';
-  counts.innerHTML = `<span>${store.document.bones.length} bones · ${store.document.meshes.length} meshes</span><strong>${store.document.controls.length} controls · ${store.document.constraints.length} constraints</strong>`;
-  rig.fieldset.appendChild(counts);
-  const diagnostics = evaluatedScene?.diagnostics;
-  appendNote(rig.fieldset, `${diagnostics?.unweightedVertices || 0} unweighted vertices · ${diagnostics?.nonNormalizedVertices || 0} non-normalized · ${diagnostics?.constraints.filter((item) => item.status === 'solved').length || 0}/${store.document.constraints.length} constraints solved.`);
-  inspector.appendChild(rig.fieldset);
+function projectCommand(action, args, label) {
+  try { return dispatchCompatibilityCommand(action, args, { label, source: 'user' }); }
+  catch (error) { showToast(error.message || String(error), true); return null; }
 }
+
+function renderArtboardInspector(artboard = activeArtboard()) {
+  inspectorTitle.textContent = artboard.name;
+  selectedType.textContent = 'ARTBOARD';
+  const frame = section('Artboard');
+  const patch = (changes, label) => projectCommand('updateArtboard', { artboardId: artboard.id, changes }, label);
+  frame.grid.append(
+    field('Name', artboard.name, (value) => patch({ name: value }, `Rename ${artboard.name}`)),
+    field('X', artboard.x, (value) => patch({ x: value }, `Move ${artboard.name} X`), { type: 'number', number: true, step: 1 }),
+    field('Y', artboard.y, (value) => patch({ y: value }, `Move ${artboard.name} Y`), { type: 'number', number: true, step: 1 }),
+    field('Width', artboard.width, (value) => patch({ width: value }, `Resize ${artboard.name}`), { type: 'number', number: true, min: 1, step: 1 }),
+    field('Height', artboard.height, (value) => patch({ height: value }, `Resize ${artboard.name}`), { type: 'number', number: true, min: 1, step: 1 }),
+    field('Background', artboard.background, (value) => patch({ background: value }, `Set ${artboard.name} background`), { placeholder: '#fff7fc' }),
+  );
+  appendNote(frame.fieldset, `Stable artboard ID: ${artboard.id}. Frame edits never move artwork or camera.`);
+  inspector.appendChild(frame.fieldset);
+}
+
+function renderComponentInspector(component) {
+  inspectorTitle.textContent = component.name; selectedType.textContent = 'COMPONENT';
+  const source = section('Component source');
+  source.grid.classList.add('oneColumn');
+  appendNote(source.fieldset, `Stable component ID: ${component.id} · source artboard: ${component.source.id}. Names are display-only.`);
+  const actions = document.createElement('div'); actions.className = 'inlineActions';
+  actions.append(inspectorAction('Place instance', 'plus', () => projectCommand('addComponentInstance', { componentId: component.id, overrides: { name: `${component.name} Instance`, artboard: activeArtboardRef(), transform: { x: activeArtboard().x + 40, y: activeArtboard().y + 40 } } }, `Place ${component.name}`)));
+  actions.append(inspectorAction('Unmark Component', 'delete', () => projectCommand('removeComponent', { componentId: component.id, options: {} }, `Unmark ${component.name}`)));
+  source.fieldset.appendChild(actions); inspector.appendChild(source.fieldset);
+}
+
+function renderComponentInstanceInspector(instance) {
+  inspectorTitle.textContent = instance.name; selectedType.textContent = 'INSTANCE';
+  const settings = section('Component instance');
+  const patch = (changes, label) => projectCommand('updateComponentInstance', { instanceId: instance.id, changes }, label);
+  settings.grid.append(
+    field('Name', instance.name, (value) => patch({ name: value }, `Rename ${instance.name}`)),
+    field('X', instance.transform.x, (value) => patch({ transform: { ...instance.transform, x: value } }, `Move ${instance.name} X`), { type: 'number', number: true }),
+    field('Y', instance.transform.y, (value) => patch({ transform: { ...instance.transform, y: value } }, `Move ${instance.name} Y`), { type: 'number', number: true }),
+    field('Frame width', instance.frame.width, (value) => patch({ frame: { ...instance.frame, width: value } }, `Resize ${instance.name}`), { type: 'number', number: true, min: 0.01 }),
+    field('Frame height', instance.frame.height, (value) => patch({ frame: { ...instance.frame, height: value } }, `Resize ${instance.name}`), { type: 'number', number: true, min: 0.01 }),
+    field('Fit', instance.fit, (value) => patch({ fit: value }, `Set ${instance.name} fit`), { select: ['none','contain','cover','stretch'].map((value) => ({ value, label: value })) }),
+    field('Align X', instance.alignX, (value) => patch({ alignX: value }, `Set ${instance.name} X alignment`), { select: ['start','center','end'].map((value) => ({ value, label: value })) }),
+    field('Align Y', instance.alignY, (value) => patch({ alignY: value }, `Set ${instance.name} Y alignment`), { select: ['start','center','end'].map((value) => ({ value, label: value })) }),
+    field('Opacity', instance.opacity, (value) => patch({ opacity: value }, `Set ${instance.name} opacity`), { type: 'number', number: true, min: 0, max: 1, step: 0.05 }),
+    checkbox('Visible', instance.visible, (value) => patch({ visible: value }, `${value ? 'Show' : 'Hide'} ${instance.name}`)),
+  );
+  appendNote(settings.fieldset, `Stable instance ID: ${instance.id} · source ${instance.component.id}. Overrides/runtime are local to this instance.`);
+  const actions = document.createElement('div'); actions.className = 'inlineActions';
+  actions.append(inspectorAction('Delete instance', 'delete', () => projectCommand('removeComponentInstance', { instanceId: instance.id }, `Delete ${instance.name}`)));
+  settings.fieldset.appendChild(actions); inspector.appendChild(settings.fieldset);
+}
+
+function renderDocumentInspector() { renderArtboardInspector(activeArtboard()); }
 
 function appendFillInspector(targetSection, kind, object) {
   const fill = object.paint.fill;
@@ -1352,7 +1465,10 @@ function renderConstraintInspector(constraint) {
 
 function renderInspector() {
   inspector.replaceChildren();
-  if (store.selectedNode) renderNodeInspector(store.selectedNode);
+  if (store.selectedArtboard) renderArtboardInspector(store.selectedArtboard);
+  else if (store.selectedComponent) renderComponentInspector(store.selectedComponent);
+  else if (store.selectedComponentInstance) renderComponentInstanceInspector(store.selectedComponentInstance);
+  else if (store.selectedNode) renderNodeInspector(store.selectedNode);
   else if (store.selectedBone) renderBoneInspector(store.selectedBone);
   else if (store.selectedMesh) renderMeshInspector(store.selectedMesh);
   else if (store.selectedControl) renderControlInspector(store.selectedControl);
@@ -1379,7 +1495,7 @@ function renderTimelineSelect() {
     selectedKeyframe = null;
   }
   timelineSelect.replaceChildren();
-  for (const timeline of store.document.timelines) {
+  for (const timeline of store.document.timelines.filter(onActiveArtboard)) {
     const option = document.createElement('option');
     option.value = timeline.id;
     option.textContent = timeline.name;
@@ -1706,7 +1822,7 @@ function evaluateCurrentFrame() {
   const runtimeAnimation = machineInteractionBridge.evaluateAll().overrides;
   const animation = { ...manualAnimation, ...runtimeAnimation };
   const layers = Object.keys(animation).length ? { animation } : {};
-  evaluatedScene = evaluateDocument(store.document, layers);
+  evaluatedScene = evaluateDocument(store.document, layers, null, { artboardId: activeArtboard().id, componentRuntime: componentRuntimeRegistry });
   interactionBridge.updateDocument(store.document);
   interactionSceneRevision += 1;
   renderer.render(evaluatedScene, store.selectedRef);
@@ -1907,6 +2023,8 @@ function scheduleAutosave(reason) {
 }
 
 store.subscribe((_current, reason) => {
+  if (!store.document.artboards.some((item) => item.id === activeArtboardId)) activeArtboardId = store.document.artboards[0].id;
+  componentRuntimeRegistry.prune();
   renderAll(reason);
   scheduleAutosave(reason);
 });
@@ -1944,6 +2062,7 @@ function commitDraftPath() {
     return;
   }
   const node = createNode('path', {
+    artboard: activeArtboardRef(),
     name: 'Drawn Path',
     transform: { x: 0, y: 0 },
     paint: { fill: 'none', stroke: '#ec4899', strokeWidth: 4 },
@@ -1971,12 +2090,10 @@ function cancelDraftPath() {
 function addNode(type) {
   const selected = store.selectedNode;
   const parent = selected?.type === 'group' ? selected : null;
+  const artboard = activeArtboard();
   const center = parent
     ? { x: 0, y: 0 }
-    : {
-      x: Number(store.document.artboard.x || 0) + store.document.artboard.width / 2,
-      y: Number(store.document.artboard.y || 0) + store.document.artboard.height / 2,
-    };
+    : { x: artboard.x + artboard.width / 2, y: artboard.y + artboard.height / 2 };
   const palette = {
     rectangle: { fill: '#f472b6', stroke: '#831843', strokeWidth: 3 },
     ellipse: { fill: '#22d3ee', stroke: '#155e75', strokeWidth: 3 },
@@ -1986,6 +2103,7 @@ function addNode(type) {
     group: { fill: 'none', stroke: 'none', strokeWidth: 0 },
   };
   const node = createNode(type, {
+    artboard: activeArtboardRef(),
     name: `New ${type[0].toUpperCase()}${type.slice(1)}`,
     parent: parent ? createNodeRef(parent.id) : null,
     transform: center,
@@ -2001,13 +2119,12 @@ document.querySelectorAll('[data-add]').forEach((button) => {
 });
 
 function addRig(kind) {
-  const center = {
-    x: Number(store.document.artboard.x || 0) + store.document.artboard.width / 2,
-    y: Number(store.document.artboard.y || 0) + store.document.artboard.height / 2,
-  };
+  const artboard = activeArtboard();
+  const center = { x: artboard.x + artboard.width / 2, y: artboard.y + artboard.height / 2 };
   if (kind === 'bone') {
     const parent = store.selectedBone;
     const boneId = store.addBone({
+      artboard: activeArtboardRef(),
       name: parent ? `${parent.name} Child` : 'New Bone',
       parent: parent ? createBoneRef(parent.id) : null,
       rest: parent ? { x: parent.length, y: 0 } : center,
@@ -2021,6 +2138,7 @@ function addRig(kind) {
   if (kind === 'control') {
     const selectedBoneState = evaluatedScene?.bones.find((bone) => bone.id === store.selectedBone?.id);
     const controlId = store.addControl({
+      artboard: activeArtboardRef(),
       name: 'New Position Control',
       position: selectedBoneState?.end || center,
     }, 'Add control');
@@ -2039,6 +2157,7 @@ function addRig(kind) {
       { id: `meshVertex_${crypto.randomUUID()}`, x: center.x - 80, y: center.y + 45, weights: cloneValue(weights) },
     ];
     const meshId = store.addMesh({
+      artboard: activeArtboardRef(),
       name: 'New Weighted Mesh',
       vertices,
       triangles: [
@@ -2094,6 +2213,7 @@ function addRig(kind) {
     }
     const constraintName = `${bone.name} ${type[0].toUpperCase()}${type.slice(1)}`;
     store.addConstraint(type, {
+      artboard: activeArtboardRef(),
       name: constraintName,
       ...overrides,
       order: store.document.constraints.length,
@@ -2119,6 +2239,7 @@ documentName.addEventListener('change', () => {
 $('newDocument').onclick = () => {
   if (store.revision !== savedRevision && !confirm('Create a new Veyra document? Your current work is autosaved but not downloaded.')) return;
   store.replaceDocument(createDocument({ name: 'Untitled Veyra' }), 'new document');
+  activeArtboardId = store.document.artboards[0].id;
   savedRevision = store.revision;
   fitCanvas();
   localStorage.removeItem(AUTOSAVE_KEY);
@@ -2132,6 +2253,7 @@ openFile.onchange = async () => {
   try {
     const documentModel = parseVeyra(await picked.text());
     store.replaceDocument(documentModel, `opened ${picked.name}`);
+    activeArtboardId = store.document.artboards[0].id;
     savedRevision = store.revision;
     fitCanvas();
     showToast(`${picked.name} opened`);
@@ -2184,7 +2306,7 @@ timelineAdd.onclick = () => {
   const name = prompt('Timeline name:', `Timeline ${store.document.timelines.length + 1}`);
   if (!name) return;
   try {
-    const id = store.addTimeline({ name, duration: 60, fps: 30 }, `Create timeline ${name}`);
+    const id = store.addTimeline({ name, duration: 60, fps: 30, artboard: activeArtboardRef() }, `Create timeline ${name}`);
     activeTimelineId = id;
     renderTimeline();
     showToast(`Timeline "${name}" created`);
@@ -2373,7 +2495,7 @@ function updateZoomLabel() {
 }
 
 function syncArtboardFrame() {
-  const artboard = store.document.artboard;
+  const artboard = activeArtboard();
   const artboardX = Number(artboard.x || 0);
   const artboardY = Number(artboard.y || 0);
   const topLeft = renderer.worldToClient(artboardX, artboardY);
@@ -2412,7 +2534,7 @@ function editorScreenSize() {
 }
 
 function fitCanvas() {
-  return applyViewportState(fitArtboardViewport(store.document.artboard, editorScreenSize(), { padding: 32 }), 'Artboard fitted');
+  return applyViewportState(fitArtboardViewport(activeArtboard(), editorScreenSize(), { padding: 32 }), 'Artboard fitted');
 }
 
 function focusEditorReference(ref, { select = true, padding = 54 } = {}) {
@@ -2424,7 +2546,7 @@ function focusEditorReference(ref, { select = true, padding = 54 } = {}) {
     return false;
   }
   if (select) store.select(ref);
-  const next = fitBoundsViewport(bounds, store.document.artboard, editorScreenSize(), { padding });
+  const next = fitBoundsViewport(bounds, activeArtboard(), editorScreenSize(), { padding });
   applyViewportState(next, `Focused ${ref.kind}`);
   return true;
 }
@@ -2455,7 +2577,7 @@ stageViewport.addEventListener('wheel', (event) => {
   const horizontal = normalizeWheelDelta(event.shiftKey ? event.deltaY + event.deltaX : event.deltaX, event.deltaMode) * 0.8;
   const vertical = event.shiftKey ? 0 : normalizeWheelDelta(event.deltaY, event.deltaMode) * 0.8;
   const matrix = canvas.getScreenCTM();
-  const worldPerPixel = matrix ? 1 / Math.max(1e-9, Math.abs(matrix.a)) : store.document.artboard.width / Math.max(1, zoom * canvas.clientWidth);
+  const worldPerPixel = matrix ? 1 / Math.max(1e-9, Math.abs(matrix.a)) : activeArtboard().width / Math.max(1, zoom * canvas.clientWidth);
   renderer.panBy(horizontal * worldPerPixel, vertical * worldPerPixel);
   syncArtboardFrame();
   setStatus(event.shiftKey ? 'Canvas panned horizontally' : 'Canvas panned');
@@ -2476,17 +2598,14 @@ function beginArtboardResize(event, direction) {
   event.preventDefault();
   event.stopImmediatePropagation();
   const startViewport = renderer.getViewport();
-  const startArtboard = {
-    x: Number(store.document.artboard.x || 0),
-    y: Number(store.document.artboard.y || 0),
-    width: store.document.artboard.width,
-    height: store.document.artboard.height,
-  };
+  const active = activeArtboard();
+  const startArtboard = { x: active.x, y: active.y, width: active.width, height: active.height };
   const matrix = canvas.getScreenCTM();
   const screenScaleX = matrix ? Math.hypot(matrix.a, matrix.b) : renderer.zoom;
   const screenScaleY = matrix ? Math.hypot(matrix.c, matrix.d) : renderer.zoom;
   const gesture = createArtboardResizeGesture({
     store,
+    artboardId: active.id,
     direction,
     start: { x: event.clientX, y: event.clientY },
     startArtboard,
@@ -2680,12 +2799,7 @@ const previewPointerHandlers = createPreviewPointerHandlers({
   getPreviewMode: () => stagePanel.dataset.mode === 'preview' || document.body.dataset.mode === 'preview',
   getViewCenter: () => renderer.viewCenter,
   getZoom: () => renderer.zoom,
-  getArtboardSize: () => ({
-    x: Number(store.document.artboard.x || 0),
-    y: Number(store.document.artboard.y || 0),
-    width: store.document.artboard.width,
-    height: store.document.artboard.height,
-  }),
+  getArtboardSize: () => ({ ...activeArtboard() }),
   isAuthoringEvent: (event) => event.target instanceof Element && Boolean(event.target.closest('.resizeHandle')),
   onNoHit: () => showToast('No interaction target under pointer', true),
 });
@@ -2825,7 +2939,30 @@ function dispatchCompatibilityCommand(action, args, command) {
 }
 
 globalThis.veyra = Object.freeze({
-  getViewportState: () => ({ ...renderer.getViewport(), layout: { ...workspaceLayout }, theme: document.documentElement.dataset.theme }),
+  getActiveArtboard: () => cloneValue(activeArtboard()),
+  setActiveArtboard: (artboardId, { fit = true } = {}) => {
+    if (!store.document.artboards.some((item) => item.id === artboardId)) throw new TypeError(`Unknown artboard ${artboardId}.`);
+    activeArtboardId = artboardId; store.select(createArtboardRef(artboardId)); if (fit) fitCanvas(); else renderAll('active artboard changed'); return cloneValue(activeArtboard());
+  },
+  addArtboard: (overrides) => dispatchCompatibilityCommand('addArtboard', { overrides }, { label: 'Add artboard', source: 'script' }),
+  updateArtboard: (artboardId, changes) => dispatchCompatibilityCommand('updateArtboard', { artboardId, changes }, { label: `Update artboard ${artboardId}`, source: 'script' }),
+  reorderArtboard: (artboardId, index) => dispatchCompatibilityCommand('reorderArtboard', { artboardId, index }, { label: `Reorder artboard ${artboardId}`, source: 'script' }),
+  duplicateArtboard: (artboardId, options = {}) => dispatchCompatibilityCommand('duplicateArtboard', { artboardId, options }, { label: `Duplicate artboard ${artboardId}`, source: 'script' }),
+  removeArtboard: (artboardId, options = {}) => dispatchCompatibilityCommand('removeArtboard', { artboardId, options }, { label: `Remove artboard ${artboardId}`, source: 'script' }),
+  createComponent: (artboardId, overrides = {}) => dispatchCompatibilityCommand('createComponent', { artboardId, overrides }, { label: `Create component from ${artboardId}`, source: 'script' }),
+  removeComponent: (componentId, options = {}) => dispatchCompatibilityCommand('removeComponent', { componentId, options }, { label: `Remove component ${componentId}`, source: 'script' }),
+  addComponentInstance: (componentId, overrides = {}) => dispatchCompatibilityCommand('addComponentInstance', { componentId, overrides }, { label: `Add component instance ${componentId}`, source: 'script' }),
+  updateComponentInstance: (instanceId, changes) => dispatchCompatibilityCommand('updateComponentInstance', { instanceId, changes }, { label: `Update component instance ${instanceId}`, source: 'script' }),
+  removeComponentInstance: (instanceId) => dispatchCompatibilityCommand('removeComponentInstance', { instanceId }, { label: `Remove component instance ${instanceId}`, source: 'script' }),
+  setComponentOverride: (instanceId, override) => dispatchCompatibilityCommand('setComponentOverride', { instanceId, override }, { label: `Set component override ${instanceId}`, source: 'script' }),
+  removeComponentOverride: (instanceId, overrideId) => dispatchCompatibilityCommand('removeComponentOverride', { instanceId, overrideId }, { label: `Remove component override ${overrideId}`, source: 'script' }),
+  getComponentRuntime: (instanceId) => cloneValue(componentRuntimeRegistry.evaluate(instanceId)),
+  setComponentTimelineTime: (instanceId, timelineId, seconds) => { const result = componentRuntimeRegistry.setTimelineTime(instanceId, timelineId, seconds); evaluateCurrentFrame(); return result; },
+  setComponentMachineInput: (instanceId, machineId, inputId, value) => { const result = componentRuntimeRegistry.setMachineInput(instanceId, machineId, inputId, value); evaluateCurrentFrame(); return result; },
+  fireComponentMachineInput: (instanceId, machineId, inputId) => { const result = componentRuntimeRegistry.fireMachineInput(instanceId, machineId, inputId); evaluateCurrentFrame(); return result; },
+  stepComponentMachine: (instanceId, machineId, deltaSeconds) => { const result = componentRuntimeRegistry.stepMachine(instanceId, machineId, deltaSeconds); evaluateCurrentFrame(); return result; },
+  resetComponentRuntime: (instanceId) => { const result = componentRuntimeRegistry.resetInstance(instanceId); evaluateCurrentFrame(); return result; },
+  getViewportState: () => ({ ...renderer.getViewport(), activeArtboardId, layout: { ...workspaceLayout }, theme: document.documentElement.dataset.theme }),
   setViewport: (viewport) => applyViewportState(viewport, 'Viewport updated'),
   fitArtboard: () => fitCanvas(),
   fitSelection: () => fitSelection(),
@@ -2844,7 +2981,7 @@ globalThis.veyra = Object.freeze({
   getSceneSummary: (options = {}) => createSceneSummary(store.document, options),
   getSemanticIndex: (options = {}) => buildSemanticIndex(store.document, options),
   getDocument: () => cloneValue(store.document),
-  getEvaluatedScene: () => cloneValue(evaluateDocument(store.document)),
+  getEvaluatedScene: () => cloneValue(evaluateDocument(store.document, {}, null, { artboardId: activeArtboard().id, componentRuntime: componentRuntimeRegistry })),
   readProperty: (address) => controlPlane.read(address).authoredValue,
   addListener: (overrides) => dispatchCompatibilityCommand('addListener', { overrides }, { label: 'Add listener', source: 'script' }),
   updateListener: (listenerId, changes) => dispatchCompatibilityCommand('updateListener', { listenerId, changes }, { label: `Update listener ${listenerId}`, source: 'script' }),

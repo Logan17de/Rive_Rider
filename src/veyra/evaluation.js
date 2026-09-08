@@ -3,6 +3,8 @@ import { cloneValue, normalizeDocument } from './model.js';
 import { propertyTargetStatus, writeProperty } from './properties.js';
 import { referenceId } from './references.js';
 import { evaluateRig } from './rigging.js';
+import { artboardById } from './projectGraph.js';
+import { evaluateComponentInstances } from './components.js';
 
 export const VEYRA_EVALUATION_ORDER = Object.freeze([
   'authored',
@@ -58,7 +60,7 @@ function evaluateNodes(document) {
   return { nodes, worldMatrices };
 }
 
-export function evaluateDocument(authoredDocument, layers = {}, animationPlayback = null) {
+export function evaluateDocument(authoredDocument, layers = {}, animationPlayback = null, options = {}) {
   let evaluatedDocument = normalizeDocument(authoredDocument);
   const sources = {};
   const diagnostics = { collisions: [] };
@@ -100,20 +102,28 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     constraintDiagnostics: solvedRig.diagnostics.constraints,
   });
 
-  return {
+  const artboardId = String(options.artboardId || evaluatedDocument.artboards[0]?.id || '');
+  const activeArtboard = artboardById(evaluatedDocument, artboardId);
+  if (!activeArtboard) throw new TypeError(`Evaluation artboard ${artboardId} does not exist.`);
+  const owned = (item) => item.artboard?.id === artboardId;
+  const baseNodes = nodeResult.nodes.filter(owned);
+  const baseScene = {
     kind: 'veyra-evaluated-scene',
     documentId: evaluatedDocument.id,
     name: evaluatedDocument.name,
     version: evaluatedDocument.version,
     conventions: cloneValue(evaluatedDocument.conventions),
-    artboard: cloneValue(evaluatedDocument.artboard),
+    artboard: cloneValue(activeArtboard),
+    artboards: cloneValue(evaluatedDocument.artboards),
+    components: cloneValue(evaluatedDocument.components),
+    componentInstances: cloneValue(evaluatedDocument.componentInstances.filter(owned)),
     assets: cloneValue(evaluatedDocument.assets),
     semantics: cloneValue(evaluatedDocument.semantics),
-    nodes: nodeResult.nodes,
-    bones: cloneValue(rig.bones),
-    meshes: cloneValue(rig.meshes),
-    controls: cloneValue(rig.controls),
-    constraints: cloneValue(rig.constraints),
+    nodes: baseNodes,
+    bones: cloneValue(rig.bones.filter(owned)),
+    meshes: cloneValue(rig.meshes.filter(owned)),
+    controls: cloneValue(rig.controls.filter(owned)),
+    constraints: cloneValue(rig.constraints.filter(owned)),
     diagnostics: cloneValue({
       ...rig.diagnostics,
       collisions: [
@@ -123,6 +133,29 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     }),
     evaluationOrder: [...VEYRA_EVALUATION_ORDER],
     sources,
+  };
+  if (options.includeComponents === false) return { ...baseScene, componentEvaluatedNodes: [] };
+  const componentEvaluatedNodes = evaluateComponentInstances({
+    document: evaluatedDocument,
+    artboardId,
+    baseScene,
+    runtimeRegistry: options.componentRuntime || null,
+    depth: Number(options.depth || 0),
+    componentPath: options.componentPath || [],
+    evaluateSource: (sourceDocument, sourceArtboardId, sourceLayers, nested = {}) => evaluateDocument(
+      sourceDocument, sourceLayers, null, {
+        ...options,
+        ...nested,
+        artboardId: sourceArtboardId,
+        componentRuntime: options.componentRuntime || null,
+        includeComponents: true,
+      },
+    ),
+  });
+  return {
+    ...baseScene,
+    nodes: [...baseNodes, ...componentEvaluatedNodes],
+    componentEvaluatedNodes,
   };
 }
 

@@ -15,6 +15,10 @@ function close(actual, expected, epsilon = 1e-9, message = '') {
   assert.ok(Math.abs(actual - expected) <= epsilon, `${message} expected ${expected}, got ${actual}`);
 }
 
+function authoredFrame(artboard) {
+  return { x: artboard.x, y: artboard.y, width: artboard.width, height: artboard.height, background: artboard.background };
+}
+
 const baseFrame = { x: 0, y: 0, width: 800, height: 600, background: '#fff7fc' };
 const camera = Object.freeze({ zoom: 2, centerX: 420, centerY: 310 });
 const screen = { width: 1000, height: 700 };
@@ -57,13 +61,13 @@ assert.deepEqual(VEYRA_ARTBOARD_RESIZE_DIRECTIONS, [
 // 1-7: all eight directions operate on the authored frame, not camera/artwork.
 {
   const { store, gesture } = resize('left', 80, 0);
-  assert.deepEqual(store.document.artboard, { ...baseFrame, x: 40, width: 760 });
+  assert.deepEqual(authoredFrame(store.document.artboard), { ...baseFrame, x: 40, width: 760 });
   assert.equal(store.document.artboard.x + store.document.artboard.width, 800);
   gesture.end();
 }
 {
   const { store, gesture } = resize('top', 0, 60);
-  assert.deepEqual(store.document.artboard, { ...baseFrame, y: 30, height: 570 });
+  assert.deepEqual(authoredFrame(store.document.artboard), { ...baseFrame, y: 30, height: 570 });
   assert.equal(store.document.artboard.y + store.document.artboard.height, 600);
   gesture.end();
 }
@@ -77,7 +81,7 @@ const expected = {
 };
 for (const direction of Object.keys(expected)) {
   const { store, gesture } = resize(direction, 80, 60);
-  const { background, ...frame } = store.document.artboard;
+  const { background, ...frame } = authoredFrame(store.document.artboard);
   assert.deepEqual(frame, expected[direction], `${direction}: composed frame semantics`);
   if (direction === 'right' || direction === 'bottom' || direction === 'bottom-right') {
     assert.equal(store.document.artboard.x, 0);
@@ -208,6 +212,8 @@ assert.doesNotMatch(html, /class="artboardHandle"/);
 assert.doesNotMatch(browser, /anchorShiftX|anchorShiftY/);
 assert.match(browser, /renderer\.worldToClient\(artboardX, artboardY\)/);
 assert.match(browser, /const startArtboard = \{/);
-assert.match(browser, /x: Number\(store\.document\.artboard\.x \|\| 0\)/);
+assert.match(browser, /const active = activeArtboard\(\);/);
+assert.match(browser, /const startArtboard = \{ x: active\.x, y: active\.y, width: active\.width, height: active\.height \};/);
+assert.match(browser, /artboardId: active\.id/);
 
 console.log('veyra M5 final artboard-origin correction tests passed');
