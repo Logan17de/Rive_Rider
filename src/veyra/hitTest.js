@@ -1,8 +1,10 @@
 import { regularPolygonPoints, starPoints } from './geometry.js';
 import { referenceId } from './references.js';
 import { transformMatrix } from './contracts.js';
+import { createSvgViewBoxScreenTransform } from './viewport.js';
 
 export const VEYRA_HIT_TEST_TOLERANCE_PX = 0.35;
+export const VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX = VEYRA_HIT_TEST_TOLERANCE_PX / 4;
 export const VEYRA_POINTER_EVENT_MODES = Object.freeze(['auto', 'none', 'pass-through']);
 
 function finite(value, fallback = 0) {
@@ -25,11 +27,15 @@ function apply(matrix, point) {
   };
 }
 
-function screenPoint(worldPoint, viewport) {
-  return {
-    x: (worldPoint.x - viewport.centerX) * viewport.zoom + viewport.width / 2,
-    y: (worldPoint.y - viewport.centerY) * viewport.zoom + viewport.height / 2,
-  };
+function invert(matrix) {
+  const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+  if (!Number.isFinite(determinant) || Math.abs(determinant) <= 1e-14) return null;
+  const inv = 1 / determinant;
+  const a = matrix[3] * inv;
+  const b = -matrix[1] * inv;
+  const c = -matrix[2] * inv;
+  const d = matrix[0] * inv;
+  return [a, b, c, d, -(a * matrix[4] + c * matrix[5]), -(b * matrix[4] + d * matrix[5])];
 }
 
 function pointOnSegment(point, start, end, epsilon = 1e-7) {
@@ -83,39 +89,29 @@ function strokeEnabled(node) {
   return stroke !== 'none' && Number.isFinite(Number(node.paint?.strokeWidth)) && Number(node.paint.strokeWidth) > 0;
 }
 
-function roundedRectanglePoints(geometry) {
-  const width = Number(geometry.width);
-  const height = Number(geometry.height);
-  const halfW = width / 2;
-  const halfH = height / 2;
-  const radius = Math.max(0, Math.min(Number(geometry.cornerRadius) || 0, halfW, halfH));
-  if (radius <= 1e-9) return [
-    { x: -halfW, y: -halfH }, { x: halfW, y: -halfH },
-    { x: halfW, y: halfH }, { x: -halfW, y: halfH },
-  ];
-  const result = [];
-  const corners = [
-    { cx: halfW - radius, cy: -halfH + radius, start: -Math.PI / 2 },
-    { cx: halfW - radius, cy: halfH - radius, start: 0 },
-    { cx: -halfW + radius, cy: halfH - radius, start: Math.PI / 2 },
-    { cx: -halfW + radius, cy: -halfH + radius, start: Math.PI },
-  ];
-  for (const corner of corners) {
-    for (let index = 0; index <= 8; index += 1) {
-      const angle = corner.start + (index / 8) * (Math.PI / 2);
-      result.push({ x: corner.cx + Math.cos(angle) * radius, y: corner.cy + Math.sin(angle) * radius });
-    }
-  }
-  return result;
+function localEllipseContains(node, localPoint) {
+  const rx = Number(node.geometry?.width) / 2;
+  const ry = Number(node.geometry?.height) / 2;
+  if (!(rx > 0) || !(ry > 0)) return false;
+  const normalized = (localPoint.x * localPoint.x) / (rx * rx) + (localPoint.y * localPoint.y) / (ry * ry);
+  return normalized <= 1 + 1e-12;
 }
 
-function ellipsePoints(geometry) {
-  const rx = Number(geometry.width) / 2;
-  const ry = Number(geometry.height) / 2;
-  return Array.from({ length: 72 }, (_, index) => {
-    const angle = (index / 72) * Math.PI * 2;
-    return { x: Math.cos(angle) * rx, y: Math.sin(angle) * ry };
-  });
+function localRoundedRectangleContains(node, localPoint) {
+  const width = Number(node.geometry?.width);
+  const height = Number(node.geometry?.height);
+  if (!(width > 0) || !(height > 0)) return false;
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const radius = Math.max(0, Math.min(Number(node.geometry?.cornerRadius) || 0, halfW, halfH));
+  const x = Math.abs(localPoint.x);
+  const y = Math.abs(localPoint.y);
+  if (x > halfW + 1e-12 || y > halfH + 1e-12) return false;
+  if (radius <= 1e-12) return true;
+  if (x <= halfW - radius || y <= halfH - radius) return true;
+  const dx = x - (halfW - radius);
+  const dy = y - (halfH - radius);
+  return dx * dx + dy * dy <= radius * radius + 1e-12;
 }
 
 function distanceToLine(point, start, end) {
@@ -132,7 +128,7 @@ function midpoint(a, b) {
 
 function flattenCubic(p0, p1, p2, p3, output, tolerance = VEYRA_HIT_TEST_TOLERANCE_PX, depth = 0) {
   const flatness = Math.max(distanceToLine(p1, p0, p3), distanceToLine(p2, p0, p3));
-  if (flatness <= tolerance || depth >= 12) {
+  if (flatness <= tolerance || depth >= 16) {
     output.push(p3);
     return;
   }
@@ -146,24 +142,20 @@ function flattenCubic(p0, p1, p2, p3, output, tolerance = VEYRA_HIT_TEST_TOLERAN
   flattenCubic(p0123, p123, p23, p3, output, tolerance, depth + 1);
 }
 
-function toScreen(matrix, viewport, point) {
-  return screenPoint(apply(matrix, point), viewport);
-}
-
-function pathScreenPoints(node, matrix, viewport) {
+function pathScreenPoints(node, localToScreen) {
   const vertices = node.geometry?.vertices || [];
-  if (vertices.length < 2) return { points: [], strokeClosed: false };
+  if (vertices.length < 2) return { points: [], strokeClosed: false, curvedApproximation: true };
   const point = (vertex) => ({ x: Number(vertex.x), y: Number(vertex.y) });
   const handle = (vertex, prefix) => ({
     x: Number(vertex.x) + Number(vertex[`${prefix}X`] || 0),
     y: Number(vertex.y) + Number(vertex[`${prefix}Y`] || 0),
   });
-  const result = [toScreen(matrix, viewport, point(vertices[0]))];
+  const result = [apply(localToScreen, point(vertices[0]))];
   const appendSegment = (from, to) => {
-    const p0 = toScreen(matrix, viewport, point(from));
-    const p1 = toScreen(matrix, viewport, handle(from, 'out'));
-    const p2 = toScreen(matrix, viewport, handle(to, 'in'));
-    const p3 = toScreen(matrix, viewport, point(to));
+    const p0 = apply(localToScreen, point(from));
+    const p1 = apply(localToScreen, handle(from, 'out'));
+    const p2 = apply(localToScreen, handle(to, 'in'));
+    const p3 = apply(localToScreen, point(to));
     const hasHandle = Math.hypot(p1.x - p0.x, p1.y - p0.y) > 1e-7
       || Math.hypot(p2.x - p3.x, p2.y - p3.y) > 1e-7;
     if (hasHandle) flattenCubic(p0, p1, p2, p3, result);
@@ -171,7 +163,77 @@ function pathScreenPoints(node, matrix, viewport) {
   };
   for (let index = 1; index < vertices.length; index += 1) appendSegment(vertices[index - 1], vertices[index]);
   if (node.geometry.closed) appendSegment(vertices.at(-1), vertices[0]);
-  return { points: result, strokeClosed: Boolean(node.geometry.closed) };
+  return { points: result, strokeClosed: Boolean(node.geometry.closed), curvedApproximation: true };
+}
+
+function conicSecondDerivativeBound(localToScreen, rx, ry) {
+  const xBound = Math.abs(localToScreen[0]) * Math.abs(rx) + Math.abs(localToScreen[2]) * Math.abs(ry);
+  const yBound = Math.abs(localToScreen[1]) * Math.abs(rx) + Math.abs(localToScreen[3]) * Math.abs(ry);
+  return Math.hypot(xBound, yBound);
+}
+
+/**
+ * For a twice-differentiable parametric curve, linear interpolation error over
+ * an interval h is bounded by max|r''| * h^2 / 8. Ellipse/circular-arc second
+ * derivatives stay within the conservative affine bound below, so the chord
+ * approximation remains bounded in final screen pixels regardless of zoom,
+ * object size, rotation, or non-uniform scale.
+ */
+function conicSegmentCount(localToScreen, rx, ry, sweep, tolerance = VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX) {
+  const bound = conicSecondDerivativeBound(localToScreen, rx, ry);
+  if (!(bound > 1e-12) || !(tolerance > 0)) return 1;
+  const maxStep = Math.sqrt((8 * tolerance) / bound);
+  if (!(maxStep > 0)) return 1;
+  return Math.max(1, Math.ceil(Math.abs(sweep) / maxStep));
+}
+
+function ellipseScreenPoints(node, localToScreen) {
+  const rx = Number(node.geometry.width) / 2;
+  const ry = Number(node.geometry.height) / 2;
+  const quarterSweep = Math.PI / 2;
+  const perQuarter = conicSegmentCount(localToScreen, rx, ry, quarterSweep);
+  const points = [];
+  for (let quarter = 0; quarter < 4; quarter += 1) {
+    const start = quarter * quarterSweep;
+    for (let index = 0; index < perQuarter; index += 1) {
+      const angle = start + (index / perQuarter) * quarterSweep;
+      points.push(apply(localToScreen, { x: Math.cos(angle) * rx, y: Math.sin(angle) * ry }));
+    }
+  }
+  return points;
+}
+
+function roundedRectangleScreenPoints(node, localToScreen) {
+  const width = Number(node.geometry.width);
+  const height = Number(node.geometry.height);
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const radius = Math.max(0, Math.min(Number(node.geometry.cornerRadius) || 0, halfW, halfH));
+  if (radius <= 1e-12) return [
+    apply(localToScreen, { x: -halfW, y: -halfH }),
+    apply(localToScreen, { x: halfW, y: -halfH }),
+    apply(localToScreen, { x: halfW, y: halfH }),
+    apply(localToScreen, { x: -halfW, y: halfH }),
+  ];
+  const quarterSweep = Math.PI / 2;
+  const perQuarter = conicSegmentCount(localToScreen, radius, radius, quarterSweep);
+  const corners = [
+    { cx: halfW - radius, cy: -halfH + radius, start: -Math.PI / 2 },
+    { cx: halfW - radius, cy: halfH - radius, start: 0 },
+    { cx: -halfW + radius, cy: halfH - radius, start: Math.PI / 2 },
+    { cx: -halfW + radius, cy: -halfH + radius, start: Math.PI },
+  ];
+  const result = [];
+  for (const corner of corners) {
+    for (let index = 0; index < perQuarter; index += 1) {
+      const angle = corner.start + (index / perQuarter) * quarterSweep;
+      result.push(apply(localToScreen, {
+        x: corner.cx + Math.cos(angle) * radius,
+        y: corner.cy + Math.sin(angle) * radius,
+      }));
+    }
+  }
+  return result;
 }
 
 function drawableGeometry(node) {
@@ -188,26 +250,54 @@ function drawableGeometry(node) {
   return false;
 }
 
-function geometryScreenPath(node, matrix, viewport) {
-  if (!drawableGeometry(node)) return { points: [], strokeClosed: false };
-  if (node.type === 'path') return pathScreenPoints(node, matrix, viewport);
+function geometryScreenPath(node, localToScreen) {
+  if (!drawableGeometry(node)) return { points: [], strokeClosed: false, curvedApproximation: false };
+  if (node.type === 'path') return pathScreenPoints(node, localToScreen);
+  if (node.type === 'ellipse') return { points: ellipseScreenPoints(node, localToScreen), strokeClosed: true, curvedApproximation: true };
+  if (node.type === 'rectangle') {
+    const curved = Number(node.geometry?.cornerRadius) > 0;
+    return { points: roundedRectangleScreenPoints(node, localToScreen), strokeClosed: true, curvedApproximation: curved };
+  }
   let local;
-  if (node.type === 'rectangle') local = roundedRectanglePoints(node.geometry);
-  else if (node.type === 'ellipse') local = ellipsePoints(node.geometry);
-  else if (node.type === 'polygon') local = regularPolygonPoints(node.geometry.radius, node.geometry.sides);
+  if (node.type === 'polygon') local = regularPolygonPoints(node.geometry.radius, node.geometry.sides);
   else if (node.type === 'star') local = starPoints(node.geometry.outerRadius, node.geometry.innerRadius, node.geometry.points);
-  else return { points: [], strokeClosed: false };
-  return { points: local.map((point) => toScreen(matrix, viewport, point)), strokeClosed: true };
+  else return { points: [], strokeClosed: false, curvedApproximation: false };
+  return { points: local.map((point) => apply(localToScreen, point)), strokeClosed: true, curvedApproximation: false };
 }
 
-function hitGeometry(node, screen, matrix, viewport) {
-  const { points, strokeClosed } = geometryScreenPath(node, matrix, viewport);
-  if (points.length < 2) return false;
-  // SVG fill semantics implicitly close an open path subpath. The point-in-
-  // polygon test closes via modulo even when the authored path stroke is open.
-  if (fillEnabled(node) && points.length >= 3 && nonzeroContains(screen, points)) return true;
+function exactCurvedFillContains(node, screen, localToScreen) {
+  if (!['rectangle', 'ellipse'].includes(node.type)) return null;
+  const inverse = invert(localToScreen);
+  if (!inverse) return false;
+  const localPoint = apply(inverse, screen);
+  return node.type === 'ellipse'
+    ? localEllipseContains(node, localPoint)
+    : localRoundedRectangleContains(node, localPoint);
+}
+
+function hitGeometry(node, screen, worldMatrix, viewportTransform) {
+  const localToScreen = multiply(viewportTransform.matrix, worldMatrix);
+  if (fillEnabled(node)) {
+    const exactCurvedFill = exactCurvedFillContains(node, screen, localToScreen);
+    if (exactCurvedFill === true) return true;
+    if (exactCurvedFill === null) {
+      const fillPath = geometryScreenPath(node, localToScreen);
+      // SVG fill semantics implicitly close an open path subpath. The winding
+      // test closes via modulo even when the authored path stroke is open.
+      if (fillPath.points.length >= 3 && nonzeroContains(screen, fillPath.points)) return true;
+    }
+  }
   if (!strokeEnabled(node)) return false;
-  const threshold = (Math.abs(Number(node.paint.strokeWidth)) / 2 + VEYRA_HIT_TEST_TOLERANCE_PX) ** 2;
+
+  const { points, strokeClosed, curvedApproximation } = geometryScreenPath(node, localToScreen);
+  if (points.length < 2) return false;
+  const halfStroke = Math.abs(Number(node.paint.strokeWidth)) / 2;
+  // Ellipse/rounded-rect chord error consumes part of the public tolerance
+  // budget, so the maximum true-boundary expansion remains <= 0.35 CSS px.
+  const allowance = curvedApproximation && ['ellipse', 'rectangle'].includes(node.type)
+    ? VEYRA_HIT_TEST_TOLERANCE_PX - VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX
+    : VEYRA_HIT_TEST_TOLERANCE_PX;
+  const threshold = (halfStroke + allowance) ** 2;
   for (let index = 1; index < points.length; index += 1) {
     if (distanceSquaredToSegment(screen, points[index - 1], points[index]) <= threshold) return true;
   }
@@ -264,19 +354,23 @@ function evaluatedPaintOrder(document, byId) {
 
 /**
  * Return the topmost interaction-participating drawable node under a viewport
- * point. `opacity` deliberately does not participate: a fully transparent node
- * remains interactive unless visibility/pointerEvents says otherwise.
+ * point. Screen mapping mirrors SVG `viewBox` + `xMidYMid meet`, so runtime hits
+ * stay aligned with rendering across aspect ratios, pan, and zoom. `opacity`
+ * deliberately does not participate.
  */
 export function hitTestPoint(point, document, viewport = {}) {
   if (!point || !document || !Array.isArray(document.nodes)) return null;
   const zoom = finite(viewport.zoom, 1);
-  if (Math.abs(zoom) < 1e-12) return null;
-  const width = finite(viewport.width, finite(document.artboard?.width, 0));
-  const height = finite(viewport.height, finite(document.artboard?.height, 0));
-  const centerX = finite(viewport.centerX, finite(viewport.panX, width / 2));
-  const centerY = finite(viewport.centerY, finite(viewport.panY, height / 2));
+  if (!(zoom > 0)) return null;
+  const artboard = document.artboard || {};
+  const width = finite(viewport.width, finite(artboard.width, 0));
+  const height = finite(viewport.height, finite(artboard.height, 0));
+  if (!(width > 0) || !(height > 0)) return null;
+  const centerX = finite(viewport.centerX, finite(viewport.panX, finite(artboard.width, 0) / 2));
+  const centerY = finite(viewport.centerY, finite(viewport.panY, finite(artboard.height, 0) / 2));
+  const viewportTransform = createSvgViewBoxScreenTransform(artboard, { width, height, zoom, centerX, centerY });
+  if (!viewportTransform) return null;
   const screen = { x: finite(point.x), y: finite(point.y) };
-  const viewportTransform = { width, height, zoom, centerX, centerY };
   const { byId, resolve } = worldMatrices(document);
   const paintOrder = evaluatedPaintOrder(document, byId);
   for (let index = paintOrder.length - 1; index >= 0; index -= 1) {
