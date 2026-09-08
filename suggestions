@@ -4,15 +4,70 @@ Veyra milestone suggestions
 Current milestone
 -----------------
 - M0–M5 foundation, interaction and workspace UX work is independently VERIFIED.
-- Active work is now `milestone.md` M6 — Multi-Artboard, Components & Project Graph, mapping to master `plan.md` M2.
-- Keep M6 focused on stable artboard/component/instance identity, component evaluation/runtime isolation, cross-artboard dependency/ownership and canonical UI/AI control parity.
+- Active work is `milestone.md` M6 — Multi-Artboard, Components & Project Graph correction pass.
+- M6 must also preserve the verified workspace-camera contract. Current user testing exposed a client-space panel-resize regression and low-zoom authored-stroke scaling issue; those belong in the active correction pass because they affect the current editor/runtime surface.
 
-Queued work after M6
---------------------
-1. Resume the master `plan.md` sequence with View Models / Data Binding / Property Groups / enums / converters / lists.
+Queued interstitial milestone after M6
+--------------------------------------
+## Vector Authoring, Multi-Selection & Grouping UX
+
+Promote this before View Models / Data Binding because it closes current everyday drawing/editing gaps in the editor.
+
+### Stage coordinates / position readout
+- Show pointer world coordinates for the active artboard in the stage/status bar (X / Y).
+- Show selected object's authored transform position clearly in the Inspector.
+- For multi-selection, expose deterministic selection bounds/center without inventing authored values.
+- Coordinate readout must use the same world/client transform as renderer and hit testing.
+
+### Rive-style Pen / Draw Path lifecycle
+- A valid draft path must not disappear merely because the user changes tools.
+- Match Rive's Pen lifecycle: pressing Esc after >=2 vertices finishes/commits the path; an incomplete one-point draft may cancel.
+- Switching tools with a valid draft should deterministically commit/finalize rather than silently discard it.
+- Click places a straight vertex; click+drag creates Bezier handles immediately.
+- Closing a path by targeting the first vertex must be supported.
+- Persistent path creation must go through the canonical command/Store path and be one undoable authored operation.
+
+### Edit Vertices mode
+- Enter with a selected path enters Edit Vertices mode; provide a visible Done Editing action.
+- Vertices remain stable-addressable entities.
+- Drag vertex to reposition.
+- Drag Bezier handles to reshape curves.
+- Support explicit handle modes compatible with Rive concepts: straight, mirrored, detached, asymmetric.
+- Ctrl/Cmd+click vertex toggles straight/mirrored where valid.
+- Ctrl/Cmd+click handle removes that handle.
+- Alt/Option+click handle detaches it.
+- Pen Alt/Option+click vertex deletes the vertex.
+- Add/remove-vertex operations must exist in the canonical command registry (not UI-only mutations).
+- Expose straight-vertex corner radius and allow direct dragging/Inspector editing; define deterministic conversion to explicit curve vertices when needed.
+- Open/close path and reverse-direction operations should be machine-readable and undoable.
+
+### Multi-selection
+- Store/editor selection must support multiple stable typed refs rather than one selectedId only.
+- Shift+click add/remove selection.
+- Empty-stage marquee selection.
+- Deep selection must remain possible for nested groups.
+- Focus/visibility/lock behavior must stay stable under multi-selection.
+
+### Group / ungroup
+- Windows/Linux Ctrl+G and macOS Cmd+G group the current selection.
+- Ctrl/Cmd+Shift+G ungroups.
+- Grouping preserves every child's rendered world transform and draw order.
+- Ungrouping preserves rendered world transforms and deterministic hierarchy order.
+- Group/ungroup are canonical commands, one undoable operation, AI-readable, stable-ref based and name-independent.
+
+### Overlay / low-zoom ergonomics
+- Distinguish authored artwork from editor-only overlays.
+- Authored fills/strokes scale normally with camera zoom unless an explicit future non-scaling-stroke feature says otherwise.
+- Selection handles, vertices, Bezier handles, bones and controls may use bounded screen-space sizing for usability, but must not alter authored geometry.
+- Add a clear way to hide rig/editor overlays (and/or a final-playback view) so low-zoom artwork can be inspected without controls visually dominating it.
+
+Mandatory tests should cover save/load, undo/redo, 10%–800% zoom, nested transforms, multi-selection/group transform preservation, pen Esc/tool-switch finalization, Bezier handle editing, and UI/AI command parity.
+
+Roadmap after the interstitial milestone
+----------------------------------------
+1. Resume master `plan.md` with View Models / Data Binding / Property Groups / enums / converters / lists.
 2. Continue into full layered state-machine parity and later Rive feature families in plan order.
-3. Add path-topology commands (`addVertex` / `removeVertex`) plus a mechanical UI-to-command parity audit when it fits the active feature boundary.
-4. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
+3. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
 
 Guardrails
 ----------
