@@ -13,7 +13,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 | Area | Current verified estimate | Notes |
 | --- | ---: | --- |
 | AI-native identity / semantics / control architecture | **~92–94%** | Stable typed identity, semantics, name-independent resolution, canonical control plane, dependency/ownership graph, preview/dispatch/verify and machine-readable interaction surfaces are verified. |
-| Core editor / engine foundation | **~82–85%** | M0–M4 are verified. M5 is largely implemented but is not counted as accepted until the viewport/artboard corrections below pass. |
+| Core editor / engine foundation | **~82–85%** | M0–M4 are verified. Most of M5 is implemented and the stable camera is accepted, but M5 is not counted until the final artboard-origin correction below passes. |
 | Modern Rive editor/runtime feature parity | **~43–47%** | Current vector/animation/rig/state-machine/interaction loop is verified; most major modern Rive feature families remain. |
 | Full Veyra target: Rive parity + every feature AI-readable/controlable | **~41–44%** | Architecture remains ahead of raw Rive feature breadth. |
 | Remaining full-target work | **~56–59%** | Primarily Components/artboards, Data Binding/View Models, full state machines/listeners/events, paint/effects, text/media, layout, advanced rigging/animation, scripting/WGSL, runtimes/SDKs/export, collaboration and MCP/agent layer. |
@@ -22,7 +22,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 - `plan.md` **M0 — AI Identity & Control Foundation:** **VERIFIED**.
 - `plan.md` **M1 — Close current interaction loop:** **VERIFIED**.
-- **Current interstitial milestone:** M5 Workspace UX Stabilization — **AWAITING VERIFICATION**.
+- **Current interstitial milestone:** M5 Workspace UX Stabilization — **CORRECTIONS REQUIRED**.
 - `plan.md` **M2 — Multi-artboard, Components and project graph:** remains next after M5 verification.
 
 ### Progress maintenance rule
@@ -31,169 +31,159 @@ Every future milestone verification or milestone advance must update this **Prog
 
 ---
 
-# MILESTONE M5 — Workspace UX Stabilization — CORRECTION PASS
+# MILESTONE M5 — Workspace UX Stabilization — FINAL CORRECTION PASS
 
 **Roadmap mapping:** interstitial editor-quality gate between verified `plan.md` M1 and `plan.md` M2  
-**Status:** `AWAITING VERIFICATION`
+**Status:** `CORRECTIONS REQUIRED`
 
-## Verification result
+## Independent verification result
 
-The main M5 implementation is accepted **in principle** and should not be rewritten unnecessarily. The following pieces exist and passed the current automated suite:
+The correction at `25684873a7efb42aa8d66300fd30686f43441d7a` successfully fixes the **stable camera** contract:
 
-- right/middle/Space canvas pan routing;
-- cursor-anchored wheel zoom helpers;
-- Fit Artboard / Fit Selection / Focus Selection / 100% commands;
-- stable-ref object focus controls;
-- hierarchy visibility controls;
-- left/right/bottom splitters and collapse persistence;
-- object move/resize transaction support;
-- semantic theme tokens and Neutral Dark default;
-- editor viewport API exposure;
-- M4 render/hit-test integration remains green;
-- latest pre-correction `main` Tests workflow is green.
+- `zoom` now has stable CSS-pixel/world-unit meaning;
+- panel/window resize changes visible extent without changing camera scale;
+- renderer and M4 hit testing share the same viewport transform;
+- 100% means `1 world unit = 1 CSS pixel`;
+- all eight screen-space artboard edge/corner zones exist;
+- permanent artboard resize-handle DOM is removed;
+- cancel/undo and pointer-capture plumbing are substantially in place;
+- final `main` CI at `262791be19d859a73179223fddb952ca341ba6d8` is green.
 
-However, independent UI verification exposed two workspace-mechanics blockers. M5 must remain open until they are corrected.
+One correctness blocker remains before M5 can be accepted.
 
 ---
 
-## Correction 1 — Panel/window resize must NOT change graph/canvas zoom mechanics
+## Final blocker — left/top artboard resize must move the ARTBOARD FRAME, not the CAMERA
 
-### Observed problem
+### Current bug
 
-Resizing the left/right panels changes the visible scale/mechanics of the graph/artboard. The current renderer viewBox is derived from artboard dimensions and zoom, while the SVG uses `preserveAspectRatio="xMidYMid meet"`. When the CSS viewport aspect/size changes, the browser therefore changes pixels-per-world-unit even though the editor zoom value did not change.
+For left/top resize, `createArtboardResizeGesture()` currently returns `anchorShiftX` / `anchorShiftY`, and the browser applies those values by changing the editor camera center.
 
-A panel resize must change **available screen area only**. It must not silently behave like zoom/fit.
+That keeps the opposite artboard edge visually fixed, but it also moves **all artwork on screen** because camera motion affects the entire world.
 
-### Required contract
+The existing regression only proves that child **serialized coordinates** are unchanged. It does not prove that the child's **rendered screen position** is unchanged.
 
-Viewport state must have stable editor semantics:
+Example at fixed zoom:
 
-- `zoom` represents a stable screen-space scale, not a value whose visual meaning changes with panel width/height;
-- changing left/right/bottom panel size preserves `zoom`, `centerX`, and `centerY` unless an explicit fit/focus command is invoked;
-- changing browser/window size preserves the same viewport state;
-- distance in CSS pixels between two world points at a fixed zoom remains invariant when only the viewport dimensions change;
-- the visible amount of surrounding workspace may increase/decrease as panels move, but artwork itself must not grow/shrink;
-- no automatic `Fit Artboard`/recenter is allowed during panel resize;
-- panel resize never mutates authored document/history;
-- renderer and M4 hit testing must consume the **same** updated viewport dimensions and the same world↔screen transform;
-- 100% zoom must have one documented, deterministic meaning across viewport sizes.
+```text
+before left-edge resize:
+artboard 0 -------------------------- 800
+            artwork @ x=200
 
-### Architectural direction
+user drags LEFT edge right by 40 world units
 
-Fix the shared viewport contract rather than compensating in CSS.
+required:
+artboard 40 ------------------------- 800
+            artwork stays at the same world/screen position
 
-The renderer/viewBox and DOM-free `createSvgViewBoxScreenTransform()` must derive from one canonical editor-camera model that includes the actual viewport width/height. Avoid a second panel-specific scale correction.
+current implementation effectively stores:
+artboard 0 -------------------------- 760
++ shifts camera to fake the old right edge
+=> artwork visibly moves even though its JSON did not change
+```
 
-If zoom semantics change from the older artboard-relative behavior, migrate/update all dependent fit/zoom/hit-test tests together and document the new invariant explicitly.
+This violates the M5 requirement that left/top artboard resizing preserve the opposite frame edge **without moving child artwork**.
 
-### Mandatory tests
+It also does not survive document semantics cleanly: the current document stores only artboard width/height, so after save/load there is no persistent information saying that the left/top edge moved.
 
-1. Start with a fixed document, viewport center and zoom. Change viewport width only: world-to-screen scale is unchanged.
-2. Change viewport height only: world-to-screen scale is unchanged.
-3. Simulate left panel 250→450px and right panel 310→220px: renderer zoom/center remain identical.
-4. Same world-point pair has the same CSS-pixel distance before/after panel resize.
-5. M4 hit testing still selects the rendered point after each viewport resize.
-6. Panel resize does not change serialized document, revision or history.
-7. `Fit Artboard` is the operation that intentionally recomputes zoom to fit the new viewport.
-8. `Focus Selection` is the operation that intentionally recomputes center/zoom.
-9. Repeated resize/expand/collapse cannot produce NaN/Infinity or lose the scene.
+### Required correction
 
----
+Introduce the smallest explicit persistent single-artboard frame-origin contract now, designed to migrate cleanly into M2 multi-artboards.
 
-## Correction 2 — Artboard resizing must work from ANY edge/corner, without permanent corner handles
+Recommended model:
 
-### User requirement
+```js
+artboard: {
+  x: 0,
+  y: 0,
+  width: 960,
+  height: 640,
+  background: '#...'
+}
+```
 
-Do not require the visible bottom-right corner resize handle.
+Equivalent explicit `originX` / `originY` naming is acceptable if used consistently, but **camera state must not represent authored artboard position**.
 
-The artboard itself must behave like a normal design-tool frame:
+Legacy documents without origin fields must normalize deterministically to `x: 0`, `y: 0`.
 
-- hover near **left/right edge** → `ew-resize`;
-- hover near **top/bottom edge** → `ns-resize`;
-- hover near **top-left/bottom-right corner zone** → `nwse-resize`;
-- hover near **top-right/bottom-left corner zone** → `nesw-resize`;
-- pointer-down + drag in that border zone resizes the artboard;
-- no permanent bright corner resize block is required.
+### Direction semantics
 
-### Screen-space hit zone
+At fixed artwork/world coordinates:
 
-- use a deterministic screen-space border tolerance, e.g. roughly 5–8 CSS px;
-- the grab zone must remain easy to hit at every zoom level;
-- edge/corner classification must be derived from pointer position relative to the rendered artboard frame, not from tiny DOM handles;
-- corner zones take priority over single-edge zones;
-- cursor updates on hover before pointer-down.
+- **right**: increase/decrease `width`; `x` unchanged;
+- **bottom**: increase/decrease `height`; `y` unchanged;
+- **left**: change `x` and `width` so the previous right edge `x + width` remains fixed;
+- **top**: change `y` and `height` so the previous bottom edge `y + height` remains fixed;
+- corners compose the corresponding horizontal + vertical rules.
 
-### Gesture isolation
+The editor camera (`zoom`, `centerX`, `centerY`) must remain unchanged during an artboard-frame resize unless the user separately invokes pan/fit/focus.
 
-When the pointer is in an artboard-resize border zone:
+### Required integration
 
-- resize wins over canvas pan, object selection/move, and runtime preview listeners;
-- pointer capture keeps resizing active outside the edge until release/cancel;
-- `pointercancel`, `lostpointercapture`, and Escape restore the pre-resize authored state;
-- one completed resize gesture creates exactly one undoable transaction;
-- a click near an edge without meaningful movement creates no history entry.
+All production surfaces that assume an artboard starts at `(0,0)` must consume the explicit origin consistently, including at minimum:
 
-### Edge semantics
+- model creation/normalization/validation/migration;
+- serialization/load round trip;
+- evaluated scene artboard metadata;
+- renderer artboard background/frame;
+- `syncArtboardFrame()`;
+- Fit Artboard camera calculation;
+- artboard edge/corner screen classification;
+- SVG/export viewBox/background behavior where applicable;
+- project/AI read surface if artboard dimensions/position are exposed;
+- undo/redo for artboard resize.
 
-The implementation must explicitly define all eight directions:
-
-`left`, `right`, `top`, `bottom`, `top-left`, `top-right`, `bottom-left`, `bottom-right`.
-
-Do not keep the current special case where top/left borders are canvas-pan handles and only right/bottom can resize.
-
-For left/top resizing, preserve the opposite rendered edge/corner and do **not** mutate/move child artwork merely to fake an anchored resize. If the current single-artboard model cannot represent the required frame origin cleanly, introduce the smallest explicit artboard-frame/origin contract needed and make its persistence/migration semantics precise; do not hide it as accidental viewport drift. Keep this bounded so it can migrate cleanly into future multi-artboard work.
-
-### Mandatory tests
-
-1. Hover classification/cursor for all 4 edges + 4 corners.
-2. Classification is identical at 10%, 100%, and 800% zoom for the same final CSS-pixel distance from the border.
-3. Right edge changes width only.
-4. Bottom edge changes height only.
-5. Left edge keeps the opposite edge anchored and does not move authored artwork.
-6. Top edge keeps the opposite edge anchored and does not move authored artwork.
-7. All corner drags resize both axes with the correct anchored corner.
-8. Minimum artboard size clamps deterministically; no negative/NaN/Infinity dimensions.
-9. Cancel/lost capture/Escape restores exact pre-gesture serialization.
-10. Completed drag is one undoable transaction.
-11. Artboard resize does not dispatch M4 runtime listener intents.
-12. Right-click canvas pan still works immediately outside the artboard resize border zone.
-13. Permanent bottom-right resize block/handle is removed from the normal UI.
+Do **not** implement full multi-artboards/components in this correction pass. This is only the minimal persistent origin needed to make the current single artboard resize semantically correct.
 
 ---
 
-## Correction 3 — Regression gate for panel ↔ viewport ↔ artboard interactions
+## Mandatory adversarial tests
 
-These behaviors must be tested together rather than as isolated helpers:
+M5 cannot pass without tests proving all of the following using production math:
 
-- resize/collapse/expand a side panel while zoomed and panned;
-- verify graph scale and viewport center do not change;
-- resize the artboard from an edge;
-- verify panel sizes do not change;
-- resize a panel again;
-- verify the newly resized artboard remains at the same camera scale;
-- run hit testing at the rendered object center;
-- focus an object, then resize panels and verify focus is not implicitly recomputed;
-- `Fit Artboard` after panel resize intentionally recomputes the camera and succeeds.
+1. left-edge resize keeps the old **right world edge** fixed;
+2. top-edge resize keeps the old **bottom world edge** fixed;
+3. top-left / top-right / bottom-left / bottom-right compose correctly;
+4. camera `{ zoom, centerX, centerY }` is bit-for-bit unchanged through every artboard resize direction;
+5. a child object's **world position** is unchanged through every artboard resize direction;
+6. a child's **CSS screen position** is unchanged during left/top resize at fixed camera;
+7. right/bottom resize does not move the artboard origin;
+8. legacy file without origin loads as `(0,0)`;
+9. save → reload after left/top resize preserves the same artboard frame edges and artwork relationship;
+10. undo restores exact `x/y/width/height` and redo reapplies them;
+11. cancel / Escape / pointercancel / lost capture restores exact pre-resize serialization and camera;
+12. sub-threshold border click creates no history entry;
+13. edge/corner classification still uses the 7 CSS-pixel zone at 10%, 100%, and 800%;
+14. renderer + M4 hit testing remain aligned after left/top resize;
+15. panel/window resize after a left/top artboard resize still preserves camera scale/center;
+16. `Fit Artboard` correctly centers/fits an artboard whose origin is not `(0,0)`;
+17. no permanent corner handle returns;
+18. all existing M0–M5 tests remain green.
 
-Use production viewport/artboard functions in the regression suite; do not create parallel test-only math.
+### Specific regression that must fail on the current implementation
+
+Create a child at a fixed world position, capture its screen point, resize the artboard from the **left** while keeping the same camera, and assert the screen point is identical afterward.
+
+The current camera-shift implementation must not be accepted by weakening this test.
 
 ---
 
 ## Do not regress accepted M5 work
 
-The correction pass must preserve:
+Preserve:
 
-- right-button drag canvas pan;
-- middle + Space pan;
+- stable CSS-pixel camera semantics;
+- panel/window resize scale invariance;
+- right/middle/Space canvas pan;
 - explicit fit/focus commands;
 - hierarchy focus/eye controls;
 - panel splitter/collapse persistence;
 - authored object move/resize transactions;
 - Neutral Dark + semantic theme system;
+- all eight 7px artboard resize zones and cursors;
+- runtime-listener isolation;
 - full document non-mutation for viewport/panel/theme operations;
-- all M0–M4 tests and contracts.
-
-Do not start multi-artboards/components, View Models/Data Binding, layered state machines, Text/Layout, scripting/WGSL, MCP/headless or export ecosystem work in this correction pass.
+- all M0–M4 contracts.
 
 ---
 
@@ -201,35 +191,36 @@ Do not start multi-artboards/components, View Models/Data Binding, layered state
 
 M5 is VERIFIED only when:
 
-- side/bottom panel resizing never changes graph/artwork scale at a fixed zoom;
-- viewport center/zoom survive panel and window resize unchanged;
-- renderer and hit testing remain aligned after arbitrary panel geometry changes;
-- artboard border proximity exposes correct resize cursor on every edge/corner;
-- artboard can be resized from every side/corner without permanent corner handles;
-- resize gesture isolation/cancel/undo behavior is correct;
-- existing M5 navigation/focus/visibility/panel/theme/object-resize behavior remains green;
+- stable camera behavior remains correct and green;
+- artboard has a real persistent origin/frame position rather than a camera workaround;
+- every edge/corner resize has correct anchored-frame semantics;
+- artwork does not move visually or structurally when only the artboard frame is resized;
+- save/load/undo/redo preserve artboard-origin semantics;
+- renderer/hit testing/export/focus consume the same artboard frame contract;
+- all prior M5 UX features remain green;
 - `npm test` passes;
 - `npm run check` passes;
-- latest GitHub Actions Tests run passes.
+- latest GitHub Actions Tests run passes on the final `main` head.
 
 ## Handoff
 
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits: 25684873a7efb42aa8d66300fd30686f43441d7a — Fix M5 stable camera and artboard border resizing [m5-correction]
-- Changed files: src/veyra/viewport.js, src/veyra/workspace.js, src/veyra/gestures.js, src/veyra/renderer.js, src/index.js, veyra.js, veyra.html, veyra.css, tests/veyra-m4-corrections.test.mjs, tests/veyra-m5-camera-artboard-corrections.test.mjs
-- Tests added/changed: dedicated M5 camera/artboard correction suite; migrated M4 high-zoom fixture to the stable CSS-pixel zoom definition
-- npm test: PASS — 31/31 suites in gated correction integration
-- npm run check: PASS — 38/38 source files in gated correction integration
-- Viewport scale-invariance proof: canonical camera now defines zoom as CSS pixels per world unit; viewBox width/height are actual host viewport CSS dimensions divided by zoom, so panel/window changes preserve zoom + center and only reveal more/less world; 100% = exactly 1 CSS px per world unit
-- Panel resize/collapse proof: workspace layout remains editor-only state; applyWorkspaceLayout and ResizeObserver call renderer.syncViewport() after CSS geometry changes without changing camera center/zoom; repeated arbitrary viewport dimensions keep the same mapping scale and finite matrices
-- Renderer/hit-test parity proof: renderer createSvgViewBox and DOM-free createSvgViewBoxScreenTransform consume the same width/height/zoom/center camera contract; M4 hit testing remains aligned at rendered object centers across changed viewport sizes
-- Artboard edge/corner classification proof: classifyArtboardResizeZone uses a 7 CSS-pixel screen-space tolerance with corner priority and all eight directions; cursors map to ew/ns/nwse/nesw; classification has no zoom input and is invariant at 10%, 100%, and 800%
-- Artboard resize transaction/cancel proof: createArtboardResizeGesture supports all eight directions, begins only after movement threshold, commits one Store transaction, exposes camera-only anchor shifts for left/top, clamps minimum dimensions, and cancel restores exact authored serialization; browser pointercancel/lost capture/Escape route to cancel
-- Right-click pan regression proof: resize classification runs only for left-button border proximity before pan routing; right-button pan remains unchanged immediately outside resize zones and the correction suite plus all prior shell/workspace tests are green
-- Document/history non-mutation proof: panel/window/camera operations remain outside authored Store state; left/top artboard resize never moves child artwork; only width/height are authored during an actual resize gesture, with no history entry for a sub-threshold click
-- Progress snapshot update: verified percentages intentionally remain at the verifier-reset M0–M4 values until M5 is independently accepted; this correction pass does not self-count unverified progress
-- Suggestions added to `suggestions`: none
-- Known limitations: the current single-artboard document still stores width/height only; left/top opposite-edge anchoring is represented by an editor-camera shift during the gesture rather than a persisted artboard origin. Child artwork is never mutated. A future explicit artboard origin belongs with the planned multi-artboard/component model, not this bounded correction pass.
+- Correction commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Persistent artboard-origin proof:
+- Left/top opposite-edge proof:
+- Artwork world/screen stationarity proof:
+- Camera non-mutation proof:
+- Save/load migration proof:
+- Undo/redo/cancel proof:
+- Renderer/hit-test/export integration:
+- Existing M5 regression proof:
+- Latest main CI:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
