@@ -1,0 +1,39 @@
+name: Apply M5 Final Artboard Origin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/apply-m5-artboard-origin-final.py'
+      - '.github/workflows/apply-m5-artboard-origin-final.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply focused final M5 correction
+        run: python3 scripts/apply-m5-artboard-origin-final.py
+      - name: Syntax check
+        run: npm run check
+      - name: Test
+        run: npm test
+      - name: Commit clean correction implementation
+        run: |
+          rm scripts/apply-m5-artboard-origin-final.py
+          rm .github/workflows/apply-m5-artboard-origin-final.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix M5 persistent artboard frame origin [m5-final-correction]'
+          git push
