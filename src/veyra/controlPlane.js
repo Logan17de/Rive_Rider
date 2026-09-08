@@ -66,6 +66,32 @@ function deterministicId(prefix, seed, suffix = '') {
   return `${prefix}_m3_${deterministicHash(`${seed}:${suffix}`)}`;
 }
 
+// Snapshot generation is derived only from stable ids and their structural
+// locations. Human names, timestamps, authored numeric values, and array order
+// do not participate. A successful create changes the stable-id set, while a
+// failed preview/dispatch does not, so repeated legitimate creates advance
+// deterministically without a mutable counter or wall clock.
+function stableIdGeneration(document) {
+  const entries = [];
+  const visit = (value, path) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, path);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.id === 'string' && value.id) entries.push(`${path}:${value.id}`);
+    for (const key of Object.keys(value).sort()) {
+      if (['id', 'name', 'createdAt', 'updatedAt'].includes(key)) continue;
+      const child = value[key];
+      if (Array.isArray(child)) visit(child, `${path}.${key}`);
+      else if (child && typeof child === 'object' && typeof child.id === 'string') visit(child, `${path}.${key}`);
+    }
+  };
+  visit(document, 'document');
+  entries.sort();
+  return deterministicHash(stableString(entries));
+}
+
 function withId(value, prefix, seed, suffix) {
   const next = { ...(value || {}) };
   if (!next.id) next.id = deterministicId(prefix, seed, suffix);
@@ -76,7 +102,7 @@ function prepareCommandDescriptor(document, descriptor, salt = '0') {
   if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) return descriptor;
   const next = cloneValue(descriptor);
   next.args = next.args || {};
-  const seed = stableString({ documentId: document.id, descriptor: next, salt });
+  const seed = stableString({ documentId: document.id, generation: stableIdGeneration(document), descriptor: next, salt });
 
   if (next.action === 'add') next.args.options = withId(next.args.options, next.args.type || 'node', seed, 'node');
   if (next.action === 'addSemantic') next.args.overrides = withId(next.args.overrides, 'semantic', seed, 'semantic');

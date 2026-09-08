@@ -21,7 +21,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 # MILESTONE M3 — Unified AI/Human Control Plane + Dependency & Ownership Graph — CORRECTION PASS
 
-**Status:** `CORRECTIONS REQUIRED`
+**Status:** `AWAITING VERIFICATION`
 
 ## Verification result
 
@@ -182,18 +182,18 @@ M3 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Repeated-create deterministic-id proof:
-- Preview/dispatch id-alignment proof:
-- Command provenance audit proof:
-- Browser canonical-dispatch proof:
-- Remaining direct mutation seams:
-- Dependency/ownership regression proof:
-- Name-independence proof:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Correction commits: workflow-gated M3 correction implementation; final SHA to be recorded after CI commit
+- Changed files: src/veyra/controlPlane.js, src/veyra/store.js, src/veyra/commands.js, src/veyra/serviceRegistry.js, src/veyra/manifest.js, src/index.js, veyra.js, tests/veyra-resolver.test.mjs, tests/veyra-control-plane-corrections.test.mjs, milestone.md
+- Tests added/changed: dedicated M3 correction suite for repeated implicit creates, snapshot preview/dispatch alignment, failed-command seed stability, undo/redo generation behavior, provenance preservation/mechanical audit, browser canonical-dispatch mapping/direct-seam audit; M2 browser resolver test strengthened from brittle direct-wrapper regex to control-plane behavioral parity + thin-adapter check
+- npm test: PASS in correction workflow gate
+- npm run check: PASS in correction workflow gate
+- Repeated-create deterministic-id proof: implicit ids seed from a deterministic stable-id generation snapshot; successful creates alter the snapshot, failed attempts do not, explicit ids remain authoritative
+- Preview/dispatch id-alignment proof: preview and standalone dispatch prepare from the same current snapshot + canonical salt; repeated create after mutation gets a new id; undo reuses an absent undone id deterministically and redo advances because the id exists again
+- Command provenance audit proof: node add/remove/removeSelection now forward descriptors; Store records metadata; every undoable VEYRA_COMMAND_TABLE action is mechanically exercised with a marker and module initialization fails if provenance is not forwarded
+- Browser canonical-dispatch proof: command-backed globalThis.veyra compatibility helpers route through dispatchCompatibilityCommand -> controlPlane.dispatchCommand; query/resolve are thin control-plane adapters
+- Remaining direct mutation seams: setMeshVertexWeights has no current command equivalent and is explicitly audited; playback/machine runtime helpers are marked runtime-only; human continuous gestures and document-shell seams remain explicitly audited
+- Dependency/ownership regression proof: original M3 suite remains unchanged and green
+- Name-independence proof: original M2/M3 name-randomization/reorder suites remain green
+- Suggestions added to `suggestions`: none
+- Known limitations: bulk mesh-vertex weight replacement still lacks a command-table action and remains an explicit audited direct Store seam; runtime-only playback/machine state remains outside persistent Store history by design
 ```

@@ -56,6 +56,7 @@ function normalizeCommand(command) {
     propertyAddresses: [...new Set((descriptor.propertyAddresses || []).map(String))],
   };
   if (descriptor.planSteps !== undefined) normalized.planSteps = cloneValue(descriptor.planSteps);
+  if (descriptor.metadata !== undefined) normalized.metadata = cloneValue(descriptor.metadata);
   return normalized;
 }
 
@@ -229,20 +230,26 @@ export class VeyraStore {
     return true;
   }
 
-  add(type, options = {}) {
+  add(type, options = {}, commandDescriptor = {}) {
     const node = createNode(type, options);
-    this.execute(`Add ${type}`, (document) => {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add ${type}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
       document.nodes.push(node);
     });
     this.select(node.id);
     return node;
   }
 
-  remove(nodeId) {
+  remove(nodeId, commandDescriptor = {}) {
     const node = nodeById(this.document, nodeId);
     if (!node) return false;
     const removed = new Set([nodeId, ...descendantIds(this.document, nodeId)]);
-    this.execute(`Delete ${node.name}`, (document) => {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete ${node.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
       document.nodes = document.nodes.filter((candidate) => !removed.has(candidate.id));
       document.semantics = document.semantics.filter((record) => !removed.has(referenceId(record.target, 'node')));
       document.constraints = document.constraints.filter((constraint) => !removed.has(referenceId(constraint.path, 'node')));
@@ -336,16 +343,15 @@ export class VeyraStore {
   get selectedControl() { return this.selectedKind === 'control' ? this.selectedObject : null; }
   get selectedConstraint() { return this.selectedKind === 'constraint' ? this.selectedObject : null; }
 
-  removeSelection() {
+  removeSelection(commandDescriptor = {}) {
     const reference = this.selectedRef;
     const object = this.selectedObject;
     if (!reference || !object) return false;
-    if (reference.kind === 'node') return this.remove(reference.id);
-    const descriptor = { label: `Delete ${object.name}` };
-    if (reference.kind === 'bone') return this.removeBone(reference.id, descriptor);
-    if (reference.kind === 'mesh') return this.removeMesh(reference.id, descriptor);
-    if (reference.kind === 'control') return this.removeControl(reference.id, descriptor);
-    if (reference.kind === 'constraint') return this.removeConstraint(reference.id, descriptor);
+    if (reference.kind === 'node') return this.remove(reference.id, commandDescriptor);
+    if (reference.kind === 'bone') return this.removeBone(reference.id, commandDescriptor);
+    if (reference.kind === 'mesh') return this.removeMesh(reference.id, commandDescriptor);
+    if (reference.kind === 'control') return this.removeControl(reference.id, commandDescriptor);
+    if (reference.kind === 'constraint') return this.removeConstraint(reference.id, commandDescriptor);
     return false;
   }
 

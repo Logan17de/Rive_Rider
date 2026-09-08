@@ -20,6 +20,7 @@ import { serializeVeyra, parseVeyra } from '../src/veyra/io.js';
 import { createProjectManifest } from '../src/veyra/manifest.js';
 import { VeyraStore } from '../src/veyra/store.js';
 import { buildSemanticIndex, queryEntities, resolveSemantic } from '../src/veyra/resolver.js';
+import { createVeyraControlPlane } from '../src/veyra/controlPlane.js';
 
 function fixture(overrides = {}) {
   const face = createNode('group', { id: 'face_group', name: 'Layer' });
@@ -199,9 +200,20 @@ assert.deepEqual(manifest.authoring.semanticResolver.functions, ['buildSemanticI
 assert.equal(manifest.authoring.semanticResolver.displayNamePolicy, 'ignored-by-default');
 assert.deepEqual(manifest.authoring.semanticResolver.outcomes, ['resolved', 'ambiguous', 'notFound']);
 
+const resolverPlane = createVeyraControlPlane(store);
+assert.deepEqual(
+  resolverPlane.queryEntities({ semantic: { tag: 'eye' } }),
+  queryEntities(store.document, { semantic: { tag: 'eye' } }),
+  'control-plane query must reuse canonical resolver behavior',
+);
+assert.deepEqual(
+  resolverPlane.resolveSemantic('right_eye'),
+  resolveSemantic(store.document, 'right_eye'),
+  'control-plane resolution must reuse canonical resolver behavior',
+);
 const browserSource = readFileSync(new URL('../veyra.js', import.meta.url), 'utf8');
-assert.match(browserSource, /queryEntities:\s*\(query = \{\}, options = \{\}\) => queryEntities\(store\.document, query, options\)/);
-assert.match(browserSource, /resolveSemantic:\s*\(intent, options = \{\}\) => resolveSemantic\(store\.document, intent, options\)/);
+assert.match(browserSource, /queryEntities:\s*\(query = \{\}, options = \{\}\) => controlPlane\.queryEntities\(query, options\)/);
+assert.match(browserSource, /resolveSemantic:\s*\(intent, options = \{\}\) => controlPlane\.resolveSemantic\(intent, options\)/);
 assert.match(browserSource, /getSemanticIndex:\s*\(options = \{\}\) => buildSemanticIndex\(store\.document, options\)/);
 
 function cloneRef(ref) { return { kind: ref.kind, id: ref.id }; }

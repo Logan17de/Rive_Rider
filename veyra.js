@@ -49,7 +49,7 @@ import { VeyraStore } from './src/veyra/store.js';
 import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
-import { buildSemanticIndex, queryEntities, resolveSemantic } from './src/veyra/resolver.js';
+import { buildSemanticIndex } from './src/veyra/resolver.js';
 import { createVeyraControlPlane } from './src/veyra/controlPlane.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
@@ -2402,10 +2402,26 @@ function machineRuntime(machineId) {
 
 const controlPlane = createVeyraControlPlane(store);
 
+function compactJson(value) {
+  if (Array.isArray(value)) return value.map(compactJson);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => [key, compactJson(item)]));
+  }
+  return value;
+}
+
+function dispatchCompatibilityCommand(action, args, command) {
+  const result = controlPlane.dispatchCommand(compactJson({ action, args, command }));
+  if (!result.ok) throw new TypeError(result.error);
+  return result.result;
+}
+
 globalThis.veyra = Object.freeze({
   getManifest: (options = {}) => controlPlane.getManifest(options),
-  queryEntities: (query = {}, options = {}) => queryEntities(store.document, query, options),
-  resolveSemantic: (intent, options = {}) => resolveSemantic(store.document, intent, options),
+  queryEntities: (query = {}, options = {}) => controlPlane.queryEntities(query, options),
+  resolveSemantic: (intent, options = {}) => controlPlane.resolveSemantic(intent, options),
   read: (refOrAddress, options = {}) => controlPlane.read(refOrAddress, options),
   previewCommand: (command, options = {}) => controlPlane.previewCommand(command, options),
   dispatchCommand: (command) => controlPlane.dispatchCommand(command),
@@ -2420,12 +2436,9 @@ globalThis.veyra = Object.freeze({
   getEvaluatedScene: () => cloneValue(evaluateDocument(store.document)),
   readProperty: (address) => controlPlane.read(address).authoredValue,
   applyCommand: ({ label, address, value, source = 'script' }) => {
-    const result = controlPlane.dispatchCommand({
-      action: 'setProperty',
-      args: { address, value },
-      command: { label, source, propertyAddresses: [address] },
+    dispatchCompatibilityCommand('setProperty', { address, value }, {
+      label, source, propertyAddresses: [address],
     });
-    if (!result.ok) throw new TypeError(result.error);
     return controlPlane.read(address).authoredValue;
   },
   setMeshVertexWeights: ({ meshId, vertexId, weights, label = 'Set mesh vertex weights', source = 'script' }) => {
@@ -2441,14 +2454,25 @@ globalThis.veyra = Object.freeze({
     return cloneValue(meshById(store.document, meshId).vertices.find((vertex) => vertex.id === vertexId).weights);
   },
   createTimeline: ({ name = 'Timeline', duration = 60, fps = 30, loop = 'none' } = {}) => {
-    return store.addTimeline({ name, duration, fps, loop }, { label: `Create timeline ${name}`, source: 'script' });
+    return dispatchCompatibilityCommand('addTimeline', { overrides: { name, duration, fps, loop } }, {
+      label: `Create timeline ${name}`,
+      source: 'script',
+    });
   },
   setKeyframe: ({ timelineId, address, frame, value, easing = 'ease-in-out', easingParams }) => {
-    store.setKeyframe({ timelineId, address, frame, value, easing, easingParams }, { label: 'Set keyframe', source: 'script' });
-    return true;
+    return Boolean(dispatchCompatibilityCommand('setKeyframe', {
+      timelineId, address, frame, value, easing, easingParams,
+    }, { label: 'Set keyframe', source: 'script' }));
   },
   removeKeyframe: ({ timelineId, address, frame }) => {
-    return store.removeKeyframe({ timelineId, address, frame }, { label: 'Remove keyframe', source: 'script' });
+    return Boolean(dispatchCompatibilityCommand('removeKeyframe', {
+      timelineId, address, frame,
+    }, { label: 'Remove keyframe', source: 'script' }));
+  },
+  moveKeyframe: ({ timelineId, address, fromFrame, toFrame }) => {
+    return Boolean(dispatchCompatibilityCommand('moveKeyframe', {
+      timelineId, address, fromFrame, toFrame,
+    }, { label: 'Move keyframe', source: 'script' }));
   },
   getTimelines: () => cloneValue(store.document.timelines),
   playTimeline: (timelineId, { loop, speed } = {}) => {
@@ -2468,7 +2492,7 @@ globalThis.veyra = Object.freeze({
   getMachines: () => cloneValue(store.document.stateMachines || []),
   getMachine: (machineId) => cloneValue(machineById(store.document, machineId)),
   createMachine: ({ name = 'State Machine', inputs = [], states = [], transitions = [], initial } = {}) => {
-    return store.addStateMachine({ name, inputs, states, transitions, initial }, {
+    return dispatchCompatibilityCommand('addStateMachine', { overrides: { name, inputs, states, transitions, initial } }, {
       label: `Create state machine ${name}`,
       source: 'script',
     });
@@ -2476,51 +2500,63 @@ globalThis.veyra = Object.freeze({
   deleteMachine: (machineId) => {
     const machine = machineById(store.document, machineId);
     if (!machine) return false;
-    machineRuntimes.delete(machineId);
-    return store.removeStateMachine(machineId, { label: `Delete state machine ${machine.name}`, source: 'script' });
+    const removed = Boolean(dispatchCompatibilityCommand('removeStateMachine', { machineId }, {
+      label: `Delete state machine ${machine.name}`,
+      source: 'script',
+    }));
+    if (removed) machineRuntimes.delete(machineId);
+    return removed;
   },
   addMachineInput: (machineId, { name = 'Value', type = 'number', value }) => {
-    return store.addMachineInput(machineId, { name, type, value }, {
+    return dispatchCompatibilityCommand('addMachineInput', { machineId, overrides: { name, type, value } }, {
       label: `Add machine input ${name}`,
       source: 'script',
     });
   },
   addMachineState: (machineId, { name = 'State', timelineId, type = 'animation' }) => {
-    return store.addMachineState(machineId, { name, type, timeline: createTimelineRef(timelineId) }, {
+    return dispatchCompatibilityCommand('addMachineState', { machineId, overrides: { name, type, timelineId } }, {
       label: `Add state ${name}`,
       source: 'script',
     });
   },
   removeMachineState: (machineId, stateId) => {
-    return store.removeMachineState(machineId, stateId, { label: 'Delete machine state', source: 'script' });
+    return Boolean(dispatchCompatibilityCommand('removeMachineState', { machineId, stateId }, {
+      label: 'Delete machine state', source: 'script',
+    }));
   },
   addMachineTransition: (machineId, { from, to, duration = 0, after, conditions = [] }) => {
-    return store.addMachineTransition(machineId, {
-      from: createMachineStateRef(from),
-      to: createMachineStateRef(to),
-      duration,
-      after,
-      conditions: conditions.map((condition) => ({
-        input: createMachineInputRef(condition.input),
-        op: condition.op,
-        value: condition.value,
-      })),
+    return dispatchCompatibilityCommand('addMachineTransition', {
+      machineId,
+      overrides: {
+        from, to, duration, after,
+        conditions: conditions.map((condition) => ({ input: condition.input, op: condition.op, value: condition.value })),
+      },
     }, { label: 'Add machine transition', source: 'script' });
   },
   removeMachineTransition: (machineId, transitionId) => {
-    return store.removeMachineTransition(machineId, transitionId, { label: 'Delete machine transition', source: 'script' });
+    return Boolean(dispatchCompatibilityCommand('removeMachineTransition', { machineId, transitionId }, {
+      label: 'Delete machine transition', source: 'script',
+    }));
   },
   updateMachineState: (machineId, stateId, changes) => {
-    return store.updateMachineState(machineId, stateId, changes, { label: `Update machine state ${stateId}`, source: 'script' });
+    return Boolean(dispatchCompatibilityCommand('updateMachineState', { machineId, stateId, changes }, {
+      label: `Update machine state ${stateId}`, source: 'script',
+    }));
   },
   updateMachineInput: (machineId, inputId, changes) => {
-    return store.updateMachineInput(machineId, inputId, changes, { label: `Update machine input ${inputId}`, source: 'script' });
+    return Boolean(dispatchCompatibilityCommand('updateMachineInput', { machineId, inputId, changes }, {
+      label: `Update machine input ${inputId}`, source: 'script',
+    }));
   },
   removeMachineInput: (machineId, inputId) => {
-    return store.removeMachineInput(machineId, inputId, { label: `Delete machine input ${inputId}`, source: 'script' });
+    return Boolean(dispatchCompatibilityCommand('removeMachineInput', { machineId, inputId }, {
+      label: `Delete machine input ${inputId}`, source: 'script',
+    }));
   },
   updateMachineTransition: (machineId, transitionId, changes) => {
-    return store.updateMachineTransition(machineId, transitionId, changes, { label: `Update machine transition ${transitionId}`, source: 'script' });
+    return Boolean(dispatchCompatibilityCommand('updateMachineTransition', { machineId, transitionId, changes }, {
+      label: `Update machine transition ${transitionId}`, source: 'script',
+    }));
   },
   setMachineInput: (machineId, nameOrId, value) => machineRuntime(machineId).setInput(nameOrId, value),
   fireMachineInput: (machineId, nameOrId) => machineRuntime(machineId).fire(nameOrId),

@@ -20,10 +20,10 @@ import {
   createTrackRef,
   createTimelineRef,
 } from './references.js';
-import { VEYRA_COMMAND_ACTIONS, VEYRA_COMMAND_TABLE } from './commands.js';
+import { VEYRA_COMMAND_ACTIONS, VEYRA_COMMAND_PROVENANCE_AUDIT, VEYRA_COMMAND_TABLE } from './commands.js';
 import { createSceneSummary } from './summary.js';
 import { VEYRA_RESOLVER_CAPABILITIES, VEYRA_RESOLVER_SCORING } from './resolver.js';
-import { VEYRA_SERVICE_DEFINITIONS, VEYRA_UI_MUTATION_PARITY_AUDIT } from './serviceRegistry.js';
+import { VEYRA_BROWSER_MUTATION_COMPATIBILITY, VEYRA_SERVICE_DEFINITIONS, VEYRA_UI_MUTATION_PARITY_AUDIT } from './serviceRegistry.js';
 
 export const VEYRA_MANIFEST_FORMAT = 'veyra-project-manifest';
 export const VEYRA_MANIFEST_VERSION = 1;
@@ -198,6 +198,8 @@ function authoringContract() {
         .map(([name, metadata]) => ({ name, ...cloneValue(metadata) }))
         .sort((left, right) => left.name.localeCompare(right.name)),
       commandActions: [...VEYRA_COMMAND_ACTIONS],
+      commandProvenanceAudit: cloneValue(VEYRA_COMMAND_PROVENANCE_AUDIT),
+      browserMutationCompatibility: cloneValue(VEYRA_BROWSER_MUTATION_COMPATIBILITY),
       uiMutationParityAudit: cloneValue(VEYRA_UI_MUTATION_PARITY_AUDIT),
       identity: 'stable typed refs and property addresses; display names are advisory only',
       planResultBindings: 'explicit-stable-ids-only',

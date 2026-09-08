@@ -161,17 +161,17 @@ const COMMAND_TABLE = {
   add: {
     summary: 'Add a node and select it.',
     params: [param('type', 'string', true), param('options', 'object', false)],
-    run: (store, args) => store.add(args.type, args.options ?? {}),
+    run: (store, args, command) => store.add(args.type, args.options ?? {}, command ?? {}),
   },
   remove: {
     summary: 'Remove a node, its descendants, and dependent records.',
     params: [param('nodeId', 'string', true)],
-    run: (store, args) => store.remove(args.nodeId),
+    run: (store, args, command) => store.remove(args.nodeId, command ?? {}),
   },
   removeSelection: {
     summary: 'Remove the current selection through the shared cascade cleanup.',
     params: [],
-    run: (store) => store.removeSelection(),
+    run: (store, args, command) => store.removeSelection(command ?? {}),
   },
   addSemantic: {
     summary: 'Add a semantic record for a typed target reference.',
@@ -756,6 +756,46 @@ function genericManifestParameters(entry) {
   ));
 }
 
+function provenanceAuditValue(type) {
+  return {
+    string: 'audit',
+    number: 0,
+    boolean: false,
+    array: [],
+    reference: { kind: 'node', id: 'audit' },
+    object: {},
+    document: {},
+    any: null,
+  }[type];
+}
+
+function auditCommandProvenance(commandName, entry) {
+  if (!entry.capabilities.includes('undoable')) {
+    return Object.freeze({ status: 'not-history-mutation', reason: 'command does not advertise an undoable committed Store history mutation' });
+  }
+  const marker = Object.freeze({ __veyraProvenanceAudit: commandName });
+  let forwarded = false;
+  const fakeStore = new Proxy({}, {
+    get: () => (...args) => {
+      if (args.includes(marker)) forwarded = true;
+      return null;
+    },
+  });
+  const args = Object.fromEntries(entry.params.map((spec) => [spec.name, provenanceAuditValue(spec.type)]));
+  try {
+    entry.run(fakeStore, args, marker);
+  } catch (error) {
+    throw new TypeError(`Command provenance audit could not exercise ${commandName}: ${error?.message || error}`);
+  }
+  if (!forwarded) {
+    throw new TypeError(`Undoable command ${commandName} does not forward canonical command provenance to its Store method.`);
+  }
+  return Object.freeze({
+    status: 'preserved',
+    fields: Object.freeze(['source', 'label', 'propertyAddresses', 'metadata']),
+  });
+}
+
 for (const [commandName, entry] of Object.entries(COMMAND_TABLE)) {
   const override = COMMAND_MANIFEST_OVERRIDES[commandName] || {};
   const manifestId = override.manifestId || kebabCase(commandName);
@@ -769,6 +809,7 @@ for (const [commandName, entry] of Object.entries(COMMAND_TABLE)) {
     transport: 'command',
     hostAvailability: 'available',
   });
+  entry.provenance = auditCommandProvenance(commandName, entry);
 }
 
 for (const action of VEYRA_SEMANTIC_COMMAND_ACTIONS) {
@@ -778,6 +819,10 @@ for (const action of VEYRA_SEMANTIC_COMMAND_ACTIONS) {
 export const VEYRA_COMMAND_TABLE = Object.freeze(COMMAND_TABLE);
 
 export const VEYRA_COMMAND_ACTIONS = Object.freeze(Object.keys(COMMAND_TABLE).sort());
+
+export const VEYRA_COMMAND_PROVENANCE_AUDIT = Object.freeze(Object.fromEntries(
+  VEYRA_COMMAND_ACTIONS.map((action) => [action, VEYRA_COMMAND_TABLE[action].provenance]),
+));
 
 // Public VeyraStore methods that take function arguments and therefore
 // cannot cross a JSON command boundary.
