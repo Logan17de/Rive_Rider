@@ -48,6 +48,25 @@ replace_once(
   assert.notEqual(registry.evaluate('remap-one').mappings.timeline[0].timeSeconds, registry.evaluate('remap-two').mappings.timeline[0].timeSeconds);""",
 'observable remap isolation',
 )
+replace_once(
+"""  const vertices = [
+    { id: 'rv0', x: 50, y: 40, weights: [{ bone: createBoneRef('rig-bone'), value: 1 }] },
+    { id: 'rv1', x: 90, y: 40, weights: [{ bone: createBoneRef('rig-bone'), value: 1 }] },
+    { id: 'rv2', x: 90, y: 60, weights: [{ bone: createBoneRef('rig-bone'), value: 1 }] },
+  ];""",
+"""  const vertices = [
+    { id: 'rv0', x: 50, y: 40, weights: [{ bone: createBoneRef('rig-bone'), value: 1 }] },
+    { id: 'rv1', x: 90, y: 40, weights: [{ bone: createBoneRef('rig-bone'), value: 1 }] },
+    { id: 'rv2', x: 90, y: 60, weights: [{ bone: createBoneRef('rig-bone'), value: 1 }] },
+    { id: 'rv3', x: 50, y: 60, weights: [{ bone: createBoneRef('rig-bone'), value: 1 }] },
+  ];""",
+'weighted quad fixture',
+)
+replace_once(
+"""  assert.deepEqual(source.meshes[0].deformedVertices.map(({ x, y }) => ({ x, y })), [{ x: 50, y: 40 }, { x: 90, y: 40 }, { x: 90, y: 60 }], 'source rig remains authored/rest-driven');""",
+"""  assert.deepEqual(source.meshes[0].deformedVertices.map(({ x, y }) => ({ x, y })), [{ x: 50, y: 40 }, { x: 90, y: 40 }, { x: 90, y: 60 }, { x: 50, y: 60 }], 'source rig remains authored/rest-driven');""",
+'rig source expectation',
+)
 
 p.write_text(t, encoding='utf-8')
 print('M6 correction adversarial fixture repaired')
