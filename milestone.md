@@ -12,213 +12,198 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 | Area | Current verified estimate | Notes |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~92–94%** | Stable typed identity, universal semantics, name-independent resolution, canonical control plane, dependency/ownership graph, preview/dispatch/verify and machine-readable interaction surfaces are verified for the pre-M6 feature graph. |
-| Core editor / engine foundation | **~87–90%** | M0–M5 foundations are independently verified, including stable workspace/camera mechanics and persistent artboard frame origin. |
-| Modern Rive editor/runtime feature parity | **~44–48%** | M6 adds substantial multi-artboard/Component code, but it is not counted until the Component runtime/evaluation corrections below pass independent verification. |
+| AI-native identity / semantics / control architecture | **~92–94%** | Pre-M6 identity, semantics, resolver, control-plane and dependency/ownership contracts are independently verified. |
+| Core editor / engine foundation | **~87–90%** | M0–M5 were independently verified on their accepted heads. Current live testing on the M6 head exposed a stricter client-space camera requirement and authored-stroke zoom bug that must be corrected before M6 can preserve the workspace contract. |
+| Modern Rive editor/runtime feature parity | **~44–48%** | M6 has substantial multi-artboard/Component implementation, but remains uncounted until the active corrections are independently accepted. |
 | Full Veyra target: Rive parity + every feature AI-readable/controlable | **~42–45%** | Architecture remains ahead of raw Rive feature breadth. |
-| Remaining full-target work | **~55–58%** | M6 verification plus Data Binding/View Models, full layered state machines/listeners/events, paint/effects, text/media, layout, advanced rigging/animation, scripting/WGSL, runtimes/SDKs/export, collaboration and MCP/agent productization. |
+| Remaining full-target work | **~55–58%** | M6 correction/verification, queued vector-authoring + multi-selection/grouping UX, then Data Binding/View Models and later Rive feature families. |
 
 ### Roadmap position
 
-- `plan.md` **M0 — AI Identity & Control Foundation:** **VERIFIED**.
-- `plan.md` **M1 — Close current interaction loop:** **VERIFIED**.
-- Interstitial **M5 — Workspace UX Stabilization:** **VERIFIED**.
-- **Current milestone M6 maps to `plan.md` M2 — Multi-artboard, Components and project graph: CORRECTIONS IMPLEMENTED, AWAITING VERIFICATION.**
+- `plan.md` M0 — AI Identity & Control Foundation: **VERIFIED**.
+- `plan.md` M1 — Close current interaction loop: **VERIFIED**.
+- Interstitial M5 — Workspace UX Stabilization: **VERIFIED on its accepted head**.
+- **Current milestone M6 maps to `plan.md` M2 — Multi-artboard, Components and project graph: CORRECTIONS REQUIRED.**
 
 ### Progress maintenance rule
 
-Every future milestone verification or milestone advance must update this **Progress snapshot** in the same `milestone.md` commit. Do not count an unverified milestone as completed progress.
+Every future milestone verification or milestone advance must update this Progress snapshot in the same `milestone.md` commit. Do not count an unverified milestone as completed progress.
 
 ---
 
 # MILESTONE M6 — Multi-Artboard, Components & Project Graph — CORRECTION PASS
 
 **Roadmap mapping:** `plan.md` M2 — Multi-artboard, Components and project graph  
-**Status:** `AWAITING VERIFICATION`
+**Status:** `CORRECTIONS REQUIRED`
 
-## Independent verification summary
+## Current verification state
 
-The implementation at `90c373586c0c0d74eaa6185fb12bae32fc606518` established most of M6:
+The original M6 implementation plus the focused Component-runtime correction are substantial. The latest Component correction at `25d95e0d8cd7bdd691a586eaed84f3dc4177e9eb` claims fixes for the three previously identified Component blockers:
 
-- versioned multi-artboard migration and explicit artboard ownership exist;
-- artboard/component/componentInstance/componentOverride refs are first-class;
-- canonical artboard and Component CRUD, preview/dispatch, history and browser/UI integration exist;
-- simple node-based Component instances evaluate without authored cloning;
-- bounded property overrides leave source authored data unchanged;
-- per-instance timeline/state-machine runtime buckets are isolated;
-- dependency/resolver/semantic/manifest surfaces include the new project entities;
-- component deletion/source deletion fail closed with live dependents;
-- cycle detection and bounded nesting are present;
-- the standard Tests run on handoff head `8de2957b4ed020c9e2bf2a5b6af9f0b4479f84a1` was green at **40/40 syntax checks and 33/33 suites**.
+1. persisted runtime selection/remap/mix behavior;
+2. nested Component transform composition;
+3. rigged Component evaluated content.
 
-Independent verification then identified the three Component-runtime/evaluation blockers below. The focused correction implementation at `25d95e0d8cd7bdd691a586eaed84f3dc4177e9eb` addresses all three in production code and adds a dedicated adversarial suite. This milestone remains **AWAITING VERIFICATION** until those corrections are independently accepted.
+Those three remain subject to independent verification, but live editor testing has now exposed an additional current-head workspace/rendering blocker that must be fixed before M6 can be accepted.
+
+Do not advance to the next roadmap family until **all four** areas are green on the same final `main` head.
 
 ---
 
-## Blocker 1 — authored remap/mix runtime contract was metadata-only
+## Previously identified Component correction areas to preserve and verify
 
-`createComponentInstance()` persists and validates:
+### A — Runtime selection/remap/mix
+- persisted runtime timeline/stateMachine selection must affect evaluation;
+- remap must change the effective source controller or be rejected as unsupported;
+- mix must have explicit deterministic semantics;
+- per-instance runtime state must remain isolated;
+- manifest/dependency claims must equal behavior.
+
+### B — Nested Component transforms
+- outer mapping is applied exactly once;
+- descendant local matrices remain parent-relative;
+- parent.world × child.local equals child.world;
+- renderer/hit testing agree;
+- evaluated identities never enter authored persistence.
+
+### C — Rigged Component content
+- current supported source nodes, bones, weighted meshes, controls and constraints must survive Component evaluation into the host scene;
+- evaluated identities are instance-scoped/non-persistent with source provenance;
+- source authored rig content remains unchanged;
+- per-instance runtime/overrides do not leak.
+
+Keep the dedicated M6 Component correction tests green while implementing the workspace correction below.
+
+---
+
+# BLOCKER 4 — Workspace chrome still moves the graph + authored strokes distort under zoom
+
+Live browser testing showed both issues clearly.
+
+## 4A — Panel resize/collapse must preserve client-space artwork position
+
+The current camera preserves world `zoom`, `centerX`, and `centerY` when left/right/bottom panels change size. That is not sufficient for the user's expected editor mechanic, because the SVG viewport itself changes its **browser client rectangle**. The same world point therefore moves to a different physical screen pixel when editor chrome changes.
+
+### Required user-visible contract
+
+Dragging, collapsing, or expanding side/bottom panels must change only how much workspace is exposed. It must not visually drag the existing graph/artwork around the monitor.
+
+### Required implementation
+
+- Measure the stage viewport client rect before a panel resize/collapse update and after layout settles.
+- Preserve a deterministic client-space anchor across the change. The world point that occupied the chosen anchor client pixel before the layout change must remain at that same client pixel after the change when geometrically possible.
+- Compute the required `centerX/centerY` compensation from the old/new viewport client-rect center delta and current zoom/world transform.
+- Do **not** mutate artboard/object coordinates.
+- Do **not** silently invoke Fit Artboard / Fit Selection.
+- Keep `zoom` unchanged.
+- Continuous splitter dragging must not accumulate numerical drift.
+- Collapse → expand back to the same layout must restore the same world→client mapping within tolerance.
+- Renderer, `worldToClient`, `clientPoint`, hit testing, focus commands and pointer interaction must all agree after the compensation.
+- Workspace/camera changes remain editor state and must not alter `.veyra` serialization, Store revision or command history.
+
+### Mandatory tests
+
+1. left splitter resize keeps a chosen world point at the same **absolute client X/Y**;
+2. right splitter resize does the same;
+3. bottom splitter resize does the same;
+4. left/right collapse→expand round-trip produces no drift;
+5. arbitrary sequence of splitter changes does not change zoom;
+6. hit test of a rendered point still succeeds after the layout change;
+7. focus-selection/focus-object uses the corrected viewport afterward;
+8. document serialization/revision/history remain unchanged.
+
+---
+
+## 4B — Authored artwork strokes must scale with zoom
+
+Current renderer code applies SVG `vector-effect="non-scaling-stroke"` to actual scene shapes and mesh triangles. This keeps authored stroke width roughly constant in screen pixels while the underlying geometry shrinks/grows, which visibly changes artwork proportions at low zoom.
+
+### Required user-visible contract
+
+Zooming the camera must scale the **whole artwork** uniformly. Editor controls may remain usable screen-sized overlays, but authored lines are part of the artwork and must visually scale with it.
+
+### Required implementation
+
+- Remove unconditional `vector-effect="non-scaling-stroke"` from authored scene-node and authored mesh rendering.
+- Authored stroke width follows world units × camera zoom.
+- If Veyra later supports an explicit authored non-scaling-stroke property, implement it as a separate real property/capability; do not make it the global default.
+- Keep editor-only overlays separate: selection boxes, resize handles, vertex points, Bezier handles, bone/control hit areas and guides may use bounded screen-space sizes.
+- Editor overlays must never affect export/final artwork geometry.
+- At very low zoom, rig/editor overlays must not make the artwork unreadable. Provide a deterministic overlay visibility policy or a view/final-playback toggle so the user can inspect clean artwork.
+- Editor render and SVG export must agree on authored stroke semantics.
+
+### Mandatory tests
+
+At a stable viewport, a 4-world-unit authored stroke should measure approximately:
 
 ```text
-runtime.timeline
-runtime.stateMachine
-runtime.mix
-runtime.remap.timeline
-runtime.remap.stateMachine
+zoom 0.10 → 0.4 CSS px
+zoom 0.50 → 2 CSS px
+zoom 1.00 → 4 CSS px
+zoom 2.00 → 8 CSS px
 ```
 
-The previous `ComponentRuntimeRegistry` did not consume the authored timeline/stateMachine/remap configuration when evaluating an instance. Runtime behavior depended only on explicit imperative calls such as `setTimelineTime(instanceId, timelineId, ...)` and `machineRuntime(instanceId, machineId)`.
-
-### Correction implemented
-
-The Component runtime now has one explicit deterministic mapping contract:
-
-- `runtime.timeline` selects a timeline runtime slot and is evaluated at deterministic time `0` before any imperative clock update;
-- `runtime.stateMachine` selects a machine runtime slot and evaluates from its authored initial state;
-- `runtime.remap.timeline` and `runtime.remap.stateMachine` change the source controller actually evaluated while the selected controller ID remains the instance-local runtime slot;
-- remap without the matching selected runtime controller is rejected;
-- selected and remapped refs must remain on the Component source artboard;
-- `runtime.mix` remains bounded to `[0,1]`: numeric values interpolate linearly from authored to runtime values; discrete values use authored below `0.5` and runtime at or above `0.5`;
-- per-instance timeline clocks and machine runtimes remain isolated;
-- runtime evaluation returns controller→effective-source mappings for deterministic inspection;
-- `projectGraphCapabilities()` / manifest authoring metadata expose the exact selection/remap/mix contract.
-
-### Adversarial proof added
-
-`tests/veyra-m6-component-corrections.test.mjs` proves:
-
-1. persisted timeline selection changes evaluated output after serialize/parse without imperative setup;
-2. persisted timeline remap changes the actual source timeline used;
-3. persisted state-machine remap changes the actual source machine used;
-4. two instances remapped to the same source timeline retain observably independent clocks/output;
-5. cross-artboard and missing remap refs fail through the canonical control plane without document/revision/history mutation;
-6. remap without selection fails validation;
-7. mix `0`, `0.25`, and `1` produce the declared deterministic results;
-8. manifest capabilities report the implemented mapping and mix behavior.
+Allow raster/antialias tolerance, but the relationship must be linear. Also prove 10%–800% zoom preserves authored fill/stroke proportions while editor handles remain interaction-usable and non-authored.
 
 ---
 
-## Blocker 2 — nested Component hierarchy could double-apply the outer transform
+## Explicit non-goals for this correction pass
 
-M6 advertises:
+Do **not** add the newly requested Pen/Edit Vertices/multi-selection/grouping features inside M6. They are now queued in `suggestions` as the next interstitial milestone after M6.
 
-```text
-nestedComponents: true
-maxComponentDepth: 16
-```
+That queued milestone includes:
 
-The previous nested-evaluation merge prefixed nested identities and multiplied the outer Component wrapper into both nested `localMatrix` and `worldMatrix` values, which could apply the outer transform twice when the renderer recomposed the hierarchy.
-
-### Correction implemented
-
-Component expansion now maps the complete evaluated node subtree through one transform-space rule:
-
-- the outer instance/source wrapper is applied once to evaluated world space;
-- a descendant whose source parent is also re-scoped preserves its source-relative `localMatrix`;
-- source parent refs are rewritten to the matching instance-scoped evaluated parent ID;
-- a subtree root attached to an authored host parent derives its local matrix from `inverse(parentWorld) * mappedWorld`;
-- final `worldMatrix` therefore remains equal to deterministic `parent.worldMatrix * child.localMatrix`;
-- nested provenance retains the inner source/component/instance context and adds the outer instance context without turning evaluated identities persistent;
-- renderer and hit testing consume the same corrected evaluated matrices.
-
-### Adversarial proof added
-
-The correction suite includes a legal two-level nested Component with outer instance, inner instance, source parent and source child transforms and proves:
-
-1. the child world transform analytically;
-2. `parent.worldMatrix * child.localMatrix == child.worldMatrix`;
-3. the child local matrix is not polluted by the outer wrapper;
-4. SVG output uses that corrected local transform;
-5. hit testing resolves the child at the rendered world location;
-6. two outer instances remain independently scoped;
-7. save/load never creates authored `componentEval:` descendants;
-8. cycle rejection remains deterministic.
+- active-artboard pointer/world X/Y readout and clear selected-object position;
+- Rive-style Pen lifecycle where Esc finishes a valid path rather than discarding it;
+- click+drag Bezier creation;
+- Edit Vertices mode;
+- straight / mirrored / detached / asymmetric handles;
+- corner-radius editing;
+- canonical add/remove vertex commands;
+- multi-selection + marquee;
+- Ctrl/Cmd+G grouping and Ctrl/Cmd+Shift+G ungrouping while preserving world transforms.
 
 ---
 
-## Blocker 3 — Component instances expanded nodes only, not rigged source content
+## Preserve existing verified behavior
 
-The previous Component expansion returned only evaluated nodes, so the host scene silently lost source bones, weighted meshes, controls and constraints.
-
-### Correction implemented
-
-`evaluateComponentContent()` now expands the current supported Component source content as one evaluated bundle:
-
-- nodes;
-- evaluated bones;
-- weighted meshes with deformed vertices;
-- controls;
-- constraints.
-
-The host evaluator merges those arrays into the normal evaluated scene, so existing renderer paths consume Component mesh output without a renderer-only parallel implementation.
-
-Instance-expanded rig identities are non-persistent and instance-scoped while retaining their persistent source refs. Bone/control/constraint references are re-scoped consistently; mesh deformed vertices and rig world-space output receive the same instance transform/fit/alignment mapping used by Component geometry. Source authored rig data is never cloned into instance storage.
-
-### Adversarial proof added
-
-The correction suite uses a source Component containing a current Veyra bone, weighted quad mesh, position control, constraint and bone animation. It proves:
-
-1. two host instances each receive evaluated mesh/bone/control/constraint output;
-2. their evaluated IDs are distinct and source refs remain distinguishable;
-3. renderer SVG includes the instance-evaluated mesh;
-4. the instance transform maps rig output consistently;
-5. the constraint points at the correct instance-scoped evaluated bone;
-6. runtime animation on instance A deforms its rig output without leaking to instance B;
-7. the source evaluated rig remains unchanged;
-8. save/load retains only the single authored source rig and no `componentEval:` rig clones.
+Do not regress M0–M5 identity, semantics, command, history, hit testing, right-click pan, stable artboard frame origin, visibility/focus controls, resizable/collapsible panels, theme contracts, interaction runtime, or the existing M6 project graph and Component correction tests.
 
 ---
 
-## Preserve the M6 work that already passed review
-
-The correction pass preserves:
-
-- deterministic legacy single-artboard → v5 migration;
-- M5 non-zero frame origin;
-- stable typed artboard/component/componentInstance/componentOverride refs;
-- explicit artboard ownership and cross-artboard validation;
-- artboard CRUD/reorder/focus/resize mechanics;
-- canonical command/preview/dispatch/history/provenance behavior;
-- source Component identity and dependent-deletion safety;
-- bounded typed instance property overrides;
-- per-instance runtime bucket isolation;
-- dependency graph and universal semantic targets;
-- name-independent resolver behavior;
-- cycle detection/depth bound;
-- current M0–M5 test contracts.
-
----
-
-## M6 acceptance after correction
+## M6 acceptance
 
 M6 is VERIFIED only when:
 
-- the three blockers above are independently confirmed fixed in production implementation;
-- runtime/remap/mix capability claims exactly match behavior;
-- legal nested Component hierarchies render with correct transform composition;
-- rigged current-feature Components evaluate/render instead of silently losing source rig content;
-- all existing M6 project-graph behavior remains green;
+- Component runtime/remap/mix behavior passes independent review;
+- nested Component hierarchy transforms pass independent review;
+- rigged Component evaluated content passes independent review;
+- panel resize/collapse no longer visibly moves anchored graph content;
+- authored strokes scale uniformly with zoom;
+- all existing M0–M6 tests remain green;
 - `npm run check` passes;
 - `npm test` passes;
-- the latest standard GitHub `Tests` run passes on the final `main` head.
+- latest standard GitHub `Tests` passes on the final `main` head.
 
 ## Handoff
 
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits: e24ad0a6799631c0edbe988fedf685070c5d9b70 (staged focused patch), 75e5af5ec7b3afdbdfa39d89e205325a854b1660 / d92e21e5880e6686f10ab535df0726457ce16c89 / 994d5fdda7cd44adc638b381ddd8234b699b0311 (gated adversarial-fixture iterations), 25d95e0d8cd7bdd691a586eaed84f3dc4177e9eb (clean correction implementation)
-- Changed files: src/veyra/components.js; src/veyra/evaluation.js; src/veyra/projectGraph.js; src/index.js; tests/veyra-m6-component-corrections.test.mjs; milestone.md
-- Tests added/changed: added tests/veyra-m6-component-corrections.test.mjs with persisted timeline/state-machine selection/remap/mix, atomic invalid-remap, legal nested hierarchy render/hit-test/persistence, and current-feature rigged Component instancing/runtime isolation coverage
-- npm test: PASS — 34 of 34 suites in the clean correction integration gate
-- npm run check: PASS — 40 of 40 source files in the clean correction integration gate
-- Runtime/remap/mix proof: authored runtime.timeline/stateMachine now create deterministic default runtime evaluation; authored remap changes the effective source controller; selected controller IDs remain per-instance runtime slots; remap is source-artboard validated and requires a matching selected controller; mix semantics are explicit/tested at 0, 0.25 and 1; two remapped instances demonstrate different runtime clocks and outputs
-- Nested Component transform proof: outer wrapper is applied once to world space; mapped descendants retain source-relative local matrices; parent refs are re-scoped; the adversarial nested child satisfies parent.world * child.local == child.world, matches SVG output and M4 hit testing, and never persists evaluated descendants
-- Rigged Component evaluation/render proof: Component evaluation now returns nodes + bones + weighted/deformed meshes + controls + constraints; host evaluation merges all supported arrays; evaluated refs are instance-scoped/non-persistent with source provenance; a two-instance weighted-rig fixture proves renderer output and instance-local animation deformation without source/sibling mutation
-- Existing M6 regression proof: original tests/veyra-m6-project-graph.test.mjs and every pre-existing M0–M5 suite pass in the same 34/34 gate
-- Manifest/capability proof: projectGraphCapabilities()/manifest now declare selected-controller default behavior, controller→source remap semantics, exact mix semantics/range, runtime isolation, and the current Component-evaluated content set
-- Persistence/history proof: serialize/parse tests show no evaluated node/rig clones enter authored storage; invalid missing/cross-artboard remaps fail through the canonical control plane with document, revision and command history unchanged
-- Progress snapshot update: verified-only percentages intentionally unchanged until independent acceptance
-- Suggestions added to `suggestions`: none
-- Known limitations: this correction covers the current M6/current-Veyra Component content families only; clipping remains none-only and later Rive feature families (Data Binding/View Models, full Layout/Text/effects, expanded state-machine/listener families, SDK/export ecosystem, etc.) remain outside M6
+- Correction commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Runtime/remap/mix proof:
+- Nested Component transform proof:
+- Rigged Component evaluation/render proof:
+- Panel client-anchor proof:
+- Authored stroke zoom-scaling proof:
+- Hit-test/render alignment proof after panel changes:
+- Existing M0–M6 regression proof:
+- Manifest/capability proof:
+- Persistence/history proof:
+- Suggestions added to suggestions:
+- Known limitations:
 ```
