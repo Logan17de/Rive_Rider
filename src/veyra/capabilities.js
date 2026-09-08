@@ -10,6 +10,7 @@ const COMMON_WRITABLE = Object.freeze([
   'parent',
   'visible',
   'locked',
+  'pointerEvents',
   'opacity',
   'transform.x',
   'transform.y',

@@ -54,6 +54,10 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'commands.side-effect-free-preview',
   'commands.atomic-plan',
   'verification.structured-assertions',
+  'interaction.listener-crud',
+  'interaction.machine-runtime-bridge',
+  'interaction.pointer-click-lifecycle',
+  'interaction.evaluated-geometry-hit-test',
 ]);
 
 function projectCapabilities(document) {
@@ -252,8 +256,8 @@ function authoringContract() {
           required: ['machine', 'input'],
           actions: ['setInput', 'fire'],
           transport: 'runtime',
-          hostAvailability: 'unsupported',
-          reason: 'The current editor host has no state-machine interaction bridge.',
+          hostAvailability: 'available',
+          runtimeState: 'ephemeral',
         },
         timeline: {
           required: ['timeline'],
@@ -394,6 +398,7 @@ export function createProjectManifest(document, options = {}) {
         constraints: document.constraints.length,
         timelines: document.timelines.length,
         stateMachines: (document.stateMachines || []).length,
+        listeners: (document.listeners || []).length,
       },
     },
     capabilities: projectCapabilities(document),

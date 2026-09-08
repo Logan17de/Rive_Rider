@@ -174,7 +174,22 @@ function pathScreenPoints(node, matrix, viewport) {
   return { points: result, strokeClosed: Boolean(node.geometry.closed) };
 }
 
+function drawableGeometry(node) {
+  if (node.type === 'rectangle' || node.type === 'ellipse') {
+    return Number(node.geometry?.width) > 0 && Number(node.geometry?.height) > 0;
+  }
+  if (node.type === 'polygon') return Number(node.geometry?.radius) > 0 && Number(node.geometry?.sides) >= 3;
+  if (node.type === 'star') {
+    return Number(node.geometry?.outerRadius) > 0
+      && Number(node.geometry?.innerRadius) >= 0
+      && Number(node.geometry?.points) >= 2;
+  }
+  if (node.type === 'path') return Array.isArray(node.geometry?.vertices) && node.geometry.vertices.length >= 2;
+  return false;
+}
+
 function geometryScreenPath(node, matrix, viewport) {
+  if (!drawableGeometry(node)) return { points: [], strokeClosed: false };
   if (node.type === 'path') return pathScreenPoints(node, matrix, viewport);
   let local;
   if (node.type === 'rectangle') local = roundedRectanglePoints(node.geometry);

@@ -22,6 +22,9 @@ export const VEYRA_SERVICE_NAMES = Object.freeze(Object.keys(VEYRA_SERVICE_DEFIN
 // direct Store/runtime seams are explicit and must carry a reason.
 export const VEYRA_BROWSER_MUTATION_COMPATIBILITY = Object.freeze({
   applyCommand: Object.freeze({ transport: 'command', action: 'setProperty' }),
+  addListener: Object.freeze({ transport: 'command', action: 'addListener' }),
+  updateListener: Object.freeze({ transport: 'command', action: 'updateListener' }),
+  removeListener: Object.freeze({ transport: 'command', action: 'removeListener' }),
   createTimeline: Object.freeze({ transport: 'command', action: 'addTimeline' }),
   setKeyframe: Object.freeze({ transport: 'command', action: 'setKeyframe' }),
   removeKeyframe: Object.freeze({ transport: 'command', action: 'removeKeyframe' }),

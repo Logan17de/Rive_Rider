@@ -19,6 +19,8 @@ import {
   semanticFor,
   timelineById,
   trackByAddress,
+  VEYRA_LISTENER_ACTIONS,
+  VEYRA_LISTENER_EVENTS,
 } from './src/veyra/model.js';
 import {
   IDENTITY_MATRIX,
@@ -53,6 +55,7 @@ import { buildSemanticIndex } from './src/veyra/resolver.js';
 import { createVeyraControlPlane } from './src/veyra/controlPlane.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
+import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
@@ -154,6 +157,12 @@ function restoredDocument() {
 const restored = restoredDocument();
 const store = new VeyraStore(restored || createStarterDocument());
 if (restored) savedRevision = -1;
+const machineInteractionBridge = createMachineInteractionBridge({
+  getDocument: () => store.document,
+  onInvalidate: () => {
+    if (evaluatedScene) evaluateCurrentFrame();
+  },
+});
 const interactionDispatcher = createInteractionDispatcher({
   transport: {
     hasTimeline: (timelineId) => !!timelineById(store.document, timelineId),
@@ -162,6 +171,7 @@ const interactionDispatcher = createInteractionDispatcher({
     stop: () => stopAnimation(),
     seek: (frame) => setCurrentFrame(frame),
   },
+  runtime: machineInteractionBridge,
   onDiagnostic: (message) => showToast(message, true),
 });
 const interactionBridge = createShellInteractionBridge({
@@ -774,6 +784,108 @@ function appendFillInspector(targetSection, kind, object) {
   appendNote(targetSection.fieldset, 'Gradient coordinates use normalized object bounds. Stops retain stable IDs for property addresses and animation.');
 }
 
+
+function listenerCommand(action, args, label) {
+  const result = controlPlane.dispatchCommand({ action, args, command: { label, source: 'user' } });
+  if (!result.ok) {
+    showToast(result.error, true);
+    return null;
+  }
+  return result.result;
+}
+
+function listenerActionDefaults(action, current = {}) {
+  if (['play', 'stop', 'seek'].includes(action)) {
+    const timelineId = referenceId(current.timeline, 'timeline') || store.document.timelines[0]?.id;
+    if (!timelineId) return null;
+    return { action, timeline: createTimelineRef(timelineId), machine: null, input: null, ...(action === 'seek' ? { value: 0 } : {}) };
+  }
+  const machines = store.document.stateMachines || [];
+  let machine = machines.find((candidate) => candidate.id === referenceId(current.machine, 'stateMachine')) || null;
+  const compatible = (candidate) => action === 'fire' ? candidate.type === 'trigger' : candidate.type !== 'trigger';
+  if (!machine || !machine.inputs.some(compatible)) machine = machines.find((candidate) => candidate.inputs.some(compatible));
+  const input = machine?.inputs.find((candidate) => candidate.id === referenceId(current.input, 'machineInput') && compatible(candidate))
+    || machine?.inputs.find(compatible);
+  if (!machine || !input) return null;
+  return {
+    action,
+    timeline: null,
+    machine: { kind: 'stateMachine', id: machine.id },
+    input: { kind: 'machineInput', id: input.id },
+    ...(action === 'setInput' ? { value: input.type === 'bool' ? false : Number(input.value || 0) } : {}),
+  };
+}
+
+function appendListenerInspector(node) {
+  const interactions = section('Interactions');
+  interactions.grid.classList.add('oneColumn');
+  const attached = (store.document.listeners || []).filter((listener) => referenceId(listener.target, 'node') === node.id);
+  for (const listener of attached) {
+    const summary = document.createElement('div');
+    summary.className = 'vertexSummary';
+    summary.innerHTML = `<span>${listener.event} → ${listener.action}</span><strong>${listener.id}</strong>`;
+    interactions.fieldset.appendChild(summary);
+    interactions.grid.append(
+      field('Event', listener.event, (event) => listenerCommand('updateListener', { listenerId: listener.id, changes: { event } }, `Set listener ${listener.id} event`), {
+        select: VEYRA_LISTENER_EVENTS.map((value) => ({ value, label: value })),
+      }),
+      field('Action', listener.action, (action) => {
+        const defaults = listenerActionDefaults(action, listener);
+        if (!defaults) return showToast(`No compatible target exists for ${action}`, true);
+        listenerCommand('updateListener', { listenerId: listener.id, changes: defaults }, `Set listener ${listener.id} action`);
+      }, { select: VEYRA_LISTENER_ACTIONS.map((value) => ({ value, label: value })) }),
+    );
+    if (['play', 'stop', 'seek'].includes(listener.action)) {
+      interactions.grid.append(field('Timeline', referenceId(listener.timeline, 'timeline'), (timelineId) => listenerCommand('updateListener', {
+        listenerId: listener.id, changes: { timeline: createTimelineRef(timelineId) },
+      }, `Retarget listener ${listener.id} timeline`), {
+        select: store.document.timelines.map((timeline) => ({ value: timeline.id, label: timeline.name })),
+      }));
+      if (listener.action === 'seek') interactions.grid.append(field('Seek frame', listener.value, (value) => listenerCommand('updateListener', {
+        listenerId: listener.id, changes: { value },
+      }, `Set listener ${listener.id} seek frame`), { type: 'number', number: true, min: 0, step: 1 }));
+    } else {
+      const machineId = referenceId(listener.machine, 'stateMachine');
+      const machine = machineById(store.document, machineId);
+      interactions.grid.append(field('Machine', machineId, (nextMachineId) => {
+        const defaults = listenerActionDefaults(listener.action, { ...listener, machine: { kind: 'stateMachine', id: nextMachineId }, input: null });
+        if (!defaults) return showToast('Selected machine has no compatible input', true);
+        listenerCommand('updateListener', { listenerId: listener.id, changes: defaults }, `Retarget listener ${listener.id} machine`);
+      }, { select: (store.document.stateMachines || []).map((item) => ({ value: item.id, label: item.name })) }));
+      const compatibleInputs = (machine?.inputs || []).filter((input) => listener.action === 'fire' ? input.type === 'trigger' : input.type !== 'trigger');
+      interactions.grid.append(field('Input', referenceId(listener.input, 'machineInput'), (inputId) => listenerCommand('updateListener', {
+        listenerId: listener.id, changes: { input: { kind: 'machineInput', id: inputId } },
+      }, `Retarget listener ${listener.id} input`), { select: compatibleInputs.map((input) => ({ value: input.id, label: `${input.name} · ${input.type}` })) }));
+      if (listener.action === 'setInput') interactions.grid.append(field('Value', listener.value, (value) => {
+        const input = compatibleInputs.find((candidate) => candidate.id === referenceId(listener.input, 'machineInput'));
+        const normalized = input?.type === 'bool' ? (String(value) === 'true' || value === true) : Number(value);
+        listenerCommand('updateListener', { listenerId: listener.id, changes: { value: normalized } }, `Set listener ${listener.id} value`);
+      }));
+    }
+    const remove = document.createElement('div');
+    remove.className = 'inlineActions';
+    remove.append(inspectorAction('Remove listener', 'delete', () => listenerCommand('removeListener', { listenerId: listener.id }, `Delete listener ${listener.id}`)));
+    interactions.fieldset.appendChild(remove);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'inlineActions';
+  actions.append(inspectorAction('Add listener', 'plus', () => {
+    let defaults = listenerActionDefaults('play');
+    let action = 'play';
+    if (!defaults) {
+      action = (store.document.stateMachines || []).some((machine) => machine.inputs.some((input) => input.type === 'trigger')) ? 'fire' : 'setInput';
+      defaults = listenerActionDefaults(action);
+    }
+    if (!defaults) return showToast('Create a timeline or compatible machine input first', true);
+    listenerCommand('addListener', { overrides: {
+      kind: 'pointer', event: 'pointerdown', target: createNodeRef(node.id), ...defaults,
+    } }, `Add listener to ${node.name}`);
+  }));
+  interactions.fieldset.appendChild(actions);
+  appendNote(interactions.fieldset, 'Listeners use stable refs. Runtime setInput/fire changes preview state only; they never enter authored history.');
+  inspector.appendChild(interactions.fieldset);
+}
+
 function renderNodeInspector(node) {
   inspectorTitle.textContent = node.name;
   selectedType.textContent = node.type.toUpperCase();
@@ -835,10 +947,19 @@ function renderNodeInspector(node) {
   }
   appearance.grid.append(
     field('Opacity', node.opacity, (value) => nodePropertyMutation(node, 'opacity', `Set ${node.name} opacity`, value), { type: 'number', number: true, min: 0, max: 1, step: 0.05, address: nodePropertyAddress(node.id, 'opacity') }),
+    field('Pointer events', node.pointerEvents || 'auto', (value) => nodePropertyMutation(node, 'pointerEvents', `Set ${node.name} pointer events`, value), {
+      select: [
+        { value: 'auto', label: 'Auto' },
+        { value: 'pass-through', label: 'Pass through' },
+        { value: 'none', label: 'None (subtree)' },
+      ],
+      address: nodePropertyAddress(node.id, 'pointerEvents'),
+    }),
     checkbox('Visible', node.visible, (value) => nodePropertyMutation(node, 'visible', `${value ? 'Show' : 'Hide'} ${node.name}`, value)),
     checkbox('Locked', node.locked, (value) => nodePropertyMutation(node, 'locked', `${value ? 'Lock' : 'Unlock'} ${node.name}`, value)),
   );
   inspector.appendChild(appearance.fieldset);
+  appendListenerInspector(node);
 
   if (node.geometry) {
     const geometry = section('Geometry');
@@ -1488,9 +1609,12 @@ function evaluateCurrentFrame() {
   // and the playhead agree (e.g. looping a loop:'none' authored timeline).
   const playing = !!animationPlayback?.isPlaying;
   const effectiveLoop = playing ? (playbackLoopMode || timeline?.loop) : timeline?.loop;
-  const layers = timeline && effectiveLoop
-    ? { animation: evaluateTimeline(timeline, currentFrame / timeline.fps, { loop: effectiveLoop }) }
+  const manualAnimation = timeline && effectiveLoop
+    ? evaluateTimeline(timeline, currentFrame / timeline.fps, { loop: effectiveLoop })
     : {};
+  const runtimeAnimation = machineInteractionBridge.evaluateAll().overrides;
+  const animation = { ...manualAnimation, ...runtimeAnimation };
+  const layers = Object.keys(animation).length ? { animation } : {};
   evaluatedScene = evaluateDocument(store.document, layers);
   interactionBridge.updateDocument(store.document);
   interactionSceneRevision += 1;
@@ -1590,6 +1714,8 @@ function stopAnimation() {
 function dispatchInteractionIntent(intent) {
   const result = interactionDispatcher.dispatch(intent);
   if (result.transportApplied) renderTimeline();
+  if (result.runtimeApplied) evaluateCurrentFrame();
+  return result;
 }
 
 function recordKeyframeFor(address) {
@@ -2384,19 +2510,9 @@ window.addEventListener('beforeunload', () => {
   try { localStorage.setItem(AUTOSAVE_KEY, serializeVeyra(store.document)); } catch {}
 });
 
-const machineRuntimes = new Map();
-
 function machineRuntime(machineId) {
-  const machine = machineById(store.document, machineId);
-  if (!machine) {
-    machineRuntimes.delete(machineId);
-    throw new TypeError(`State machine ${machineId} does not exist.`);
-  }
-  let runtime = machineRuntimes.get(machineId);
-  if (!runtime) {
-    runtime = createMachineRuntime(() => store.document, machineId);
-    machineRuntimes.set(machineId, runtime);
-  }
+  const runtime = machineInteractionBridge.runtimeFor(machineId);
+  if (!runtime) throw new TypeError(`State machine ${machineId} does not exist.`);
   return runtime;
 }
 
@@ -2435,6 +2551,9 @@ globalThis.veyra = Object.freeze({
   getDocument: () => cloneValue(store.document),
   getEvaluatedScene: () => cloneValue(evaluateDocument(store.document)),
   readProperty: (address) => controlPlane.read(address).authoredValue,
+  addListener: (overrides) => dispatchCompatibilityCommand('addListener', { overrides }, { label: 'Add listener', source: 'script' }),
+  updateListener: (listenerId, changes) => dispatchCompatibilityCommand('updateListener', { listenerId, changes }, { label: `Update listener ${listenerId}`, source: 'script' }),
+  removeListener: (listenerId) => Boolean(dispatchCompatibilityCommand('removeListener', { listenerId }, { label: `Delete listener ${listenerId}`, source: 'script' })),
   applyCommand: ({ label, address, value, source = 'script' }) => {
     dispatchCompatibilityCommand('setProperty', { address, value }, {
       label, source, propertyAddresses: [address],
@@ -2504,7 +2623,7 @@ globalThis.veyra = Object.freeze({
       label: `Delete state machine ${machine.name}`,
       source: 'script',
     }));
-    if (removed) machineRuntimes.delete(machineId);
+    if (removed) machineInteractionBridge.prune();
     return removed;
   },
   addMachineInput: (machineId, { name = 'Value', type = 'number', value }) => {

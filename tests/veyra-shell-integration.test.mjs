@@ -175,7 +175,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   };
 
   check('[T2] real preview handler composition reaches transport in ordered set-active then play calls', () => {
-    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 140, clientY: 120 }));
+    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 100, clientY: 100 }));
     assert.deepEqual(calls, [
       ['setActiveTimeline', 'doorAnim'],
       ['play', { restart: true }],
@@ -254,7 +254,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
 
   check('[GATE 1] preview pointerdown on direct-play listener dispatches a play transport intent', () => {
     // Button center at (100+40, 100+20) = (140, 120) in canvas-local coords.
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100 });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 1, 'exactly one transport intent dispatched');
     assert.deepEqual(playbackEvents[0], { kind: 'transport', op: 'play', timelineId: 'doorAnim' });
@@ -290,7 +290,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   check('[GATE 2] preview pointerdown play does not mutate document identity or command history', () => {
     const beforeDoc = store.document;
     const beforeHistoryLength = store.commandHistory.length;
-    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 140, clientY: 120 }));
+    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 100, clientY: 100 }));
     assert.strictEqual(store.document, beforeDoc, 'document identity unchanged after preview play');
     assert.equal(store.commandHistory.length, beforeHistoryLength, 'no command recorded for preview play');
   });
@@ -319,7 +319,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers } = makeHandlers({ store, canvas, playbackEvents, tool: 'select', preview: false });
 
   check('[GATE 2] non-preview (select mode) pointerdown on the same target never plays', () => {
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100 });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 0, 'select-mode click does not trigger playback');
     assert.equal(event.__stopped, false, 'select-mode click is NOT claimed by preview — propagation left alone for authoring path');
@@ -346,7 +346,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
     // Button center at canvas-local (140, 120). CSS box is 400x300 but the
     // backing (clientWidth/clientHeight) is 800x600, so scale is 2x in both
     // axes: client point = offset + local/2 = (50+70, 60+60) = (120, 120).
-    const event = fakeEvent('pointerdown', { clientX: 120, clientY: 120 });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 110 });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 1, 'scaled+offset client point still resolves to the button hit');
   });
@@ -368,7 +368,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
     // shape, since hitTestPoint's zoom/pan arithmetic is covered by
     // tests/veyra-hittest.test.mjs — this gate proves the VIEWPORT VALUES
     // (not raw client coords) are what reaches the resolver.
-    assert.doesNotThrow(() => handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 140, clientY: 120 })));
+    assert.doesNotThrow(() => handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 100, clientY: 100 })));
   });
 }
 
@@ -385,7 +385,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
 
   check('[GATE 4] document identity replacement clears stale hover and adopts the new document', () => {
     // Establish hover over the button first.
-    handlers.onPointerMove(fakeEvent('pointermove', { clientX: 140, clientY: 120 }));
+    handlers.onPointerMove(fakeEvent('pointermove', { clientX: 100, clientY: 100 }));
     assert.notEqual(interactionBridge.resolver.hoverKey, null, 'hover established before replacement');
 
     // Simulate an edit/undo/redo replacing store.document with a new identity
@@ -398,7 +398,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
     assert.equal(interactionBridge.resolver.hoverKey, null, 'hover state reset on document identity change, no stale leak');
 
     // The new document has no listeners, so a pointerdown at the same spot must not play.
-    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 140, clientY: 120 }));
+    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 100, clientY: 100 }));
     assert.equal(playbackEvents.length, 0, 'new document with no listeners does not play at the old hover location');
   });
 }
@@ -449,7 +449,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers, diagnostics } = makeHandlers({ store, canvas, playbackEvents });
 
   check('[GATE 5] unsupported runtime (machine) intent is visibly diagnosed, not silently dropped', () => {
-    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 140, clientY: 120 }));
+    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 100, clientY: 100 }));
     assert.equal(playbackEvents.length, 0, 'runtime intent never reaches the transport path');
     assert.ok(
       diagnostics.some((message) => message.includes('fire')),
@@ -473,7 +473,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers } = makeHandlers({ store, canvas, playbackEvents });
 
   check('[GATE 7] pointermove over a direct-play listener does not invoke play', () => {
-    handlers.onPointerMove(fakeEvent('pointermove', { clientX: 140, clientY: 120 }));
+    handlers.onPointerMove(fakeEvent('pointermove', { clientX: 100, clientY: 100 }));
     assert.equal(playbackEvents.length, 0, 'pointermove alone must never start playback for a pointerdown-bound listener');
   });
 }
@@ -487,7 +487,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   check('[GATE 7] pointerup is routed through the direct-intent path (same as pointerdown)', () => {
     // Fixture's listener is bound to pointerdown, so pointerup must NOT match it —
     // this proves pointerup is resolved as its own event type, not aliased to pointerdown.
-    handlers.onPointerUp(fakeEvent('pointerup', { clientX: 140, clientY: 120 }));
+    handlers.onPointerUp(fakeEvent('pointerup', { clientX: 100, clientY: 100 }));
     assert.equal(playbackEvents.length, 0, 'pointerup does not fire a pointerdown-bound listener');
   });
 }
@@ -518,7 +518,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers } = makeHandlers({ store, canvas, playbackEvents });
 
   check('[GATE 7] pointerup DOES fire a pointerup-bound direct listener and isolates preview propagation', () => {
-    const event = fakeEvent('pointerup', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointerup', { clientX: 100, clientY: 100 });
     handlers.onPointerUp(event);
     assert.equal(playbackEvents.length, 1, 'pointerup-bound listener fires on the real onPointerUp handler');
     assert.equal(event.__stopped, true, 'eligible preview pointerup stops propagation before the editor ancestor');
@@ -532,7 +532,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers } = makeHandlers({ store, canvas, playbackEvents });
 
   check('[GATE 7] eligible preview pointerdown stops propagation, isolating it from editor drag/selection', () => {
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100 });
     handlers.onPointerDown(event);
     assert.equal(event.__stopped, true, 'propagation stopped so renderer child handlers cannot start a drag');
     assert.equal(event.__defaultPrevented, true, 'preventDefault called because an intent was dispatched');
@@ -546,7 +546,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   });
 
   check('[GATE 7] eligible preview pointermove stops propagation', () => {
-    const event = fakeEvent('pointermove', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointermove', { clientX: 100, clientY: 100 });
     handlers.onPointerMove(event);
     assert.equal(event.__stopped, true, 'preview pointermove also isolated from editor handlers');
   });
@@ -560,7 +560,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers } = makeHandlers({ store, canvas, playbackEvents });
 
   check('[GATE 7 negative] Alt-held pointerdown is ineligible and does not touch propagation', () => {
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120, altKey: true });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100, altKey: true });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 0, 'Alt-held click does not play');
     assert.equal(event.__stopped, false, 'ineligible event is left alone for the pan/authoring path');
@@ -568,14 +568,14 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   });
 
   check('[GATE 7 negative] middle-button pointerdown is ineligible and does not touch propagation', () => {
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120, button: 1 });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100, button: 1 });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 0, 'middle-button click does not play');
     assert.equal(event.__stopped, false, 'ineligible event left alone');
   });
 
   check('[GATE 7 negative] non-primary pointerdown is ineligible and does not touch propagation', () => {
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120, isPrimary: false });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100, isPrimary: false });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 0, 'non-primary pointer does not play');
     assert.equal(event.__stopped, false, 'ineligible event left alone');
@@ -590,7 +590,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers } = makeHandlers({ store, canvas, playbackEvents, tool: 'pencil' });
 
   check('[GATE 7 negative] pencil-tool pointerdown is ineligible and does not touch propagation', () => {
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100 });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 0, 'pencil tool click does not play');
     assert.equal(event.__stopped, false, 'ineligible event left alone for pencil authoring path');
@@ -605,14 +605,14 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
   const { handlers } = makeHandlers({ store, canvas, playbackEvents, panGesture: true });
 
   check('[GATE 7 negative] active pan gesture makes pointerdown ineligible', () => {
-    const event = fakeEvent('pointerdown', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointerdown', { clientX: 100, clientY: 100 });
     handlers.onPointerDown(event);
     assert.equal(playbackEvents.length, 0, 'pan gesture in progress blocks preview dispatch');
     assert.equal(event.__stopped, false, 'ineligible event left alone during active pan');
   });
 
   check('[GATE 7 negative] active pan gesture leaves pointerup propagation for ancestor pan handling', () => {
-    const event = fakeEvent('pointerup', { clientX: 140, clientY: 120 });
+    const event = fakeEvent('pointerup', { clientX: 100, clientY: 100 });
     handlers.onPointerUp(event);
     assert.equal(event.__stopped, false, 'ineligible pan pointerup is not stopped before the ancestor finishPan handler');
   });
@@ -672,7 +672,7 @@ function makeHandlers({ store, canvas, tool = 'select', preview = true, panGestu
     const canvas = fakeCanvas();
     const playbackEvents = [];
     const { handlers } = makeHandlers({ store, canvas, playbackEvents });
-    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 140, clientY: 120 }));
+    handlers.onPointerDown(fakeEvent('pointerdown', { clientX: 100, clientY: 100 }));
     assert.equal(playbackEvents.length, 0, 'pointerdown does not fire a pointerup-bound listener — proves the assertion is sensitive to real behavior, not vacuous');
   });
 }

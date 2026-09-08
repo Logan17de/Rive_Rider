@@ -1,6 +1,8 @@
 import {
   VEYRA_EASING_TYPES,
   VEYRA_LOOP_MODES,
+  VEYRA_LISTENER_ACTIONS,
+  VEYRA_LISTENER_EVENTS,
   VEYRA_MACHINE_INPUT_TYPES,
   VEYRA_NODE_TYPES,
   VEYRA_PROPERTY_BOUNDS,
@@ -197,6 +199,21 @@ const COMMAND_TABLE = {
     summary: 'Remove one typed semantic relation from a semantic record.',
     params: [param('semanticId', 'string', true), param('relation', 'object', true)],
     run: (store, args, command) => store.removeSemanticRelation(args.semanticId, args.relation, command ?? {}),
+  },
+  addListener: {
+    summary: 'Add a validated current pointer listener.',
+    params: [param('overrides', 'object', true)],
+    run: (store, args, command) => store.addListener(args.overrides, command ?? {}),
+  },
+  updateListener: {
+    summary: 'Update a current pointer listener by stable listener id.',
+    params: [param('listenerId', 'string', true), param('changes', 'object', true)],
+    run: (store, args, command) => store.updateListener(args.listenerId, args.changes, command ?? {}),
+  },
+  removeListener: {
+    summary: 'Remove a current pointer listener by stable listener id.',
+    params: [param('listenerId', 'string', true)],
+    run: (store, args, command) => store.removeListener(args.listenerId, command ?? {}),
   },
   setProperty: {
     summary: 'Write a capability-checked property by address.',
@@ -424,6 +441,29 @@ const COMMAND_MANIFEST_OVERRIDES = {
     name: 'Remove semantic relation',
     targetKind: 'semanticRecord',
     capabilities: ['semantic-write', 'typed-relation', 'transactional', 'undoable'],
+  },
+  addListener: {
+    manifestId: 'add-listener',
+    name: 'Add listener',
+    targetKind: 'listener',
+    parameters: [
+      manifestParameter('overrides', 'object', true, 'Pointer listener with stable target refs, event/action and typed runtime/transport targets.', {
+        eventEnum: [...VEYRA_LISTENER_EVENTS], actionEnum: [...VEYRA_LISTENER_ACTIONS],
+      }),
+    ],
+    capabilities: ['interaction-write', 'transactional', 'undoable', 'returns-id'],
+  },
+  updateListener: {
+    manifestId: 'update-listener',
+    name: 'Update listener',
+    targetKind: 'listener',
+    capabilities: ['interaction-write', 'transactional', 'undoable'],
+  },
+  removeListener: {
+    manifestId: 'remove-listener',
+    name: 'Remove listener',
+    targetKind: 'listener',
+    capabilities: ['interaction-write', 'transactional', 'undoable'],
   },
   setProperty: {
     manifestId: 'write-property',

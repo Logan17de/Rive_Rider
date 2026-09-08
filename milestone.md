@@ -26,7 +26,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 # MILESTONE M4 — Close the Current Interaction Loop
 
 **Roadmap mapping:** `plan.md` M1 — Close current interaction loop  
-**Status:** `READY`
+**Status:** `AWAITING VERIFICATION`
 
 ## Goal
 
@@ -305,22 +305,22 @@ M4 is complete only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Listener CRUD/control-plane proof:
-- Listener validation/lifecycle proof:
-- Machine runtime bridge proof:
-- Pointer/click lifecycle proof:
-- Exact evaluated hit-test proof:
-- Bézier/stroke/transform proof:
-- Pointer -> listener -> machine -> evaluated render proof:
-- Runtime non-mutation proof:
-- Manifest/dependency/control-plane proof:
-- Human UI listener authoring proof:
-- Name-independence proof:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Implementation commits: workflow-gated M4 interaction-loop implementation; final SHA recorded after CI commit
+- Changed files: model/store/commands/controlPlane/capabilities/manifest/serviceRegistry/index, hitTest/listenersRuntime/interactionTransport/interactionHost/shellBridge, veyra.js, listener + M4 tests, milestone.md
+- Tests added/changed: dedicated M4 end-to-end/adversarial interaction suite; listener registry expectation strengthened to typed machine refs + click
+- npm test: PASS in workflow gate
+- npm run check: PASS in workflow gate
+- Listener CRUD/control-plane proof: add/update/remove listener Store methods + JSON command actions + deterministic preview IDs + undo/redo/provenance tests
+- Listener validation/lifecycle proof: normalization rejects dangling/mixed/type-incompatible refs; delete cascades are deterministic; click is down/up-same-stable-target
+- Machine runtime bridge proof: one persistent MachineRuntime per machine id/document getter; structured missing-target diagnostics; setInput/fire step exactly once per event without authored writes
+- Pointer/click lifecycle proof: enter/leave follows top-hit changes; pointermove/down/up direct intents execute exactly once; click follows pointerdown/up stable-target qualification
+- Exact evaluated hit-test proof: transformed rectangle/ellipse/polygon/star/path use rendered geometry, no bounds fallback; visibility/pointerEvents rules are explicit and opacity-independent
+- Bézier/stroke/transform proof: adaptive screen-space cubic flattening uses a 0.35px tolerance; filled open paths implicitly close; non-scaling strokes use screen-space distance
+- Pointer -> listener -> machine -> evaluated render proof: runtime bridge output is merged into the animation evaluation layer and invalidates render after interaction
+- Runtime non-mutation proof: M4 tests compare serialization/history before and after runtime interaction
+- Manifest/dependency/control-plane proof: listener command actions generated from canonical table; machine listener host availability is available; existing listener runtimeUses dependency edges stay bidirectional
+- Human UI listener authoring proof: selected-node inspector can add/edit/remove current pointer listeners and pointer participation through canonical commands/properties
+- Name-independence proof: M4 fixture reruns after misleading renames/serialize-load using stable refs only
+- Suggestions added to `suggestions`: none
+- Known limitations: current legacy listener model remains one action per pointer listener; clipping/layout/components/accessibility/data binding remain deferred per M4 non-goals
 ```

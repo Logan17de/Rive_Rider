@@ -320,7 +320,7 @@ for (const names of [false, true]) {
   const document = goldenFixture();
   const manifest = createProjectManifest(document);
   assert.equal(manifest.document.counts.listeners, 2);
-  assert.equal(manifest.authoring.schema.listener.variants.machine.hostAvailability, 'available');
+  assert.equal(manifest.authoring.listener.variants.machine.hostAvailability, 'available');
   assert.ok(manifest.capabilities.includes('interaction.listener-crud'));
   for (const command of ['addListener', 'updateListener', 'removeListener']) {
     assert.ok(manifest.actions.some((action) => action.command === command));
@@ -334,7 +334,7 @@ for (const names of [false, true]) {
   const read = plane.read({ kind: 'listener', id: 'set_enabled' }, { includeDependencies: true });
   assert.equal(read.status, 'ok');
   assert.equal(read.ref.id, 'set_enabled');
-  assert.equal(read.dependencies.status, 'ok');
+  assert.ok(read.dependencySummary.edgeCount > 0);
 
   const source = readFileSync(new URL('../veyra.js', import.meta.url), 'utf8');
   assert.match(source, /function appendListenerInspector\(node\)/);

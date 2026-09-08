@@ -14,9 +14,11 @@ const scene = { ...document, kind: 'veyra-evaluated-scene', documentId: document
 const hit = bridge.resolve({ type: 'pointerdown', x: 50, y: 50 }, scene, 1, { width: 100, height: 100, centerX: 0, centerY: 0, zoom: 1 });
 assert.equal(hit.intents[0].op, 'play', 'preview adapter emits direct play intent');
 assert.equal(intents[0].timelineId, 'tl', 'adapter forwards transport target');
-const moveBridge = createShellInteractionBridge({ document: normalizeDocument({ ...document, listeners: [createPointerListener({ id: 'move-play', targetId: 'target', event: 'pointermove', action: 'play', timelineId: 'tl' })] }), onIntent: () => { throw new Error('pointermove direct intent escaped'); } });
+const moveIntents = [];
+const moveBridge = createShellInteractionBridge({ document: normalizeDocument({ ...document, listeners: [createPointerListener({ id: 'move-play', targetId: 'target', event: 'pointermove', action: 'play', timelineId: 'tl' })] }), onIntent: (intent) => moveIntents.push(intent) });
 const move = moveBridge.resolve({ type: 'pointermove', x: 50, y: 50 }, scene, 1, { width: 100, height: 100, centerX: 0, centerY: 0, zoom: 1 });
-assert.equal(move.intents.length, 1, 'resolver reports direct pointermove listener without dispatching it');
+assert.equal(move.intents.length, 1, 'resolver reports direct pointermove listener');
+assert.equal(moveIntents.length, 1, 'M4 dispatches a direct pointermove listener exactly once');
 assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 0 }, tool: 'select', preview: false }), false, 'select mode blocks preview dispatch');
 assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 0 }, tool: 'select', preview: true }), true, 'preview mode admits primary pointer dispatch');
 assert.equal(isPreviewPointerEligible({ event: { isPrimary: true, button: 1 }, tool: 'select', preview: true }), false, 'middle-button pan is not preview dispatch');

@@ -118,6 +118,7 @@ assert.deepEqual(manifest.document.counts, {
   constraints: 0,
   timelines: 1,
   stateMachines: 1,
+  listeners: 0,
 });
 assert.ok(manifest.capabilities.includes('assets.registry'));
 assert.ok(manifest.capabilities.includes('animation.timelines'));
@@ -294,7 +295,7 @@ assert.deepEqual(
 
 // --- Action schema --------------------------------------------------------------
 const actions = manifest.actions;
-assert.equal(actions.length, 50, 'Action catalog grows additively from 45 entries to 50 with canonical semantic CRUD.');
+assert.equal(actions.length, 53, 'Action catalog grows additively with canonical semantic CRUD plus M4 listener CRUD.');
 const actionIds = actions.map((item) => item.ref.id);
 assert.equal(new Set(actionIds).size, actionIds.length, 'Action ids must be unique.');
 for (const item of actions) {
@@ -392,7 +393,8 @@ for (const id of [
   'remove-control', 'remove-constraint', 'add-asset', 'remove-asset', 'begin', 'commit', 'cancel',
   'undo', 'redo', 'select', 'replace-document', 'remove-selection',
  ]) assert.ok(serializeProjectManifest(manifest).includes(`\"id\": \"${id}\"`), `${id} must be discoverable.`);
-assert.equal(manifest.authoring.listener.variants.machine.hostAvailability, 'unsupported');
+assert.equal(manifest.authoring.listener.variants.machine.hostAvailability, 'available');
+assert.equal(manifest.authoring.listener.variants.machine.runtimeState, 'ephemeral');
 assert.equal(manifest.authoring.listener.variants.timeline.hostAvailability, 'available');
 
 // Action parameters must expose the shared validation bounds.

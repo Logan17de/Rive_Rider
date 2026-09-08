@@ -9,6 +9,7 @@ import {
   createControlRef,
   createMachineInputRef,
   createMachineStateRef,
+  createStateMachineRef,
   createMeshVertexRef,
   createNodeRef,
   createTimelineRef,
@@ -32,9 +33,10 @@ export const VEYRA_LISTENER_VERSION = 4;
 export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4]);
 export const VEYRA_LISTENER_KINDS = Object.freeze(['pointer']);
 export const VEYRA_LISTENER_EVENTS = Object.freeze([
-  'pointerdown', 'pointerup', 'pointermove', 'pointerenter', 'pointerleave',
+  'pointerdown', 'pointerup', 'pointermove', 'pointerenter', 'pointerleave', 'click',
 ]);
 export const VEYRA_LISTENER_ACTIONS = Object.freeze(['setInput', 'fire', 'play', 'stop', 'seek']);
+export const VEYRA_POINTER_EVENT_MODES = Object.freeze(['auto', 'none', 'pass-through']);
 export const VEYRA_MIME = 'application/vnd.veyra+json';
 export const VEYRA_ASSET_TYPES = Object.freeze(['image', 'font', 'audio']);
 export const VEYRA_CONSTRAINT_TYPES = Object.freeze([
@@ -508,7 +510,7 @@ export function createPointerListener(overrides = {}) {
   const machineValue = overrides.machine ?? overrides.machineId;
   const inputValue = overrides.input ?? overrides.inputId;
   const timelineValue = overrides.timeline ?? overrides.timelineId;
-  const machine = machineValue == null || machineValue === '' ? null : String(machineValue);
+  const machine = machineValue == null || machineValue === '' ? null : normalizeReference(machineValue, 'stateMachine', 'listener.machine');
   const input = inputValue == null || inputValue === '' ? null : normalizeReference(inputValue, 'machineInput', 'listener.input');
   const timeline = timelineValue == null || timelineValue === '' ? null : normalizeReference(timelineValue, 'timeline', 'listener.timeline');
   const machineAction = action === 'setInput' || action === 'fire';
@@ -731,6 +733,10 @@ function normalizeNode(node, index, anglesUseDegrees, inputVersion) {
   if (!VEYRA_NODE_TYPES.includes(type)) throw new TypeError(`nodes[${index}].type is unsupported.`);
   const id = String(node.id || '');
   if (!id) throw new TypeError(`nodes[${index}].id is required.`);
+  const pointerEvents = String(node.pointerEvents || 'auto');
+  if (!VEYRA_POINTER_EVENT_MODES.includes(pointerEvents)) {
+    throw new TypeError(`nodes[${index}].pointerEvents must be one of ${VEYRA_POINTER_EVENT_MODES.join(', ')}.`);
+  }
   return {
     id,
     type,
@@ -738,6 +744,7 @@ function normalizeNode(node, index, anglesUseDegrees, inputVersion) {
     parent: normalizeReference(node.parent ?? node.parentId, 'node', `nodes[${index}].parent`),
     visible: node.visible !== false,
     locked: Boolean(node.locked),
+    ...(pointerEvents !== 'auto' ? { pointerEvents } : {}),
     opacity: bounded(node.opacity ?? 1, `nodes[${index}].opacity`, 0, 1),
     transform: normalizeTransform(node.transform, `nodes[${index}].transform`, anglesUseDegrees),
     paint: {
@@ -1269,7 +1276,8 @@ function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) 
   if (timelineAction && (machineValue != null || inputValue != null)) throw new TypeError(`${path}.machine/input are not allowed for ${action}.`);
   const result = { id: String(listener?.id || createId('listener')), kind, event, target, action };
   if (machineAction) {
-    const machineId = String(machineValue || '');
+    const machineRef = requiredReference(machineValue, 'stateMachine', `${path}.machine`);
+    const machineId = referenceId(machineRef, 'stateMachine');
     const machine = machinesById.get(machineId);
     if (!machine) throw new TypeError(`${path}.machine references missing state machine ${machineId}.`);
     if (!machine.states.length) console.warn(`${path} targets state machine ${machineId} with no playable state; interaction will be ignored at runtime. No playable animation is configured for this interaction.`);
@@ -1277,11 +1285,22 @@ function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) 
     const inputId = referenceId(inputRef, 'machineInput');
     const input = machine.inputs.find((candidate) => candidate.id === inputId || candidate.name === inputId);
     if (!input) throw new TypeError(`${path}.input references missing machine input ${inputId}.`);
-    result.machine = machineId;
+    result.machine = createStateMachineRef(machineId);
     result.input = createMachineInputRef(input.id);
+    if (action === 'fire' && input.type !== 'trigger') {
+      throw new TypeError(`${path}.input must be a trigger input for fire.`);
+    }
     if (action === 'setInput') {
+      if (input.type === 'trigger') throw new TypeError(`${path}.input is a trigger; use fire instead of setInput.`);
       if (listener.value === undefined) throw new TypeError(`${path}.value is required for setInput.`);
-      result.value = cloneValue(listener.value);
+      if (input.type === 'number') {
+        const value = Number(listener.value);
+        if (!Number.isFinite(value)) throw new TypeError(`${path}.value must be finite for number input ${input.id}.`);
+        result.value = value;
+      } else {
+        if (typeof listener.value !== 'boolean') throw new TypeError(`${path}.value must be boolean for bool input ${input.id}.`);
+        result.value = listener.value;
+      }
     }
   } else if (timelineAction) {
     const timelineRef = requiredReference(timelineValue, 'timeline', `${path}.timeline`);

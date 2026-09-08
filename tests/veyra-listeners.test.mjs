@@ -42,8 +42,7 @@ const base = createDocument({
   assert.equal(normalized.version, 4, 'listener feature projects to v4');
   assert.deepEqual(normalized.listeners[0].target, { kind: 'node', id: node.id });
   assert.deepEqual(normalized.listeners[0].input, { kind: 'machineInput', id: 'tap_input' });
-  assert.equal(typeof normalized.listeners[0].machine, 'string');
-  assert.equal(normalized.listeners[0].machine, machine.id);
+  assert.deepEqual(normalized.listeners[0].machine, { kind: 'stateMachine', id: machine.id });
   assert.equal(parseVeyra(JSON.stringify(normalized)).listeners.length, 1);
   console.log('✓ valid listener persists stable target/input ids');
 }
@@ -51,7 +50,7 @@ const base = createDocument({
 // Negative control: unknown values and malformed registry shapes fail loudly.
 {
   assert.throws(() => normalizeDocument({ ...base, listeners: [{ id: 'bad', kind: 'click', event: 'pointerdown', target: node.id, machine: machine.id, input: 'Tap', action: 'fire' }] }), /supported listener kind/);
-  assert.throws(() => normalizeDocument({ ...base, listeners: [{ id: 'bad', kind: 'pointer', event: 'click', target: node.id, machine: machine.id, input: 'Tap', action: 'fire' }] }), /supported pointer event/);
+  assert.equal(normalizeDocument({ ...base, listeners: [createPointerListener({ id: 'click-ok', kind: 'pointer', event: 'click', target: node.id, machine: machine.id, input: 'Tap', action: 'fire' })] }).listeners[0].event, 'click');
   assert.throws(() => normalizeDocument({ ...base, listeners: { bad: true } }), /listeners must be an array/);
   assert.throws(() => normalizeDocument({ ...base, listeners: [{ id: 'bad', kind: 'pointer', event: 'pointerdown', target: 'missing', machine: machine.id, input: 'Tap', action: 'fire' }] }), /missing node/);
   console.log('✓ malformed listeners are refused, never dropped');

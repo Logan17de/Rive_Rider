@@ -17,6 +17,7 @@ import {
   createStateMachine,
   createMesh,
   createNode,
+  createPointerListener,
   createTimeline,
   createTrack,
   descendantIds,
@@ -253,6 +254,7 @@ export class VeyraStore {
       document.nodes = document.nodes.filter((candidate) => !removed.has(candidate.id));
       document.semantics = document.semantics.filter((record) => !removed.has(referenceId(record.target, 'node')));
       document.constraints = document.constraints.filter((constraint) => !removed.has(referenceId(constraint.path, 'node')));
+      document.listeners = document.listeners.filter((listener) => !removed.has(referenceId(listener.target, 'node')));
     });
     this.selectedId = null;
     this.selectedKind = null;
@@ -260,6 +262,45 @@ export class VeyraStore {
     return true;
   }
 
+
+
+
+  // --- Current pointer listener authored CRUD (M4) --------------------------
+  addListener(overrides = {}, commandDescriptor = {}) {
+    const listener = createPointerListener(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add ${listener.event} listener`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.listeners.push(listener);
+    });
+    return listener.id;
+  }
+
+  updateListener(listenerId, changes = {}, commandDescriptor = {}) {
+    const existing = this.document.listeners.find((listener) => listener.id === listenerId);
+    if (!existing) return false;
+    const candidate = createPointerListener({ ...cloneValue(existing), ...cloneValue(changes), id: listenerId });
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update listener ${listenerId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const index = document.listeners.findIndex((listener) => listener.id === listenerId);
+      document.listeners[index] = candidate;
+    });
+    return listenerId;
+  }
+
+  removeListener(listenerId, commandDescriptor = {}) {
+    if (!this.document.listeners.some((listener) => listener.id === listenerId)) return false;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete listener ${listenerId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      document.listeners = document.listeners.filter((listener) => listener.id !== listenerId);
+    });
+    return true;
+  }
 
   // --- Universal semantic metadata -----------------------------------------
   // Human UI and AI both use these Store commands. Validation and history are
@@ -553,6 +594,7 @@ export class VeyraStore {
       : { label: `Delete timeline ${timeline.name}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
       document.timelines = document.timelines.filter((candidate) => candidate.id !== timelineId);
+      document.listeners = document.listeners.filter((listener) => referenceId(listener.timeline, 'timeline') !== timelineId);
     });
     return true;
   }
@@ -653,6 +695,7 @@ export class VeyraStore {
       : { label: `Delete state machine ${machine.name}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
       document.stateMachines = document.stateMachines.filter((candidate) => candidate.id !== machineId);
+      document.listeners = document.listeners.filter((listener) => referenceId(listener.machine, 'stateMachine') !== machineId);
     });
     return true;
   }
@@ -841,6 +884,10 @@ export class VeyraStore {
     this.execute(descriptor, (document) => {
       const target = machineById(document, machineId);
       target.inputs = target.inputs.filter((candidate) => candidate.id !== inputId);
+      document.listeners = document.listeners.filter((listener) => !(
+        referenceId(listener.machine, 'stateMachine') === machineId
+        && referenceId(listener.input, 'machineInput') === inputId
+      ));
     });
     return true;
   }

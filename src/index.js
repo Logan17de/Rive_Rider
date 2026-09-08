@@ -42,3 +42,6 @@ export {
   readVeyra,
   verifyVeyraChange,
 } from './veyra/controlPlane.js';
+
+export { createMachineInteractionBridge } from './veyra/interactionHost.js';
+export { hitTestPoint, VEYRA_HIT_TEST_TOLERANCE_PX, VEYRA_POINTER_EVENT_MODES } from './veyra/hitTest.js';
