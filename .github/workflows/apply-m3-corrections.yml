@@ -7,6 +7,7 @@ on:
       - '.github/workflows/apply-m3-corrections.yml'
       - 'scripts/apply-m3-corrections.py'
       - 'scripts/fix-m3-correction-applycommand.py'
+      - 'scripts/fix-m3-correction-tests.py'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +31,7 @@ jobs:
         run: |
           python3 scripts/apply-m3-corrections.py
           python3 scripts/fix-m3-correction-applycommand.py
+          python3 scripts/fix-m3-correction-tests.py
       - name: Syntax check
         run: npm run check
       - name: Test
@@ -38,7 +40,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/apply-m3-corrections.yml scripts/apply-m3-corrections.py scripts/fix-m3-correction-applycommand.py
+          git rm .github/workflows/apply-m3-corrections.yml scripts/apply-m3-corrections.py scripts/fix-m3-correction-applycommand.py scripts/fix-m3-correction-tests.py
           git add -A
           git diff --cached --check
           git commit -m "Fix M3 control-plane convergence blockers [m3-corrected]"
