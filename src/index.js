@@ -49,8 +49,8 @@ export { createMachineInteractionBridge } from './veyra/interactionHost.js';
 export { hitTestPoint, VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX, VEYRA_HIT_TEST_TOLERANCE_PX, VEYRA_POINTER_EVENT_MODES } from './veyra/hitTest.js';
 export { createSvgViewBox, createSvgViewBoxScreenTransform, VEYRA_SVG_PRESERVE_ASPECT_RATIO } from './veyra/viewport.js';
 // M5 workspace helpers are deterministic editor-state primitives. Camera zoom
-// is CSS pixels per world unit, and panel/theme/navigation state never authors
-// document content, so browser behavior and tests share one stable contract.
+// is CSS pixels per world unit; the authored artboard frame has persistent
+// x/y/width/height while panel/theme/navigation state remains editor-only.
 export {
   VEYRA_ARTBOARD_RESIZE_TOLERANCE_PX,
   VEYRA_MIN_NODE_SCALE,
