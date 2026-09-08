@@ -4,7 +4,7 @@ import { propertyTargetStatus, writeProperty } from './properties.js';
 import { referenceId } from './references.js';
 import { evaluateRig } from './rigging.js';
 import { artboardById } from './projectGraph.js';
-import { evaluateComponentInstances } from './components.js';
+import { evaluateComponentContent } from './components.js';
 
 export const VEYRA_EVALUATION_ORDER = Object.freeze([
   'authored',
@@ -134,8 +134,15 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     evaluationOrder: [...VEYRA_EVALUATION_ORDER],
     sources,
   };
-  if (options.includeComponents === false) return { ...baseScene, componentEvaluatedNodes: [] };
-  const componentEvaluatedNodes = evaluateComponentInstances({
+  if (options.includeComponents === false) return {
+    ...baseScene,
+    componentEvaluatedNodes: [],
+    componentEvaluatedBones: [],
+    componentEvaluatedMeshes: [],
+    componentEvaluatedControls: [],
+    componentEvaluatedConstraints: [],
+  };
+  const componentContent = evaluateComponentContent({
     document: evaluatedDocument,
     artboardId,
     baseScene,
@@ -154,8 +161,16 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
   });
   return {
     ...baseScene,
-    nodes: [...baseNodes, ...componentEvaluatedNodes],
-    componentEvaluatedNodes,
+    nodes: [...baseNodes, ...componentContent.nodes],
+    bones: [...baseScene.bones, ...componentContent.bones],
+    meshes: [...baseScene.meshes, ...componentContent.meshes],
+    controls: [...baseScene.controls, ...componentContent.controls],
+    constraints: [...baseScene.constraints, ...componentContent.constraints],
+    componentEvaluatedNodes: componentContent.nodes,
+    componentEvaluatedBones: componentContent.bones,
+    componentEvaluatedMeshes: componentContent.meshes,
+    componentEvaluatedControls: componentContent.controls,
+    componentEvaluatedConstraints: componentContent.constraints,
   };
 }
 

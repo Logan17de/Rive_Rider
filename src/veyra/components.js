@@ -1,5 +1,5 @@
 import { evaluateTimeline } from './animation.js';
-import { invertMatrix, multiplyMatrices, transformMatrix } from './contracts.js';
+import { invertMatrix, multiplyMatrices, transformMatrix, transformPoint } from './contracts.js';
 import { createMachineRuntime } from './stateMachine.js';
 import { readProperty, writeProperty } from './properties.js';
 import {
@@ -79,6 +79,18 @@ function mixedRuntimeOverrides(document, overrides, mix) {
   return output;
 }
 
+function effectiveTimelineId(instance, controllerId) {
+  const selected = instance.runtime?.timeline?.id || null;
+  const remapped = instance.runtime?.remap?.timeline?.id || null;
+  return selected && controllerId === selected && remapped ? remapped : controllerId;
+}
+
+function effectiveMachineId(instance, controllerId) {
+  const selected = instance.runtime?.stateMachine?.id || null;
+  const remapped = instance.runtime?.remap?.stateMachine?.id || null;
+  return selected && controllerId === selected && remapped ? remapped : controllerId;
+}
+
 export class ComponentRuntimeRegistry {
   #getDocument;
   #buckets = new Map();
@@ -91,14 +103,21 @@ export class ComponentRuntimeRegistry {
     const document = this.#getDocument();
     const instance = componentInstanceById(document, instanceId);
     if (!instance) throw new TypeError(`Unknown component instance ${instanceId}.`);
-    return { document, instance, component: componentById(document, instance.component.id) };
+    const component = componentById(document, instance.component.id);
+    if (!component) throw new TypeError(`Component instance ${instanceId} references missing component ${instance.component.id}.`);
+    return { document, instance, component };
   }
 
   #bucket(instanceId) {
     const { document, instance } = this.#instance(instanceId);
     let bucket = this.#buckets.get(instanceId);
     if (!bucket) {
-      bucket = { timelineTimes: new Map(), machines: new Map(), documentId: document.id };
+      bucket = {
+        timelineTimes: new Map(),
+        machines: new Map(),
+        machineTargets: new Map(),
+        documentId: document.id,
+      };
       this.#buckets.set(instanceId, bucket);
     }
     return { document, instance, bucket };
@@ -112,10 +131,25 @@ export class ComponentRuntimeRegistry {
     }
   }
 
+  #machineRuntimeFor(document, instance, bucket, controllerId) {
+    const controller = { kind: 'stateMachine', id: String(controllerId) };
+    this.#validateSourceRef(document, instance, controller);
+    const targetId = effectiveMachineId(instance, controller.id);
+    const target = { kind: 'stateMachine', id: targetId };
+    this.#validateSourceRef(document, instance, target);
+    if (!bucket.machines.has(controller.id) || bucket.machineTargets.get(controller.id) !== targetId) {
+      bucket.machines.set(controller.id, createMachineRuntime(() => this.#getDocument(), targetId));
+      bucket.machineTargets.set(controller.id, targetId);
+    }
+    return bucket.machines.get(controller.id);
+  }
+
   setTimelineTime(instanceId, timelineId, timeSeconds) {
     const { document, instance, bucket } = this.#bucket(instanceId);
     const ref = { kind: 'timeline', id: String(timelineId) };
     this.#validateSourceRef(document, instance, ref);
+    const effective = { kind: 'timeline', id: effectiveTimelineId(instance, ref.id) };
+    this.#validateSourceRef(document, instance, effective);
     const time = Number(timeSeconds);
     if (!Number.isFinite(time) || time < 0) throw new TypeError('Component timeline time must be a finite non-negative number.');
     bucket.timelineTimes.set(ref.id, time);
@@ -130,10 +164,7 @@ export class ComponentRuntimeRegistry {
 
   machineRuntime(instanceId, machineId) {
     const { document, instance, bucket } = this.#bucket(instanceId);
-    const ref = { kind: 'stateMachine', id: String(machineId) };
-    this.#validateSourceRef(document, instance, ref);
-    if (!bucket.machines.has(ref.id)) bucket.machines.set(ref.id, createMachineRuntime(() => this.#getDocument(), ref.id));
-    return bucket.machines.get(ref.id);
+    return this.#machineRuntimeFor(document, instance, bucket, String(machineId));
   }
 
   setMachineInput(instanceId, machineId, inputId, value) {
@@ -170,19 +201,39 @@ export class ComponentRuntimeRegistry {
   evaluate(instanceId) {
     const { document, instance, bucket } = this.#bucket(instanceId);
     const overrides = {};
-    for (const [timelineId, timeSeconds] of [...bucket.timelineTimes.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      const timeline = document.timelines.find((item) => item.id === timelineId);
-      if (timeline) Object.assign(overrides, evaluateTimeline(timeline, timeSeconds));
+    const timelineControllers = new Map(bucket.timelineTimes);
+    const selectedTimelineId = instance.runtime?.timeline?.id || null;
+    if (selectedTimelineId && !timelineControllers.has(selectedTimelineId)) timelineControllers.set(selectedTimelineId, 0);
+    const timelineMappings = [];
+    for (const [controllerId, timeSeconds] of [...timelineControllers.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const controller = { kind: 'timeline', id: controllerId };
+      this.#validateSourceRef(document, instance, controller);
+      const sourceTimelineId = effectiveTimelineId(instance, controllerId);
+      const effective = { kind: 'timeline', id: sourceTimelineId };
+      this.#validateSourceRef(document, instance, effective);
+      const timeline = document.timelines.find((item) => item.id === sourceTimelineId);
+      if (!timeline) throw new TypeError(`Component runtime timeline ${sourceTimelineId} does not exist.`);
+      Object.assign(overrides, evaluateTimeline(timeline, timeSeconds));
+      timelineMappings.push({ controllerId, sourceTimelineId, timeSeconds });
     }
-    for (const [machineId, runtime] of [...bucket.machines.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      void machineId;
+
+    const machineControllers = new Set(bucket.machines.keys());
+    const selectedMachineId = instance.runtime?.stateMachine?.id || null;
+    if (selectedMachineId) machineControllers.add(selectedMachineId);
+    const machineMappings = [];
+    for (const controllerId of [...machineControllers].sort()) {
+      const runtime = this.#machineRuntimeFor(document, instance, bucket, controllerId);
       Object.assign(overrides, runtime.evaluate().overrides);
+      machineMappings.push({ controllerId, sourceMachineId: runtime.machineId });
     }
+
     return {
       instanceId,
       overrides: mixedRuntimeOverrides(document, overrides, instance.runtime?.mix ?? 1),
-      timelineIds: [...bucket.timelineTimes.keys()].sort(),
-      machineIds: [...bucket.machines.keys()].sort(),
+      timelineIds: [...timelineControllers.keys()].sort(),
+      machineIds: [...machineControllers].sort(),
+      mappings: { timeline: timelineMappings, stateMachine: machineMappings },
+      mix: Number(instance.runtime?.mix ?? 1),
     };
   }
 
@@ -199,25 +250,47 @@ function applyInstanceOverrides(document, instance) {
   return next;
 }
 
-function opacityProduct(node, byId) {
-  let opacity = Number(node.opacity ?? 1);
-  let current = node;
-  const seen = new Set([node.id]);
-  while (current.parent?.id) {
-    current = byId.get(current.parent.id);
-    if (!current || seen.has(current.id)) break;
-    seen.add(current.id);
-    opacity *= Number(current.opacity ?? 1);
-  }
-  return opacity;
+function scopedEvaluatedId(instanceId, sourceId) {
+  return `componentEval:${instanceId}:${sourceId}`;
+}
+
+function remapEvaluatedReference(reference, maps) {
+  if (!reference?.kind || !reference?.id) return reference ? cloneValue(reference) : reference;
+  const map = maps[reference.kind];
+  return map?.has(reference.id) ? { kind: reference.kind, id: map.get(reference.id) } : cloneValue(reference);
+}
+
+function evaluatedProvenance(item, kind, component, instance, directSource) {
+  const sourceId = item.sourceRef?.id || item.id;
+  const base = {
+    sourceRef: item.sourceRef || { kind, id: sourceId },
+    componentRef: directSource ? { kind: 'component', id: component.id } : cloneValue(item.componentRef),
+    componentInstanceRef: directSource ? { kind: 'componentInstance', id: instance.id } : cloneValue(item.componentInstanceRef),
+    evaluatedIdentity: directSource
+      ? {
+        kind: 'component-instance-descendant',
+        persistent: false,
+        source: { kind, id: sourceId },
+        instance: { kind: 'componentInstance', id: instance.id },
+      }
+      : {
+        ...(cloneValue(item.evaluatedIdentity) || {}),
+        persistent: false,
+        outerInstance: { kind: 'componentInstance', id: instance.id },
+      },
+  };
+  if (!directSource) base.outerComponentInstanceRef = { kind: 'componentInstance', id: instance.id };
+  return base;
 }
 
 /**
- * Expand authored component instances into evaluated descendants. Source ids
- * stay persistent source ids; evaluated ids are scoped to the instance and are
- * never written back to authored storage.
+ * Expand authored Component instances into evaluated content. Every returned
+ * identity is instance-scoped and non-persistent; source refs remain the
+ * stable authored refs. The outer source mapping is applied exactly once to
+ * subtree roots/world-space rig output while descendant local matrices stay
+ * relative to their re-scoped evaluated parents.
  */
-export function evaluateComponentInstances({
+export function evaluateComponentContent({
   document,
   artboardId,
   baseScene,
@@ -228,7 +301,7 @@ export function evaluateComponentInstances({
 }) {
   if (depth > VEYRA_COMPONENT_MAX_DEPTH) throw new TypeError(`Component evaluation exceeded depth ${VEYRA_COMPONENT_MAX_DEPTH}.`);
   const hostNodes = new Map(baseScene.nodes.map((node) => [node.id, node]));
-  const output = [];
+  const output = { nodes: [], bones: [], meshes: [], controls: [], constraints: [] };
   const instances = (document.componentInstances || [])
     .filter((instance) => instance.artboard.id === artboardId && instance.visible)
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -240,21 +313,35 @@ export function evaluateComponentInstances({
     const parentWorld = instance.parent ? hostNodes.get(instance.parent.id)?.worldMatrix || null : null;
     const wrapper = componentInstanceSourceMatrix(document, instance, parentWorld);
     const sourceDocument = applyInstanceOverrides(document, instance);
-    const runtime = runtimeRegistry ? runtimeRegistry.evaluate(instance.id).overrides : {};
-    const sourceScene = evaluateSource(sourceDocument, component.source.id, { animation: runtime }, {
+    const runtimeResult = runtimeRegistry
+      ? runtimeRegistry.evaluate(instance.id)
+      : createComponentRuntimeRegistry(document).evaluate(instance.id);
+    const sourceScene = evaluateSource(sourceDocument, component.source.id, { animation: runtimeResult.overrides }, {
       depth: depth + 1,
       componentPath: [...componentPath, component.id],
     });
-    const directSourceNodes = sourceScene.nodes.filter((node) => !node.componentInstanceRef);
-    const sourceById = new Map(directSourceNodes.map((node) => [node.id, node]));
-    const evaluatedId = (sourceId) => `componentEval:${instance.id}:${sourceId}`;
-    for (const sourceNode of directSourceNodes) {
+
+    const nodeIds = new Map(sourceScene.nodes.map((item) => [item.id, scopedEvaluatedId(instance.id, item.id)]));
+    const boneIds = new Map((sourceScene.bones || []).map((item) => [item.id, scopedEvaluatedId(instance.id, item.id)]));
+    const meshIds = new Map((sourceScene.meshes || []).map((item) => [item.id, scopedEvaluatedId(instance.id, item.id)]));
+    const controlIds = new Map((sourceScene.controls || []).map((item) => [item.id, scopedEvaluatedId(instance.id, item.id)]));
+    const constraintIds = new Map((sourceScene.constraints || []).map((item) => [item.id, scopedEvaluatedId(instance.id, item.id)]));
+    const referenceMaps = {
+      node: nodeIds,
+      bone: boneIds,
+      mesh: meshIds,
+      control: controlIds,
+      constraint: constraintIds,
+    };
+
+    for (const sourceNode of sourceScene.nodes) {
       const mappedWorld = multiplyMatrices(wrapper, sourceNode.worldMatrix);
-      const sourceParentId = sourceNode.parent?.id;
-      let localMatrix;
+      const sourceParentId = sourceNode.parent?.id || null;
+      const hasMappedParent = Boolean(sourceParentId && nodeIds.has(sourceParentId));
       let parent = null;
-      if (sourceParentId && sourceById.has(sourceParentId)) {
-        parent = { kind: 'node', id: evaluatedId(sourceParentId) };
+      let localMatrix;
+      if (hasMappedParent) {
+        parent = { kind: 'node', id: nodeIds.get(sourceParentId) };
         localMatrix = cloneValue(sourceNode.localMatrix);
       } else if (instance.parent && parentWorld) {
         parent = cloneValue(instance.parent);
@@ -263,36 +350,104 @@ export function evaluateComponentInstances({
       } else {
         localMatrix = mappedWorld;
       }
-      output.push({
+      const directSource = !sourceNode.componentInstanceRef;
+      const sourceId = sourceNode.sourceRef?.id || sourceNode.id;
+      const hasInstanceOverride = directSource && (instance.overrides || []).some(
+        (override) => override.target.kind === 'node' && override.target.id === sourceId,
+      );
+      const hasRuntime = directSource && Object.keys(runtimeResult.overrides).some((address) => address.startsWith(`node:${sourceId}/`));
+      output.nodes.push({
         ...cloneValue(sourceNode),
-        id: evaluatedId(sourceNode.id),
-        name: sourceNode.name,
+        id: nodeIds.get(sourceNode.id),
         parent,
         localMatrix,
         worldMatrix: mappedWorld,
-        opacity: Math.max(0, Math.min(1, Number(sourceNode.opacity ?? 1) * (sourceNode.parent?.id ? 1 : instance.opacity))),
-        sourceRef: { kind: 'node', id: sourceNode.sourceRef?.id || sourceNode.id },
-        componentRef: { kind: 'component', id: component.id },
-        componentInstanceRef: { kind: 'componentInstance', id: instance.id },
-        evaluatedIdentity: {
-          kind: 'component-instance-descendant',
-          persistent: false,
-          source: { kind: 'node', id: sourceNode.sourceRef?.id || sourceNode.id },
-          instance: { kind: 'componentInstance', id: instance.id },
-        },
-        propertySource: (instance.overrides || []).some((override) => override.target.kind === 'node' && override.target.id === (sourceNode.sourceRef?.id || sourceNode.id))
-          ? 'component-instance-override'
-          : runtimeRegistry ? 'component-instance-runtime' : 'component-source',
+        opacity: Math.max(0, Math.min(1, Number(sourceNode.opacity ?? 1) * (hasMappedParent ? 1 : instance.opacity))),
+        ...evaluatedProvenance(sourceNode, 'node', component, instance, directSource),
+        propertySource: directSource
+          ? (hasInstanceOverride ? 'component-instance-override' : hasRuntime ? 'component-instance-runtime' : 'component-source')
+          : sourceNode.propertySource,
       });
     }
-    output.push(...(sourceScene.componentEvaluatedNodes || []).map((nested) => ({
-      ...cloneValue(nested),
-      id: `componentEval:${instance.id}:${nested.id}`,
-      parent: nested.parent?.id ? { kind: 'node', id: `componentEval:${instance.id}:${nested.parent.id}` } : null,
-      localMatrix: multiplyMatrices(wrapper, nested.localMatrix),
-      worldMatrix: multiplyMatrices(wrapper, nested.worldMatrix),
-      outerComponentInstanceRef: { kind: 'componentInstance', id: instance.id },
-    })));
+
+    for (const sourceBone of sourceScene.bones || []) {
+      const directSource = !sourceBone.componentInstanceRef;
+      const parentId = sourceBone.parent?.id || null;
+      const hasMappedParent = Boolean(parentId && boneIds.has(parentId));
+      const mappedWorld = multiplyMatrices(wrapper, sourceBone.worldMatrix);
+      output.bones.push({
+        ...cloneValue(sourceBone),
+        id: boneIds.get(sourceBone.id),
+        parent: hasMappedParent ? { kind: 'bone', id: boneIds.get(parentId) } : null,
+        localMatrix: hasMappedParent ? cloneValue(sourceBone.localMatrix) : mappedWorld,
+        worldMatrix: mappedWorld,
+        restWorldMatrix: multiplyMatrices(wrapper, sourceBone.restWorldMatrix),
+        start: transformPoint(wrapper, sourceBone.start),
+        end: transformPoint(wrapper, sourceBone.end),
+        ...evaluatedProvenance(sourceBone, 'bone', component, instance, directSource),
+      });
+    }
+
+    for (const sourceMesh of sourceScene.meshes || []) {
+      const directSource = !sourceMesh.componentInstanceRef;
+      const vertexIds = new Map((sourceMesh.vertices || []).map((vertex) => [vertex.id, scopedEvaluatedId(instance.id, vertex.id)]));
+      const vertices = (sourceMesh.vertices || []).map((vertex) => ({
+        ...cloneValue(vertex),
+        id: vertexIds.get(vertex.id),
+        weights: (vertex.weights || []).map((weight) => ({
+          ...cloneValue(weight),
+          bone: remapEvaluatedReference(weight.bone, referenceMaps),
+        })),
+      }));
+      const deformedVertices = (sourceMesh.deformedVertices || []).map((vertex) => {
+        const point = transformPoint(wrapper, vertex);
+        return { ...cloneValue(vertex), id: vertexIds.get(vertex.id) || scopedEvaluatedId(instance.id, vertex.id), x: point.x, y: point.y };
+      });
+      const triangles = (sourceMesh.triangles || []).map((triangle) => triangle.map((reference) => (
+        vertexIds.has(reference.id) ? { kind: reference.kind, id: vertexIds.get(reference.id) } : cloneValue(reference)
+      )));
+      output.meshes.push({
+        ...cloneValue(sourceMesh),
+        id: meshIds.get(sourceMesh.id),
+        vertices,
+        deformedVertices,
+        triangles,
+        opacity: Math.max(0, Math.min(1, Number(sourceMesh.opacity ?? 1) * instance.opacity)),
+        ...evaluatedProvenance(sourceMesh, 'mesh', component, instance, directSource),
+      });
+    }
+
+    for (const sourceControl of sourceScene.controls || []) {
+      const directSource = !sourceControl.componentInstanceRef;
+      const mappedPosition = sourceControl.kind === 'position' ? transformPoint(wrapper, sourceControl.position) : cloneValue(sourceControl.position);
+      output.controls.push({
+        ...cloneValue(sourceControl),
+        id: controlIds.get(sourceControl.id),
+        position: mappedPosition,
+        ...evaluatedProvenance(sourceControl, 'control', component, instance, directSource),
+      });
+    }
+
+    for (const sourceConstraint of sourceScene.constraints || []) {
+      const directSource = !sourceConstraint.componentInstanceRef;
+      const mapped = cloneValue(sourceConstraint);
+      if (mapped.bone) mapped.bone = remapEvaluatedReference(mapped.bone, referenceMaps);
+      if (mapped.bones) mapped.bones = mapped.bones.map((ref) => remapEvaluatedReference(ref, referenceMaps));
+      if (mapped.target) mapped.target = remapEvaluatedReference(mapped.target, referenceMaps);
+      if (mapped.path) mapped.path = remapEvaluatedReference(mapped.path, referenceMaps);
+      output.constraints.push({
+        ...mapped,
+        id: constraintIds.get(sourceConstraint.id),
+        ...evaluatedProvenance(sourceConstraint, 'constraint', component, instance, directSource),
+      });
+    }
   }
   return output;
 }
+
+// Preserve the public M6 helper's node-array shape while the evaluator consumes
+// the richer content bundle internally.
+export function evaluateComponentInstances(options) {
+  return evaluateComponentContent(options).nodes;
+}
+

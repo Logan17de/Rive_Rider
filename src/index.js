@@ -88,5 +88,5 @@ export {
   entityArtboardId, duplicateArtboardIntoDocument, projectGraphCapabilities,
 } from './veyra/projectGraph.js';
 export {
-  ComponentRuntimeRegistry, createComponentRuntimeRegistry, componentInstanceSourceMatrix, evaluateComponentInstances,
+  ComponentRuntimeRegistry, createComponentRuntimeRegistry, componentInstanceSourceMatrix, evaluateComponentContent, evaluateComponentInstances,
 } from './veyra/components.js';

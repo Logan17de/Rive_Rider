@@ -400,6 +400,12 @@ export function validateProjectGraph(document) {
         throw new TypeError(`Component instance ${instance.id} override ${override.id} targets ${override.target.kind}:${override.target.id} outside source artboard ${sourceOwner}.`);
       }
     }
+    if (instance.runtime.remap.timeline && !instance.runtime.timeline) {
+      throw new TypeError(`Component instance ${instance.id} runtime.remap.timeline requires runtime.timeline selection.`);
+    }
+    if (instance.runtime.remap.stateMachine && !instance.runtime.stateMachine) {
+      throw new TypeError(`Component instance ${instance.id} runtime.remap.stateMachine requires runtime.stateMachine selection.`);
+    }
     for (const ref of [instance.runtime.timeline, instance.runtime.stateMachine, instance.runtime.remap.timeline, instance.runtime.remap.stateMachine].filter(Boolean)) {
       if (entityArtboardId(document, ref) !== sourceOwner) {
         throw new TypeError(`Component instance ${instance.id} runtime ref ${ref.kind}:${ref.id} is outside source artboard ${sourceOwner}.`);
@@ -648,5 +654,16 @@ export function projectGraphCapabilities() {
     clipping: 'none-only',
     overrideTargets: ['node', 'bone', 'mesh', 'control', 'constraint'],
     runtimeIsolation: 'per-component-instance',
+    runtimeMapping: {
+      timelineSelection: 'authored selected source timeline; default runtime time is 0 seconds',
+      stateMachineSelection: 'authored selected source machine; default runtime state is its initial state',
+      remap: 'selected controller id remains the runtime slot; remap selects the source timeline/stateMachine actually evaluated',
+      mix: {
+        range: [0, 1],
+        numeric: 'linear authored-to-runtime interpolation',
+        discrete: 'authored below 0.5; runtime at or above 0.5',
+      },
+    },
+    componentEvaluatedContent: ['nodes', 'bones', 'weightedMeshes', 'controls', 'constraints'],
   };
 }
