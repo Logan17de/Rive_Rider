@@ -3,76 +3,33 @@ Veyra milestone suggestions
 
 Current milestone
 -----------------
-- M0–M5 foundation, interaction and workspace UX work is independently VERIFIED.
-- Active work is `milestone.md` M6 — Multi-Artboard, Components & Project Graph correction pass.
-- M6 must also preserve the verified workspace-camera contract. Current user testing exposed a client-space panel-resize regression and low-zoom authored-stroke scaling issue; those belong in the active correction pass because they affect the current editor/runtime surface.
+- M0–M6 foundation, interaction, workspace, multi-artboard and Component work is independently VERIFIED.
+- Active work is `milestone.md` M7 — Vector Authoring, Multi-Selection & Grouping UX.
+- M7 must preserve `QUALITY.md`: editor-only UX stays out of the minimal playback runtime, authored geometry remains canonical, and no second evaluator/model is introduced.
 
-Queued interstitial milestone after M6
---------------------------------------
-## Vector Authoring, Multi-Selection & Grouping UX
-
-Promote this before View Models / Data Binding because it closes current everyday drawing/editing gaps in the editor.
-
-### Stage coordinates / position readout
-- Show pointer world coordinates for the active artboard in the stage/status bar (X / Y).
-- Show selected object's authored transform position clearly in the Inspector.
-- For multi-selection, expose deterministic selection bounds/center without inventing authored values.
-- Coordinate readout must use the same world/client transform as renderer and hit testing.
-
-### Rive-style Pen / Draw Path lifecycle
-- A valid draft path must not disappear merely because the user changes tools.
-- Match Rive's Pen lifecycle: pressing Esc after >=2 vertices finishes/commits the path; an incomplete one-point draft may cancel.
-- Switching tools with a valid draft should deterministically commit/finalize rather than silently discard it.
-- Click places a straight vertex; click+drag creates Bezier handles immediately.
-- Closing a path by targeting the first vertex must be supported.
-- Persistent path creation must go through the canonical command/Store path and be one undoable authored operation.
-
-### Edit Vertices mode
-- Enter with a selected path enters Edit Vertices mode; provide a visible Done Editing action.
-- Vertices remain stable-addressable entities.
-- Drag vertex to reposition.
-- Drag Bezier handles to reshape curves.
-- Support explicit handle modes compatible with Rive concepts: straight, mirrored, detached, asymmetric.
-- Ctrl/Cmd+click vertex toggles straight/mirrored where valid.
-- Ctrl/Cmd+click handle removes that handle.
-- Alt/Option+click handle detaches it.
-- Pen Alt/Option+click vertex deletes the vertex.
-- Add/remove-vertex operations must exist in the canonical command registry (not UI-only mutations).
-- Expose straight-vertex corner radius and allow direct dragging/Inspector editing; define deterministic conversion to explicit curve vertices when needed.
-- Open/close path and reverse-direction operations should be machine-readable and undoable.
-
-### Multi-selection
-- Store/editor selection must support multiple stable typed refs rather than one selectedId only.
-- Shift+click add/remove selection.
-- Empty-stage marquee selection.
-- Deep selection must remain possible for nested groups.
-- Focus/visibility/lock behavior must stay stable under multi-selection.
-
-### Group / ungroup
-- Windows/Linux Ctrl+G and macOS Cmd+G group the current selection.
-- Ctrl/Cmd+Shift+G ungroups.
-- Grouping preserves every child's rendered world transform and draw order.
-- Ungrouping preserves rendered world transforms and deterministic hierarchy order.
-- Group/ungroup are canonical commands, one undoable operation, AI-readable, stable-ref based and name-independent.
-
-### Overlay / low-zoom ergonomics
-- Distinguish authored artwork from editor-only overlays.
-- Authored fills/strokes scale normally with camera zoom unless an explicit future non-scaling-stroke feature says otherwise.
-- Selection handles, vertices, Bezier handles, bones and controls may use bounded screen-space sizing for usability, but must not alter authored geometry.
-- Add a clear way to hide rig/editor overlays (and/or a final-playback view) so low-zoom artwork can be inspected without controls visually dominating it.
-
-Mandatory tests should cover save/load, undo/redo, 10%–800% zoom, nested transforms, multi-selection/group transform preservation, pen Esc/tool-switch finalization, Bezier handle editing, and UI/AI command parity.
-
-Roadmap after the interstitial milestone
-----------------------------------------
+Queued work after M7
+--------------------
 1. Resume master `plan.md` with View Models / Data Binding / Property Groups / enums / converters / lists.
 2. Continue into full layered state-machine parity and later Rive feature families in plan order.
-3. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
+3. Translate the checked-in `deep-research-report (6).md` into later bounded milestones for Lottie JSON + dotLottie interoperability, masks/mattes, Motion Tokens/slots, compatibility analysis, import/export fidelity and modular runtimes. Do not silently collapse these into generic Rive features.
+4. Introduce a semantic shortcut/keymap profile system (Veyra / Rive / Lottie-AE / Custom) once M7's semantic editor-command layer is stable.
+5. Add bundle-size/performance regression tooling when a compiled/distributable runtime target exists; enforce the budgets in `QUALITY.md` rather than optimizing by deleting parity features.
+6. Build a compatibility analyzer before broad interchange export: exact / approximate / bake / rasterize / reject, with no silent feature loss.
+7. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
+
+Longer-term lightweight/runtime principles
+------------------------------------------
+- Keep `.veyra` editable source distinct from a future compact `.vyr` runtime artifact.
+- Use one evaluator semantics across editor preview and runtime.
+- Prefer compiler stripping, dead-scene elimination, asset/geometry deduplication, font subsetting, dirty evaluation and settled-state sleeping over feature removal.
+- Keep optional runtime modules such as text, audio, scripting, accessibility, advanced effects and debugging separable from the minimal vector/timeline core.
+- Port to Rust/WASM/native only after evaluator/file contracts are sufficiently frozen and compatibility tests can prove semantic equivalence.
 
 Guardrails
 ----------
 - `milestone.md` remains the only active implementation milestone.
+- `plan.md` remains the authoritative product roadmap; `QUALITY.md` is the permanent non-functional engineering contract.
 - Future work stays here until the current milestone is independently accepted.
 - Stable IDs and human display names remain separate contracts.
 - UI convenience must not introduce a second mutation model or bypass the canonical control plane/Store validation boundary.
-- Component/instance implementation must not pre-empt the next View Model/Data Binding milestone with an incompatible ad-hoc data system.
+- No interchange exporter may silently drop unsupported Veyra features.
