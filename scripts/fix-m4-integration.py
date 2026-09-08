@@ -89,7 +89,7 @@ patch(
     "assert.ok(read.dependencySummary.edgeCount > 0);",
 )
 
-# Listener count and listener CRUD actions are now first-class manifest data.
+# Listener count/action catalog and runtime host availability are now first-class manifest data.
 patch(
     'tests/veyra-manifest.test.mjs',
     """  timelines: 1,
@@ -106,6 +106,12 @@ patch(
     'tests/veyra-manifest.test.mjs',
     "assert.equal(actions.length, 50, 'Action catalog grows additively from 45 entries to 50 with canonical semantic CRUD.');",
     "assert.equal(actions.length, 53, 'Action catalog grows additively with canonical semantic CRUD plus M4 listener CRUD.');",
+)
+patch(
+    'tests/veyra-manifest.test.mjs',
+    "assert.equal(manifest.authoring.listener.variants.machine.hostAvailability, 'unsupported');",
+    """assert.equal(manifest.authoring.listener.variants.machine.hostAvailability, 'available');
+assert.equal(manifest.authoring.listener.variants.machine.runtimeState, 'ephemeral');""",
 )
 
 # M4 closes the pointermove runtime hole: direct pointermove listeners are no
