@@ -28,8 +28,10 @@ export function createSvgViewBox(artboard = {}, viewport = {}) {
   const viewportHeight = positive(viewport.height, artboardHeight);
   const zoom = positive(viewport.zoom, 1);
   if (!artboardWidth || !artboardHeight || !viewportWidth || !viewportHeight || !zoom) return null;
-  const centerX = finite(viewport.centerX, artboardWidth / 2);
-  const centerY = finite(viewport.centerY, artboardHeight / 2);
+  const artboardX = finite(artboard.x, 0);
+  const artboardY = finite(artboard.y, 0);
+  const centerX = finite(viewport.centerX, artboardX + artboardWidth / 2);
+  const centerY = finite(viewport.centerY, artboardY + artboardHeight / 2);
   const visibleWidth = viewportWidth / zoom;
   const visibleHeight = viewportHeight / zoom;
   return {

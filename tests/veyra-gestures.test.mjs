@@ -23,7 +23,7 @@ for (const point of [{ clientX: 13, clientY: 22 }, { clientX: 14, clientY: 23 },
 const begins = store.calls.filter(([name]) => name === 'begin');
 assert.equal(begins.length, 1, 'gesture structurally begins exactly once');
 assert.equal(store.calls.filter(([name]) => name === 'mutate').length, 3, 'each active move mutates once');
-assert.deepEqual(store.document.artboard, { width: 112, height: 92 }, 'scaled resize deltas reach store data');
+assert.deepEqual(store.document.artboard, { width: 112, height: 92, x: 0, y: 0 }, 'scaled resize deltas reach store data with default origin');
 assert.equal(gesture.end().committed, true, 'successful gesture commits');
 assert.equal(store.calls.filter(([name]) => name === 'commit').length, 1, 'gesture commits exactly once');
 

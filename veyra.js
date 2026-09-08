@@ -1973,7 +1973,10 @@ function addNode(type) {
   const parent = selected?.type === 'group' ? selected : null;
   const center = parent
     ? { x: 0, y: 0 }
-    : { x: store.document.artboard.width / 2, y: store.document.artboard.height / 2 };
+    : {
+      x: Number(store.document.artboard.x || 0) + store.document.artboard.width / 2,
+      y: Number(store.document.artboard.y || 0) + store.document.artboard.height / 2,
+    };
   const palette = {
     rectangle: { fill: '#f472b6', stroke: '#831843', strokeWidth: 3 },
     ellipse: { fill: '#22d3ee', stroke: '#155e75', strokeWidth: 3 },
@@ -1999,8 +2002,8 @@ document.querySelectorAll('[data-add]').forEach((button) => {
 
 function addRig(kind) {
   const center = {
-    x: store.document.artboard.width / 2,
-    y: store.document.artboard.height / 2,
+    x: Number(store.document.artboard.x || 0) + store.document.artboard.width / 2,
+    y: Number(store.document.artboard.y || 0) + store.document.artboard.height / 2,
   };
   if (kind === 'bone') {
     const parent = store.selectedBone;
@@ -2371,8 +2374,10 @@ function updateZoomLabel() {
 
 function syncArtboardFrame() {
   const artboard = store.document.artboard;
-  const topLeft = renderer.worldToClient(0, 0);
-  const bottomRight = renderer.worldToClient(artboard.width, artboard.height);
+  const artboardX = Number(artboard.x || 0);
+  const artboardY = Number(artboard.y || 0);
+  const topLeft = renderer.worldToClient(artboardX, artboardY);
+  const bottomRight = renderer.worldToClient(artboardX + artboard.width, artboardY + artboard.height);
   if (!topLeft || !bottomRight) return;
   const viewportRect = stageViewport.getBoundingClientRect();
   artboardFrame.style.left = `${topLeft.x - viewportRect.left}px`;
@@ -2471,7 +2476,12 @@ function beginArtboardResize(event, direction) {
   event.preventDefault();
   event.stopImmediatePropagation();
   const startViewport = renderer.getViewport();
-  const startArtboard = { width: store.document.artboard.width, height: store.document.artboard.height };
+  const startArtboard = {
+    x: Number(store.document.artboard.x || 0),
+    y: Number(store.document.artboard.y || 0),
+    width: store.document.artboard.width,
+    height: store.document.artboard.height,
+  };
   const matrix = canvas.getScreenCTM();
   const screenScaleX = matrix ? Math.hypot(matrix.a, matrix.b) : renderer.zoom;
   const screenScaleY = matrix ? Math.hypot(matrix.c, matrix.d) : renderer.zoom;
@@ -2483,13 +2493,10 @@ function beginArtboardResize(event, direction) {
     scaleX: 1 / Math.max(1e-9, screenScaleX),
     scaleY: 1 / Math.max(1e-9, screenScaleY),
     onMove: (state) => {
-      renderer.setViewport({
-        ...startViewport,
-        centerX: startViewport.centerX + state.anchorShiftX,
-        centerY: startViewport.centerY + state.anchorShiftY,
-      });
+      // Resizing authors the frame origin/dimensions only. The camera is
+      // deliberately untouched, so artwork remains stationary on screen.
       syncArtboardFrame();
-      setStatus(`Artboard ${state.width} × ${state.height}`);
+      setStatus(`Artboard ${state.width} × ${state.height} @ ${state.x}, ${state.y}`);
     },
   });
   stageViewport.setPointerCapture?.(event.pointerId);
@@ -2510,12 +2517,10 @@ function beginArtboardResize(event, direction) {
     try { stageViewport.releasePointerCapture?.(event.pointerId); } catch {}
     const result = commitGesture ? gesture.end() : gesture.cancel();
     if (!commitGesture) {
-      renderer.setViewport(startViewport);
       evaluateCurrentFrame();
       syncArtboardFrame();
       setStatus('Artboard resize cancelled');
     } else if (result.error) {
-      renderer.setViewport(startViewport);
       renderAll('validation-error');
     } else if (result.committed) {
       syncArtboardFrame();
@@ -2675,7 +2680,12 @@ const previewPointerHandlers = createPreviewPointerHandlers({
   getPreviewMode: () => stagePanel.dataset.mode === 'preview' || document.body.dataset.mode === 'preview',
   getViewCenter: () => renderer.viewCenter,
   getZoom: () => renderer.zoom,
-  getArtboardSize: () => ({ width: store.document.artboard.width, height: store.document.artboard.height }),
+  getArtboardSize: () => ({
+    x: Number(store.document.artboard.x || 0),
+    y: Number(store.document.artboard.y || 0),
+    width: store.document.artboard.width,
+    height: store.document.artboard.height,
+  }),
   isAuthoringEvent: (event) => event.target instanceof Element && Boolean(event.target.closest('.resizeHandle')),
   onNoHit: () => showToast('No interaction target under pointer', true),
 });

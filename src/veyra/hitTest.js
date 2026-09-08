@@ -366,8 +366,10 @@ export function hitTestPoint(point, document, viewport = {}) {
   const width = finite(viewport.width, finite(artboard.width, 0));
   const height = finite(viewport.height, finite(artboard.height, 0));
   if (!(width > 0) || !(height > 0)) return null;
-  const centerX = finite(viewport.centerX, finite(viewport.panX, finite(artboard.width, 0) / 2));
-  const centerY = finite(viewport.centerY, finite(viewport.panY, finite(artboard.height, 0) / 2));
+  const artboardCenterX = finite(artboard.x, 0) + finite(artboard.width, 0) / 2;
+  const artboardCenterY = finite(artboard.y, 0) + finite(artboard.height, 0) / 2;
+  const centerX = finite(viewport.centerX, finite(viewport.panX, artboardCenterX));
+  const centerY = finite(viewport.centerY, finite(viewport.panY, artboardCenterY));
   const viewportTransform = createSvgViewBoxScreenTransform(artboard, { width, height, zoom, centerX, centerY });
   if (!viewportTransform) return null;
   const screen = { x: finite(point.x), y: finite(point.y) };

@@ -22,7 +22,7 @@ function close(actual, expected, epsilon = 1e-8, message = '') {
   assert.ok(Math.abs(actual - expected) <= epsilon, `${message} expected ${expected}, got ${actual}`);
 }
 
-const artboard = { width: 800, height: 600 };
+const artboard = { x: 0, y: 0, width: 800, height: 600 };
 const camera = { zoom: 1.75, centerX: 430, centerY: 280 };
 const sizes = [
   { width: 900, height: 700 },
@@ -135,7 +135,7 @@ function gesture(direction, dxPx, dyPx, { zoom = 2, minSize = 1 } = {}) {
   const g = createArtboardResizeGesture({
     store: s,
     start: { x: 100, y: 100 },
-    startArtboard: { width: 800, height: 600 },
+    startArtboard: { x: 0, y: 0, width: 800, height: 600 },
     direction,
     scaleX: 1 / zoom,
     scaleY: 1 / zoom,
@@ -150,7 +150,7 @@ function gesture(direction, dxPx, dyPx, { zoom = 2, minSize = 1 } = {}) {
 {
   const { s, g, moved, childBefore, historyBefore } = gesture('right', 40, 30);
   assert.equal(moved.width, 820); assert.equal(moved.height, 600);
-  assert.equal(moved.anchorShiftX, 0); assert.equal(JSON.stringify(s.document.nodes[0]), childBefore);
+  assert.equal(moved.x, 0); assert.equal(JSON.stringify(s.document.nodes[0]), childBefore);
   assert.equal(g.end().committed, true); assert.equal(s.commandHistory.length, historyBefore + 1);
   assert.equal(s.undo(), true); assert.equal(s.document.artboard.width, 800);
 }
@@ -160,12 +160,12 @@ function gesture(direction, dxPx, dyPx, { zoom = 2, minSize = 1 } = {}) {
 }
 {
   const { s, g, moved, childBefore } = gesture('left', 40, 0);
-  assert.equal(moved.width, 780); assert.equal(moved.anchorShiftX, -20);
+  assert.equal(moved.width, 780); assert.equal(moved.x, 20); assert.equal(moved.x + moved.width, 800);
   assert.equal(JSON.stringify(s.document.nodes[0]), childBefore); g.end();
 }
 {
   const { g, moved } = gesture('top', 0, 30);
-  assert.equal(moved.height, 585); assert.equal(moved.anchorShiftY, -15); g.end();
+  assert.equal(moved.height, 585); assert.equal(moved.y, 15); assert.equal(moved.y + moved.height, 600); g.end();
 }
 for (const direction of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
   const { g, moved } = gesture(direction, direction.includes('left') ? 40 : 40, direction.includes('top') ? 30 : 30);
@@ -174,18 +174,19 @@ for (const direction of ['top-left', 'top-right', 'bottom-left', 'bottom-right']
   assert.equal(g.end().committed, true);
 }
 
-// Left/top camera shifts keep the opposite rendered edge/corner exactly fixed.
+// Left/top resize moves the authored frame while the camera and artwork stay fixed.
 {
   const size = { width: 1000, height: 700 };
   const startCamera = { zoom: 2, centerX: 400, centerY: 300 };
   const before = createSvgViewBoxScreenTransform(artboard, { ...size, ...startCamera });
-  const oldRight = transformPoint(before.matrix, { x: 800, y: 300 });
-  const { g, moved } = gesture('left', 80, 0, { zoom: 2 });
-  const nextArtboard = { width: moved.width, height: 600 };
-  const nextCamera = { ...startCamera, centerX: startCamera.centerX + moved.anchorShiftX };
-  const after = createSvgViewBoxScreenTransform(nextArtboard, { ...size, ...nextCamera });
-  const newRight = transformPoint(after.matrix, { x: moved.width, y: 300 });
-  close(newRight.x, oldRight.x, 1e-8, 'left resize preserves opposite rendered edge');
+  const childScreenBefore = transformPoint(before.matrix, { x: 200, y: 150 });
+  const { s, g, moved } = gesture('left', 80, 0, { zoom: 2 });
+  const after = createSvgViewBoxScreenTransform(s.document.artboard, { ...size, ...startCamera });
+  const childScreenAfter = transformPoint(after.matrix, { x: 200, y: 150 });
+  assert.deepEqual(startCamera, { zoom: 2, centerX: 400, centerY: 300 });
+  close(moved.x + moved.width, 800, 1e-8, 'left resize preserves opposite world edge');
+  close(childScreenAfter.x, childScreenBefore.x, 1e-8, 'child screen x stays fixed');
+  close(childScreenAfter.y, childScreenBefore.y, 1e-8, 'child screen y stays fixed');
   g.cancel();
 }
 

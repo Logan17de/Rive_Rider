@@ -13,7 +13,13 @@ function canonicalize(value) {
 }
 
 export function canonicalVeyraValue(documentModel) {
-  return canonicalize(normalizeDocument(documentModel));
+  const normalized = normalizeDocument(documentModel);
+  const canonical = canonicalize(normalized);
+  // x/y=0 are the legacy implicit defaults. Omitting only those default values
+  // keeps old canonical files byte-stable; any moved frame persists explicitly.
+  if (canonical.artboard?.x === 0) delete canonical.artboard.x;
+  if (canonical.artboard?.y === 0) delete canonical.artboard.y;
+  return canonical;
 }
 
 export function serializeVeyra(documentModel) {

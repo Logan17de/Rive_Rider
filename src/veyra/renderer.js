@@ -91,8 +91,8 @@ export class VeyraRenderer {
   resetView() {
     if (this.scene) {
       this.viewCenter = {
-        x: this.scene.artboard.width / 2,
-        y: this.scene.artboard.height / 2,
+        x: (this.scene.artboard.x || 0) + this.scene.artboard.width / 2,
+        y: (this.scene.artboard.y || 0) + this.scene.artboard.height / 2,
       };
     }
     this.zoom = 1;
@@ -110,8 +110,8 @@ export class VeyraRenderer {
   getViewport() {
     return {
       zoom: this.zoom,
-      centerX: this.viewCenter?.x ?? this.scene?.artboard.width / 2 ?? 0,
-      centerY: this.viewCenter?.y ?? this.scene?.artboard.height / 2 ?? 0,
+      centerX: this.viewCenter?.x ?? ((this.scene?.artboard.x || 0) + (this.scene?.artboard.width || 0) / 2),
+      centerY: this.viewCenter?.y ?? ((this.scene?.artboard.y || 0) + (this.scene?.artboard.height || 0) / 2),
     };
   }
 
@@ -131,8 +131,8 @@ export class VeyraRenderer {
   setViewport(viewport = {}) {
     if (!this.scene) return this.getViewport();
     const zoom = Math.min(8, Math.max(0.1, Number(viewport.zoom ?? this.zoom) || 1));
-    const centerX = Number(viewport.centerX ?? this.viewCenter?.x ?? this.scene.artboard.width / 2);
-    const centerY = Number(viewport.centerY ?? this.viewCenter?.y ?? this.scene.artboard.height / 2);
+    const centerX = Number(viewport.centerX ?? this.viewCenter?.x ?? ((this.scene.artboard.x || 0) + this.scene.artboard.width / 2));
+    const centerY = Number(viewport.centerY ?? this.viewCenter?.y ?? ((this.scene.artboard.y || 0) + this.scene.artboard.height / 2));
     if (![zoom, centerX, centerY].every(Number.isFinite)) throw new TypeError('Viewport values must be finite.');
     this.zoom = zoom;
     this.viewCenter = { x: centerX, y: centerY };
@@ -162,7 +162,9 @@ export class VeyraRenderer {
   #applyViewBox() {
     if (!this.scene) return;
     const { width, height } = this.scene.artboard;
-    if (!this.viewCenter) this.viewCenter = { x: width / 2, y: height / 2 };
+    const artboardX = Number(this.scene.artboard.x || 0);
+    const artboardY = Number(this.scene.artboard.y || 0);
+    if (!this.viewCenter) this.viewCenter = { x: artboardX + width / 2, y: artboardY + height / 2 };
     const screen = this.getScreenSize();
     const viewBox = createSvgViewBox(this.scene.artboard, {
       width: screen.width,
@@ -183,7 +185,10 @@ export class VeyraRenderer {
     this.scene = scene;
     if (resetView) {
       this.viewDocumentId = scene.documentId;
-      this.viewCenter = { x: scene.artboard.width / 2, y: scene.artboard.height / 2 };
+      this.viewCenter = {
+        x: (scene.artboard.x || 0) + scene.artboard.width / 2,
+        y: (scene.artboard.y || 0) + scene.artboard.height / 2,
+      };
     }
     this.selectedRef = typeof selectedRef === 'string'
       ? { kind: 'node', id: selectedRef }
@@ -200,8 +205,8 @@ export class VeyraRenderer {
     this.svg.setAttribute('aria-label', `${scene.name} artboard`);
     const background = svgElement('rect', {
       class: 'artboardBackground',
-      x: 0,
-      y: 0,
+      x: scene.artboard.x || 0,
+      y: scene.artboard.y || 0,
       width: scene.artboard.width,
       height: scene.artboard.height,
       fill: scene.artboard.background,

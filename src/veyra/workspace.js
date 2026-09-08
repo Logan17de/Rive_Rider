@@ -159,13 +159,21 @@ export function artboardResizeCursor(direction) {
   return '';
 }
 
+function artboardCenter(artboard = {}) {
+  return {
+    x: finite(artboard.x, 0) + finite(artboard.width, 0) / 2,
+    y: finite(artboard.y, 0) + finite(artboard.height, 0) / 2,
+  };
+}
+
 function screenMapping(artboard, viewport, screenSize) {
+  const center = artboardCenter(artboard);
   return createSvgViewBoxScreenTransform(artboard, {
     width: finite(screenSize?.width, artboard?.width),
     height: finite(screenSize?.height, artboard?.height),
     zoom: clampZoom(viewport?.zoom ?? 1),
-    centerX: finite(viewport?.centerX, finite(artboard?.width) / 2),
-    centerY: finite(viewport?.centerY, finite(artboard?.height) / 2),
+    centerX: finite(viewport?.centerX, center.x),
+    centerY: finite(viewport?.centerY, center.y),
   });
 }
 
@@ -174,8 +182,8 @@ export function panViewportByScreen(viewport, delta, artboard, screenSize) {
   if (!mapping?.scale) return { ...viewport };
   return {
     ...viewport,
-    centerX: finite(viewport.centerX, artboard.width / 2) - finite(delta?.x) / mapping.scale,
-    centerY: finite(viewport.centerY, artboard.height / 2) - finite(delta?.y) / mapping.scale,
+    centerX: finite(viewport.centerX, artboardCenter(artboard).x) - finite(delta?.x) / mapping.scale,
+    centerY: finite(viewport.centerY, artboardCenter(artboard).y) - finite(delta?.y) / mapping.scale,
     zoom: clampZoom(viewport.zoom ?? 1),
   };
 }
@@ -204,13 +212,14 @@ export function fitArtboardViewport(artboard, screenSize = {}, options = {}) {
   const screenWidth = Math.max(1, finite(screenSize?.width, width));
   const screenHeight = Math.max(1, finite(screenSize?.height, height));
   const padding = clamp(options.padding ?? 0, 0, Math.min(screenWidth, screenHeight) * 0.4);
+  const center = artboardCenter(artboard);
   return {
     zoom: clampZoom(Math.min(
       Math.max(1, screenWidth - padding * 2) / width,
       Math.max(1, screenHeight - padding * 2) / height,
     )),
-    centerX: width / 2,
-    centerY: height / 2,
+    centerX: center.x,
+    centerY: center.y,
   };
 }
 

@@ -33,16 +33,14 @@ export function createArtboardResizeGesture({
   if (!store || !start || !startArtboard) throw new TypeError('Artboard resize gesture requires store, start, and startArtboard.');
   const resolvedDirection = normalizedDirection(direction, mode);
   if (!resolvedDirection) throw new TypeError(`Unsupported artboard resize direction ${direction ?? mode}.`);
+  const startX = finite(startArtboard.x, 0);
+  const startY = finite(startArtboard.y, 0);
   const startWidth = Math.max(minSize, finite(startArtboard.width, minSize));
   const startHeight = Math.max(minSize, finite(startArtboard.height, minSize));
+  const fixedRight = startX + startWidth;
+  const fixedBottom = startY + startHeight;
   let active = false;
-  let last = {
-    width: startWidth,
-    height: startHeight,
-    anchorShiftX: 0,
-    anchorShiftY: 0,
-    direction: resolvedDirection,
-  };
+  let last = { x: startX, y: startY, width: startWidth, height: startHeight, direction: resolvedDirection };
 
   function move(point) {
     const clientX = finite(point?.clientX, start.x);
@@ -59,18 +57,16 @@ export function createArtboardResizeGesture({
     const right = resolvedDirection.includes('right');
     const top = resolvedDirection.includes('top');
     const bottom = resolvedDirection.includes('bottom');
+
     const width = Math.max(minSize, Math.round(startWidth + (right ? dx : left ? -dx : 0)));
     const height = Math.max(minSize, Math.round(startHeight + (bottom ? dy : top ? -dy : 0)));
-    last = {
-      width,
-      height,
-      // Camera-only shift required to keep the opposite rendered edge fixed.
-      // Authored child coordinates are intentionally untouched.
-      anchorShiftX: left ? width - startWidth : 0,
-      anchorShiftY: top ? height - startHeight : 0,
-      direction: resolvedDirection,
-    };
+    const x = left ? fixedRight - width : startX;
+    const y = top ? fixedBottom - height : startY;
+    last = { x, y, width, height, direction: resolvedDirection };
+
     store.mutate((documentModel) => {
+      documentModel.artboard.x = last.x;
+      documentModel.artboard.y = last.y;
       documentModel.artboard.width = last.width;
       documentModel.artboard.height = last.height;
     }, 'drag');

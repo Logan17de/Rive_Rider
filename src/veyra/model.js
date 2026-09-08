@@ -553,6 +553,8 @@ export function createDocument(overrides = {}) {
     createdAt: overrides.createdAt || now,
     updatedAt: overrides.updatedAt || now,
     artboard: {
+      x: 0,
+      y: 0,
       width: 960,
       height: 640,
       background: '#fff7fc',
@@ -1468,6 +1470,10 @@ export function normalizeDocument(input) {
     createdAt: String(input.createdAt || new Date().toISOString()),
     updatedAt: String(input.updatedAt || new Date().toISOString()),
     artboard: {
+      // Legacy documents had an implicit frame origin at world (0,0). Keep
+      // that migration deterministic while making frame position authored.
+      x: finite(input.artboard?.x ?? 0, 'artboard.x'),
+      y: finite(input.artboard?.y ?? 0, 'artboard.y'),
       width: bounded(input.artboard?.width ?? 960, 'artboard.width', 1, 100000),
       height: bounded(input.artboard?.height ?? 640, 'artboard.height', 1, 100000),
       background: color(input.artboard?.background ?? '#fff7fc', 'artboard.background'),

@@ -236,13 +236,18 @@ export function renderSvgString(scene) {
     }).join('');
     return `<g id="${escapeXml(mesh.id)}" opacity="${mesh.opacity}">${triangles}</g>`;
   }).join('');
+  const artboardX = Number(scene.artboard.x || 0);
+  const artboardY = Number(scene.artboard.y || 0);
+  const background = artboardX === 0 && artboardY === 0
+    ? `<rect width="100%" height="100%" fill="${escapeXml(scene.artboard.background)}"/>`
+    : `<rect x="${artboardX}" y="${artboardY}" width="${scene.artboard.width}" height="${scene.artboard.height}" fill="${escapeXml(scene.artboard.background)}"/>`;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${scene.artboard.width}" height="${scene.artboard.height}" viewBox="0 0 ${scene.artboard.width} ${scene.artboard.height}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${scene.artboard.width}" height="${scene.artboard.height}" viewBox="${artboardX} ${artboardY} ${scene.artboard.width} ${scene.artboard.height}">`,
     `<title>${escapeXml(scene.name)}</title>`,
     `<metadata>${escapeXml(JSON.stringify({ generator: 'Veyra', formatVersion: scene.version, documentId: scene.documentId }))}</metadata>`,
     definitions ? `<defs>${definitions}</defs>` : '',
-    `<rect width="100%" height="100%" fill="${escapeXml(scene.artboard.background)}"/>`,
+    background,
     content,
     meshContent,
     '</svg>',

@@ -98,7 +98,10 @@ export function createPreviewPointerHandlers({
     if (!previewPointerEligible(event) || !evaluatedScene) return null;
     const point = canvasPoint(event, canvas, { cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight });
     const fallback = getArtboardSize ? getArtboardSize() : { width: 0, height: 0 };
-    const center = (getViewCenter && getViewCenter()) || { x: fallback.width / 2, y: fallback.height / 2 };
+    const center = (getViewCenter && getViewCenter()) || {
+      x: Number(fallback.x || 0) + fallback.width / 2,
+      y: Number(fallback.y || 0) + fallback.height / 2,
+    };
     const rect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
     const viewportWidth = canvas.clientWidth || rect.width;
     const viewportHeight = canvas.clientHeight || rect.height;
