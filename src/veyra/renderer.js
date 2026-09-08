@@ -9,7 +9,7 @@ import {
 import { referenceId } from './references.js';
 import { transformMatrix, transformPoint } from './contracts.js';
 import { createSvgViewBox, VEYRA_SVG_PRESERVE_ASPECT_RATIO } from './viewport.js';
-import { resizeNodeTransform } from './workspace.js';
+import { resizeNodeTransform, shouldShowDetailedRigOverlay } from './workspace.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -300,7 +300,6 @@ export class VeyraRenderer {
         fill: fillPaintValue(node.paint.fill, paintServerId('node', node.id)),
         stroke: node.paint.stroke,
         'stroke-width': node.paint.strokeWidth,
-        'vector-effect': 'non-scaling-stroke',
         class: 'sceneShape',
         tabindex: '-1',
       });
@@ -338,7 +337,6 @@ export class VeyraRenderer {
           fill: fillPaintValue(mesh.paint.fill, paintServerId('mesh', mesh.id)),
           stroke: mesh.paint.stroke,
           'stroke-width': mesh.paint.strokeWidth,
-          'vector-effect': 'non-scaling-stroke',
         });
         polygon.addEventListener('pointerdown', (event) => {
           event.stopPropagation();
@@ -346,7 +344,7 @@ export class VeyraRenderer {
         });
         meshGroup.appendChild(polygon);
       }
-      if (this.selectedRef?.kind === 'mesh' && this.selectedRef.id === mesh.id) {
+      if (this.selectedRef?.kind === 'mesh' && this.selectedRef.id === mesh.id && shouldShowDetailedRigOverlay(this.zoom)) {
         for (const vertex of mesh.deformedVertices) {
           meshGroup.appendChild(svgElement('circle', {
             class: vertex.weightSum > 0 ? 'meshVertex' : 'meshVertex isUnweighted',
@@ -364,6 +362,10 @@ export class VeyraRenderer {
 
   #renderRigOverlay() {
     const overlay = svgElement('g', { class: 'rigOverlay' });
+    if (!shouldShowDetailedRigOverlay(this.zoom)) {
+      overlay.setAttribute('data-overlay-policy', 'hidden-low-zoom');
+      return overlay;
+    }
     for (const constraint of this.scene.constraints || []) {
       if (!constraint.enabled || constraint.type !== 'ik') continue;
       const boneId = referenceId(constraint.bones.at(-1), 'bone');

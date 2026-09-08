@@ -200,7 +200,7 @@ function svgNode(node, childrenByParent) {
     .map(([name, value]) => `${name}="${escapeXml(value)}"`)
     .join(' ');
   const fill = fillPaintValue(node.paint.fill, paintServerId('node', node.id));
-  const shape = `<${descriptor.tag} ${attributes} fill="${escapeXml(fill)}" stroke="${escapeXml(node.paint.stroke)}" stroke-width="${node.paint.strokeWidth}" vector-effect="non-scaling-stroke"/>`;
+  const shape = `<${descriptor.tag} ${attributes} fill="${escapeXml(fill)}" stroke="${escapeXml(node.paint.stroke)}" stroke-width="${node.paint.strokeWidth}"/>`;
   return `<g id="${escapeXml(node.id)}" transform="${transform}" opacity="${opacity}">${shape}${childMarkup}</g>`;
 }
 
@@ -232,7 +232,7 @@ export function renderSvgString(scene) {
         .map((vertex) => `${vertex.x},${vertex.y}`)
         .join(' ');
       const fill = fillPaintValue(mesh.paint.fill, paintServerId('mesh', mesh.id));
-      return `<polygon points="${escapeXml(points)}" fill="${escapeXml(fill)}" stroke="${escapeXml(mesh.paint.stroke)}" stroke-width="${mesh.paint.strokeWidth}" vector-effect="non-scaling-stroke"/>`;
+      return `<polygon points="${escapeXml(points)}" fill="${escapeXml(fill)}" stroke="${escapeXml(mesh.paint.stroke)}" stroke-width="${mesh.paint.strokeWidth}"/>`;
     }).join('');
     return `<g id="${escapeXml(mesh.id)}" opacity="${mesh.opacity}">${triangles}</g>`;
   }).join('');

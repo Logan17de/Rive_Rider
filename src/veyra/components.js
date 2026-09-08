@@ -91,6 +91,34 @@ function effectiveMachineId(instance, controllerId) {
   return selected && controllerId === selected && remapped ? remapped : controllerId;
 }
 
+export const VEYRA_COMPONENT_RUNTIME_SCOPE_KIND = 'componentRuntimeScope';
+
+function runtimeScopeRef(value, index) {
+  const id = typeof value === 'string' ? value : value?.kind === 'componentInstance' ? value.id : null;
+  if (!id) throw new TypeError(`Component runtime scope path[${index}] must be a componentInstance ref.`);
+  return { kind: 'componentInstance', id: String(id) };
+}
+
+export function createComponentRuntimeScope(value) {
+  let path;
+  if (typeof value === 'string' || value?.kind === 'componentInstance') path = [value];
+  else if (Array.isArray(value)) path = value;
+  else if (value?.kind === VEYRA_COMPONENT_RUNTIME_SCOPE_KIND && Array.isArray(value.path)) path = value.path;
+  else throw new TypeError('Component runtime scope must be an instance id/ref, typed scope, or ordered instance-ref path.');
+  if (!path.length) throw new TypeError('Component runtime scope path cannot be empty.');
+  return { kind: VEYRA_COMPONENT_RUNTIME_SCOPE_KIND, path: path.map(runtimeScopeRef) };
+}
+
+export function componentRuntimeScopeKey(value) {
+  const scope = createComponentRuntimeScope(value);
+  return JSON.stringify(scope.path.map((ref) => [ref.kind, ref.id]));
+}
+
+function scopeHasPrefix(scope, prefix) {
+  if (prefix.path.length > scope.path.length) return false;
+  return prefix.path.every((ref, index) => scope.path[index]?.kind === ref.kind && scope.path[index]?.id === ref.id);
+}
+
 export class ComponentRuntimeRegistry {
   #getDocument;
   #buckets = new Map();
@@ -99,28 +127,40 @@ export class ComponentRuntimeRegistry {
     this.#getDocument = typeof documentOrGetter === 'function' ? documentOrGetter : () => documentOrGetter;
   }
 
-  #instance(instanceId) {
+  #resolveScope(scopeInput) {
     const document = this.#getDocument();
-    const instance = componentInstanceById(document, instanceId);
-    if (!instance) throw new TypeError(`Unknown component instance ${instanceId}.`);
-    const component = componentById(document, instance.component.id);
-    if (!component) throw new TypeError(`Component instance ${instanceId} references missing component ${instance.component.id}.`);
-    return { document, instance, component };
+    const scope = createComponentRuntimeScope(scopeInput);
+    let instance = null;
+    let component = null;
+    let expectedOwner = null;
+    for (let index = 0; index < scope.path.length; index += 1) {
+      const ref = scope.path[index];
+      instance = componentInstanceById(document, ref.id);
+      if (!instance) throw new TypeError(`Unknown component instance ${ref.id} in runtime scope.`);
+      if (expectedOwner && instance.artboard.id !== expectedOwner) {
+        throw new TypeError(`Component runtime scope path is invalid at ${ref.id}; expected instance owned by source artboard ${expectedOwner}.`);
+      }
+      component = componentById(document, instance.component.id);
+      if (!component) throw new TypeError(`Component instance ${ref.id} references missing component ${instance.component.id}.`);
+      expectedOwner = component.source.id;
+    }
+    return { document, scope, key: componentRuntimeScopeKey(scope), instance, component };
   }
 
-  #bucket(instanceId) {
-    const { document, instance } = this.#instance(instanceId);
-    let bucket = this.#buckets.get(instanceId);
-    if (!bucket) {
+  #bucket(scopeInput) {
+    const resolved = this.#resolveScope(scopeInput);
+    let bucket = this.#buckets.get(resolved.key);
+    if (!bucket || bucket.documentId !== resolved.document.id) {
       bucket = {
+        scope: cloneValue(resolved.scope),
         timelineTimes: new Map(),
         machines: new Map(),
         machineTargets: new Map(),
-        documentId: document.id,
+        documentId: resolved.document.id,
       };
-      this.#buckets.set(instanceId, bucket);
+      this.#buckets.set(resolved.key, bucket);
     }
-    return { document, instance, bucket };
+    return { ...resolved, bucket };
   }
 
   #validateSourceRef(document, instance, ref) {
@@ -144,8 +184,8 @@ export class ComponentRuntimeRegistry {
     return bucket.machines.get(controller.id);
   }
 
-  setTimelineTime(instanceId, timelineId, timeSeconds) {
-    const { document, instance, bucket } = this.#bucket(instanceId);
+  setTimelineTime(scopeInput, timelineId, timeSeconds) {
+    const { document, instance, bucket } = this.#bucket(scopeInput);
     const ref = { kind: 'timeline', id: String(timelineId) };
     this.#validateSourceRef(document, instance, ref);
     const effective = { kind: 'timeline', id: effectiveTimelineId(instance, ref.id) };
@@ -156,50 +196,76 @@ export class ComponentRuntimeRegistry {
     return time;
   }
 
-  clearTimeline(instanceId, timelineId = null) {
-    const { bucket } = this.#bucket(instanceId);
+  clearTimeline(scopeInput, timelineId = null) {
+    const { bucket } = this.#bucket(scopeInput);
     if (timelineId == null) bucket.timelineTimes.clear();
     else bucket.timelineTimes.delete(String(timelineId));
   }
 
-  machineRuntime(instanceId, machineId) {
-    const { document, instance, bucket } = this.#bucket(instanceId);
+  machineRuntime(scopeInput, machineId) {
+    const { document, instance, bucket } = this.#bucket(scopeInput);
     return this.#machineRuntimeFor(document, instance, bucket, String(machineId));
   }
 
-  setMachineInput(instanceId, machineId, inputId, value) {
-    return this.machineRuntime(instanceId, machineId).setInput(inputId, value);
+  setMachineInput(scopeInput, machineId, inputId, value) {
+    return this.machineRuntime(scopeInput, machineId).setInput(inputId, value);
   }
 
-  fireMachineInput(instanceId, machineId, inputId) {
-    return this.machineRuntime(instanceId, machineId).fire(inputId);
+  fireMachineInput(scopeInput, machineId, inputId) {
+    return this.machineRuntime(scopeInput, machineId).fire(inputId);
   }
 
-  stepMachine(instanceId, machineId, deltaSeconds) {
-    return this.machineRuntime(instanceId, machineId).step(deltaSeconds);
+  stepMachine(scopeInput, machineId, deltaSeconds) {
+    return this.machineRuntime(scopeInput, machineId).step(deltaSeconds);
   }
 
-  resetInstance(instanceId) {
-    const bucket = this.#buckets.get(instanceId);
+  resetInstance(scopeInput) {
+    const scope = createComponentRuntimeScope(scopeInput);
+    const bucket = this.#buckets.get(componentRuntimeScopeKey(scope));
     if (!bucket) return false;
     bucket.timelineTimes.clear();
     for (const runtime of bucket.machines.values()) runtime.reset();
     return true;
   }
 
+  resetSubtree(scopeInput) {
+    const prefix = this.#resolveScope(scopeInput).scope;
+    let reset = 0;
+    for (const bucket of this.#buckets.values()) {
+      if (!scopeHasPrefix(bucket.scope, prefix)) continue;
+      bucket.timelineTimes.clear();
+      for (const runtime of bucket.machines.values()) runtime.reset();
+      reset += 1;
+    }
+    return reset;
+  }
+
   deleteInstance(instanceId) {
-    return this.#buckets.delete(instanceId);
+    let removed = 0;
+    for (const [key, bucket] of [...this.#buckets.entries()]) {
+      if (!bucket.scope.path.some((ref) => ref.id === String(instanceId))) continue;
+      this.#buckets.delete(key);
+      removed += 1;
+    }
+    return removed > 0;
   }
 
   prune() {
-    const document = this.#getDocument();
-    const live = new Set((document.componentInstances || []).map((item) => item.id));
-    for (const id of this.#buckets.keys()) if (!live.has(id)) this.#buckets.delete(id);
+    for (const [key, bucket] of [...this.#buckets.entries()]) {
+      try { this.#resolveScope(bucket.scope); }
+      catch { this.#buckets.delete(key); }
+    }
     return this.#buckets.size;
   }
 
-  evaluate(instanceId) {
-    const { document, instance, bucket } = this.#bucket(instanceId);
+  listRuntimeScopes() {
+    return [...this.#buckets.values()]
+      .map((bucket) => cloneValue(bucket.scope))
+      .sort((a, b) => componentRuntimeScopeKey(a).localeCompare(componentRuntimeScopeKey(b)));
+  }
+
+  evaluate(scopeInput) {
+    const { document, instance, bucket, scope } = this.#bucket(scopeInput);
     const overrides = {};
     const timelineControllers = new Map(bucket.timelineTimes);
     const selectedTimelineId = instance.runtime?.timeline?.id || null;
@@ -228,7 +294,8 @@ export class ComponentRuntimeRegistry {
     }
 
     return {
-      instanceId,
+      instanceId: instance.id,
+      runtimeScope: cloneValue(scope),
       overrides: mixedRuntimeOverrides(document, overrides, instance.runtime?.mix ?? 1),
       timelineIds: [...timelineControllers.keys()].sort(),
       machineIds: [...machineControllers].sort(),
@@ -239,7 +306,6 @@ export class ComponentRuntimeRegistry {
 
   get size() { return this.#buckets.size; }
 }
-
 export function createComponentRuntimeRegistry(documentOrGetter) {
   return new ComponentRuntimeRegistry(documentOrGetter);
 }
@@ -260,12 +326,13 @@ function remapEvaluatedReference(reference, maps) {
   return map?.has(reference.id) ? { kind: reference.kind, id: map.get(reference.id) } : cloneValue(reference);
 }
 
-function evaluatedProvenance(item, kind, component, instance, directSource) {
+function evaluatedProvenance(item, kind, component, instance, directSource, runtimeScope) {
   const sourceId = item.sourceRef?.id || item.id;
   const base = {
     sourceRef: item.sourceRef || { kind, id: sourceId },
     componentRef: directSource ? { kind: 'component', id: component.id } : cloneValue(item.componentRef),
     componentInstanceRef: directSource ? { kind: 'componentInstance', id: instance.id } : cloneValue(item.componentInstanceRef),
+    componentRuntimeScope: directSource ? cloneValue(runtimeScope) : cloneValue(item.componentRuntimeScope || runtimeScope),
     evaluatedIdentity: directSource
       ? {
         kind: 'component-instance-descendant',
@@ -298,6 +365,7 @@ export function evaluateComponentContent({
   runtimeRegistry = null,
   depth = 0,
   componentPath = [],
+  runtimeScopePath = [],
 }) {
   if (depth > VEYRA_COMPONENT_MAX_DEPTH) throw new TypeError(`Component evaluation exceeded depth ${VEYRA_COMPONENT_MAX_DEPTH}.`);
   const hostNodes = new Map(baseScene.nodes.map((node) => [node.id, node]));
@@ -313,12 +381,14 @@ export function evaluateComponentContent({
     const parentWorld = instance.parent ? hostNodes.get(instance.parent.id)?.worldMatrix || null : null;
     const wrapper = componentInstanceSourceMatrix(document, instance, parentWorld);
     const sourceDocument = applyInstanceOverrides(document, instance);
+    const runtimeScope = createComponentRuntimeScope([...runtimeScopePath, { kind: 'componentInstance', id: instance.id }]);
     const runtimeResult = runtimeRegistry
-      ? runtimeRegistry.evaluate(instance.id)
-      : createComponentRuntimeRegistry(document).evaluate(instance.id);
+      ? runtimeRegistry.evaluate(runtimeScope)
+      : createComponentRuntimeRegistry(document).evaluate(runtimeScope);
     const sourceScene = evaluateSource(sourceDocument, component.source.id, { animation: runtimeResult.overrides }, {
       depth: depth + 1,
       componentPath: [...componentPath, component.id],
+      runtimeScopePath: runtimeScope.path,
     });
 
     const nodeIds = new Map(sourceScene.nodes.map((item) => [item.id, scopedEvaluatedId(instance.id, item.id)]));
@@ -363,7 +433,7 @@ export function evaluateComponentContent({
         localMatrix,
         worldMatrix: mappedWorld,
         opacity: Math.max(0, Math.min(1, Number(sourceNode.opacity ?? 1) * (hasMappedParent ? 1 : instance.opacity))),
-        ...evaluatedProvenance(sourceNode, 'node', component, instance, directSource),
+        ...evaluatedProvenance(sourceNode, 'node', component, instance, directSource, runtimeScope),
         propertySource: directSource
           ? (hasInstanceOverride ? 'component-instance-override' : hasRuntime ? 'component-instance-runtime' : 'component-source')
           : sourceNode.propertySource,
@@ -384,7 +454,7 @@ export function evaluateComponentContent({
         restWorldMatrix: multiplyMatrices(wrapper, sourceBone.restWorldMatrix),
         start: transformPoint(wrapper, sourceBone.start),
         end: transformPoint(wrapper, sourceBone.end),
-        ...evaluatedProvenance(sourceBone, 'bone', component, instance, directSource),
+        ...evaluatedProvenance(sourceBone, 'bone', component, instance, directSource, runtimeScope),
       });
     }
 
@@ -413,7 +483,7 @@ export function evaluateComponentContent({
         deformedVertices,
         triangles,
         opacity: Math.max(0, Math.min(1, Number(sourceMesh.opacity ?? 1) * instance.opacity)),
-        ...evaluatedProvenance(sourceMesh, 'mesh', component, instance, directSource),
+        ...evaluatedProvenance(sourceMesh, 'mesh', component, instance, directSource, runtimeScope),
       });
     }
 
@@ -424,7 +494,7 @@ export function evaluateComponentContent({
         ...cloneValue(sourceControl),
         id: controlIds.get(sourceControl.id),
         position: mappedPosition,
-        ...evaluatedProvenance(sourceControl, 'control', component, instance, directSource),
+        ...evaluatedProvenance(sourceControl, 'control', component, instance, directSource, runtimeScope),
       });
     }
 
@@ -438,7 +508,7 @@ export function evaluateComponentContent({
       output.constraints.push({
         ...mapped,
         id: constraintIds.get(sourceConstraint.id),
-        ...evaluatedProvenance(sourceConstraint, 'constraint', component, instance, directSource),
+        ...evaluatedProvenance(sourceConstraint, 'constraint', component, instance, directSource, runtimeScope),
       });
     }
   }

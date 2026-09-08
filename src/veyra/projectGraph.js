@@ -653,7 +653,11 @@ export function projectGraphCapabilities() {
     maxComponentDepth: VEYRA_COMPONENT_MAX_DEPTH,
     clipping: 'none-only',
     overrideTargets: ['node', 'bone', 'mesh', 'control', 'constraint'],
-    runtimeIsolation: 'per-component-instance',
+    runtimeIsolation: {
+      authoredTopLevel: 'per-component-instance',
+      evaluatedNested: 'per-component-runtime-scope',
+      scope: { kind: 'componentRuntimeScope', pathItemKind: 'componentInstance', persistent: false },
+    },
     runtimeMapping: {
       timelineSelection: 'authored selected source timeline; default runtime time is 0 seconds',
       stateMachineSelection: 'authored selected source machine; default runtime state is its initial state',

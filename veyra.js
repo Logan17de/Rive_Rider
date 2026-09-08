@@ -59,11 +59,12 @@ import { createVeyraControlPlane } from './src/veyra/controlPlane.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
 import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
-import { createComponentRuntimeRegistry } from './src/veyra/components.js';
+import { createComponentRuntimeRegistry, createComponentRuntimeScope } from './src/veyra/components.js';
 import {
   VEYRA_WORKSPACE_LAYOUT_DEFAULTS,
   artboardResizeCursor,
   classifyArtboardResizeZone,
+  compensateViewportForClientRect,
   evaluatedRefBounds,
   fitArtboardViewport,
   fitBoundsViewport,
@@ -323,7 +324,16 @@ const renderer = new VeyraRenderer($('veyraCanvas'), {
   cancel: () => store.cancel(),
 });
 
-function applyWorkspaceLayout(persist = true) {
+function stageViewportClientRect() {
+  const rect = stageViewport.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+
+function captureWorkspaceClientAnchor() {
+  return { viewport: renderer.getViewport(), rect: stageViewportClientRect() };
+}
+
+function applyWorkspaceLayout(persist = true, cameraAnchor = null) {
   workspaceLayout = normalizeWorkspaceLayout(workspaceLayout, { width: window.innerWidth, height: window.innerHeight });
   for (const [property, value] of Object.entries(workspaceCssVariables(workspaceLayout, { width: window.innerWidth, height: window.innerHeight }))) {
     document.documentElement.style.setProperty(property, value);
@@ -339,7 +349,17 @@ function applyWorkspaceLayout(persist = true) {
   timelineToggle.title = workspaceLayout.bottomCollapsed ? 'Expand timeline' : 'Collapse timeline';
   if (persist) localStorage.setItem(UI_LAYOUT_KEY, JSON.stringify(workspaceLayout));
   requestAnimationFrame(() => {
-    renderer.syncViewport();
+    if (cameraAnchor && renderer.scene) {
+      const applied = renderer.setViewport(compensateViewportForClientRect(
+        cameraAnchor.viewport,
+        cameraAnchor.rect,
+        stageViewportClientRect(),
+      ));
+      zoom = applied.zoom;
+      updateZoomLabel();
+    } else {
+      renderer.syncViewport();
+    }
     syncArtboardFrame();
   });
   return { ...workspaceLayout };
@@ -2292,8 +2312,9 @@ deleteNodeButton.onclick = () => store.removeSelection();
 
 // Timeline event handlers
 timelineToggle.onclick = () => {
+  const cameraAnchor = captureWorkspaceClientAnchor();
   workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'bottom', !workspaceLayout.bottomCollapsed, { width: window.innerWidth, height: window.innerHeight });
-  applyWorkspaceLayout();
+  applyWorkspaceLayout(true, cameraAnchor);
 };
 
 timelineSelect.onchange = () => {
@@ -2743,6 +2764,7 @@ function wireWorkspaceSplitter(element, panel) {
     const startY = event.clientY;
     const property = panel === 'left' ? 'leftWidth' : panel === 'right' ? 'rightWidth' : 'bottomHeight';
     const startSize = workspaceLayout[property];
+    const cameraAnchor = captureWorkspaceClientAnchor();
     element.setPointerCapture?.(event.pointerId);
     element.classList.add('isDragging');
     const onMove = (nextEvent) => {
@@ -2752,7 +2774,7 @@ function wireWorkspaceSplitter(element, panel) {
           ? startX - nextEvent.clientX
           : startY - nextEvent.clientY;
       workspaceLayout = setWorkspacePanelSize(workspaceLayout, panel, startSize + delta, { width: window.innerWidth, height: window.innerHeight });
-      applyWorkspaceLayout(false);
+      applyWorkspaceLayout(false, cameraAnchor);
     };
     const onEnd = (nextEvent) => {
       element.removeEventListener('pointermove', onMove);
@@ -2760,28 +2782,31 @@ function wireWorkspaceSplitter(element, panel) {
       element.removeEventListener('pointercancel', onEnd);
       element.classList.remove('isDragging');
       try { element.releasePointerCapture?.(nextEvent.pointerId); } catch {}
-      applyWorkspaceLayout(true);
+      applyWorkspaceLayout(true, cameraAnchor);
     };
     element.addEventListener('pointermove', onMove);
     element.addEventListener('pointerup', onEnd);
     element.addEventListener('pointercancel', onEnd);
   });
   element.addEventListener('dblclick', () => {
+    const cameraAnchor = captureWorkspaceClientAnchor();
     const property = panel === 'left' ? 'leftWidth' : panel === 'right' ? 'rightWidth' : 'bottomHeight';
     workspaceLayout = setWorkspacePanelSize(workspaceLayout, panel, VEYRA_WORKSPACE_LAYOUT_DEFAULTS[property], { width: window.innerWidth, height: window.innerHeight });
-    applyWorkspaceLayout();
+    applyWorkspaceLayout(true, cameraAnchor);
   });
 }
 wireWorkspaceSplitter(leftSplitter, 'left');
 wireWorkspaceSplitter(rightSplitter, 'right');
 wireWorkspaceSplitter(timelineSplitter, 'bottom');
 hierarchyCollapse.onclick = () => {
+  const cameraAnchor = captureWorkspaceClientAnchor();
   workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'left', !workspaceLayout.leftCollapsed, { width: window.innerWidth, height: window.innerHeight });
-  applyWorkspaceLayout();
+  applyWorkspaceLayout(true, cameraAnchor);
 };
 inspectorCollapse.onclick = () => {
+  const cameraAnchor = captureWorkspaceClientAnchor();
   workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'right', !workspaceLayout.rightCollapsed, { width: window.innerWidth, height: window.innerHeight });
-  applyWorkspaceLayout();
+  applyWorkspaceLayout(true, cameraAnchor);
 };
 window.addEventListener('resize', () => applyWorkspaceLayout(false));
 
@@ -2815,12 +2840,14 @@ canvas.addEventListener('pointerdown', previewPointerHandlers.onPointerDown, tru
 const toggleInspectorButton = $('toggleInspector');
 const toggleHierarchyButton = $('toggleHierarchyPanel');
 toggleInspectorButton.onclick = () => {
+  const cameraAnchor = captureWorkspaceClientAnchor();
   workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'right', !workspaceLayout.rightCollapsed, { width: window.innerWidth, height: window.innerHeight });
-  applyWorkspaceLayout();
+  applyWorkspaceLayout(true, cameraAnchor);
 };
 toggleHierarchyButton.onclick = () => {
+  const cameraAnchor = captureWorkspaceClientAnchor();
   workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'left', !workspaceLayout.leftCollapsed, { width: window.innerWidth, height: window.innerHeight });
-  applyWorkspaceLayout();
+  applyWorkspaceLayout(true, cameraAnchor);
 };
 
 window.addEventListener('keydown', (event) => {
@@ -2956,12 +2983,14 @@ globalThis.veyra = Object.freeze({
   removeComponentInstance: (instanceId) => dispatchCompatibilityCommand('removeComponentInstance', { instanceId }, { label: `Remove component instance ${instanceId}`, source: 'script' }),
   setComponentOverride: (instanceId, override) => dispatchCompatibilityCommand('setComponentOverride', { instanceId, override }, { label: `Set component override ${instanceId}`, source: 'script' }),
   removeComponentOverride: (instanceId, overrideId) => dispatchCompatibilityCommand('removeComponentOverride', { instanceId, overrideId }, { label: `Remove component override ${overrideId}`, source: 'script' }),
-  getComponentRuntime: (instanceId) => cloneValue(componentRuntimeRegistry.evaluate(instanceId)),
-  setComponentTimelineTime: (instanceId, timelineId, seconds) => { const result = componentRuntimeRegistry.setTimelineTime(instanceId, timelineId, seconds); evaluateCurrentFrame(); return result; },
-  setComponentMachineInput: (instanceId, machineId, inputId, value) => { const result = componentRuntimeRegistry.setMachineInput(instanceId, machineId, inputId, value); evaluateCurrentFrame(); return result; },
-  fireComponentMachineInput: (instanceId, machineId, inputId) => { const result = componentRuntimeRegistry.fireMachineInput(instanceId, machineId, inputId); evaluateCurrentFrame(); return result; },
-  stepComponentMachine: (instanceId, machineId, deltaSeconds) => { const result = componentRuntimeRegistry.stepMachine(instanceId, machineId, deltaSeconds); evaluateCurrentFrame(); return result; },
-  resetComponentRuntime: (instanceId) => { const result = componentRuntimeRegistry.resetInstance(instanceId); evaluateCurrentFrame(); return result; },
+  createComponentRuntimeScope: (path) => cloneValue(createComponentRuntimeScope(path)),
+  listComponentRuntimeScopes: () => cloneValue(componentRuntimeRegistry.listRuntimeScopes()),
+  getComponentRuntime: (scope) => cloneValue(componentRuntimeRegistry.evaluate(scope)),
+  setComponentTimelineTime: (scope, timelineId, seconds) => { const result = componentRuntimeRegistry.setTimelineTime(scope, timelineId, seconds); evaluateCurrentFrame(); return result; },
+  setComponentMachineInput: (scope, machineId, inputId, value) => { const result = componentRuntimeRegistry.setMachineInput(scope, machineId, inputId, value); evaluateCurrentFrame(); return result; },
+  fireComponentMachineInput: (scope, machineId, inputId) => { const result = componentRuntimeRegistry.fireMachineInput(scope, machineId, inputId); evaluateCurrentFrame(); return result; },
+  stepComponentMachine: (scope, machineId, deltaSeconds) => { const result = componentRuntimeRegistry.stepMachine(scope, machineId, deltaSeconds); evaluateCurrentFrame(); return result; },
+  resetComponentRuntime: (scope) => { const result = componentRuntimeRegistry.resetInstance(scope); evaluateCurrentFrame(); return result; },
   getViewportState: () => ({ ...renderer.getViewport(), activeArtboardId, layout: { ...workspaceLayout }, theme: document.documentElement.dataset.theme }),
   setViewport: (viewport) => applyViewportState(viewport, 'Viewport updated'),
   fitArtboard: () => fitCanvas(),

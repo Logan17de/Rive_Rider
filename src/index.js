@@ -54,6 +54,7 @@ export { createSvgViewBox, createSvgViewBoxScreenTransform, VEYRA_SVG_PRESERVE_A
 export {
   VEYRA_ARTBOARD_RESIZE_TOLERANCE_PX,
   VEYRA_MIN_NODE_SCALE,
+  VEYRA_RIG_OVERLAY_MIN_ZOOM,
   VEYRA_PAN_DRAG_THRESHOLD_PX,
   VEYRA_UI_THEMES,
   VEYRA_WORKSPACE_LAYOUT_DEFAULTS,
@@ -63,6 +64,7 @@ export {
   artboardResizeCursor,
   clampZoom,
   classifyArtboardResizeZone,
+  compensateViewportForClientRect,
   evaluatedRefBounds,
   fitArtboardViewport,
   fitBoundsViewport,
@@ -75,6 +77,7 @@ export {
   resizeNodeTransform,
   setWorkspacePanelCollapsed,
   setWorkspacePanelSize,
+  shouldShowDetailedRigOverlay,
   shouldSuppressCanvasContextMenu,
   wheelZoomFactor,
   workspaceCssVariables,
@@ -88,5 +91,5 @@ export {
   entityArtboardId, duplicateArtboardIntoDocument, projectGraphCapabilities,
 } from './veyra/projectGraph.js';
 export {
-  ComponentRuntimeRegistry, createComponentRuntimeRegistry, componentInstanceSourceMatrix, evaluateComponentContent, evaluateComponentInstances,
+  VEYRA_COMPONENT_RUNTIME_SCOPE_KIND, ComponentRuntimeRegistry, createComponentRuntimeRegistry, createComponentRuntimeScope, componentRuntimeScopeKey, componentInstanceSourceMatrix, evaluateComponentContent, evaluateComponentInstances,
 } from './veyra/components.js';

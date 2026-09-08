@@ -149,6 +149,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     runtimeRegistry: options.componentRuntime || null,
     depth: Number(options.depth || 0),
     componentPath: options.componentPath || [],
+    runtimeScopePath: options.runtimeScopePath || [],
     evaluateSource: (sourceDocument, sourceArtboardId, sourceLayers, nested = {}) => evaluateDocument(
       sourceDocument, sourceLayers, null, {
         ...options,

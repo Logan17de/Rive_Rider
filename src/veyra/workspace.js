@@ -8,6 +8,7 @@ export const VEYRA_ZOOM_MAX = 8;
 export const VEYRA_PAN_DRAG_THRESHOLD_PX = 3;
 export const VEYRA_ARTBOARD_RESIZE_TOLERANCE_PX = 7;
 export const VEYRA_MIN_NODE_SCALE = 0.01;
+export const VEYRA_RIG_OVERLAY_MIN_ZOOM = 0.2;
 export const VEYRA_UI_THEMES = Object.freeze([
   'neutral-dark',
   'graphite-blue',
@@ -92,6 +93,35 @@ export function workspaceCssVariables(layout, viewport = {}) {
     '--right-panel-width': normalized.rightCollapsed ? '0px' : `${normalized.rightWidth}px`,
     '--timeline-height': normalized.bottomCollapsed ? '48px' : `${normalized.bottomHeight}px`,
   };
+}
+
+function clientRectCenter(rect = {}) {
+  const left = finite(rect.left, 0);
+  const top = finite(rect.top, 0);
+  const width = Math.max(0, finite(rect.width, finite(rect.right, left) - left));
+  const height = Math.max(0, finite(rect.height, finite(rect.bottom, top) - top));
+  return { x: left + width / 2, y: top + height / 2 };
+}
+
+/**
+ * Preserve the absolute browser-client mapping of the current camera when UI
+ * chrome changes the SVG viewport rectangle. This is editor state only: zoom
+ * is unchanged and no authored artboard/object property participates.
+ */
+export function compensateViewportForClientRect(viewport = {}, beforeRect = {}, afterRect = {}) {
+  const zoom = clampZoom(viewport.zoom ?? 1);
+  const before = clientRectCenter(beforeRect);
+  const after = clientRectCenter(afterRect);
+  return {
+    ...viewport,
+    zoom,
+    centerX: finite(viewport.centerX, 0) + (after.x - before.x) / zoom,
+    centerY: finite(viewport.centerY, 0) + (after.y - before.y) / zoom,
+  };
+}
+
+export function shouldShowDetailedRigOverlay(zoom) {
+  return clampZoom(zoom ?? 1) >= VEYRA_RIG_OVERLAY_MIN_ZOOM;
 }
 
 export function normalizeWheelDelta(delta, deltaMode = 0) {
