@@ -8,6 +8,7 @@ import {
 } from './geometry.js';
 import { referenceId } from './references.js';
 import { transformPoint } from './contracts.js';
+import { createSvgViewBox, VEYRA_SVG_PRESERVE_ASPECT_RATIO } from './viewport.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -118,14 +119,13 @@ export class VeyraRenderer {
     if (!this.scene) return;
     const { width, height } = this.scene.artboard;
     if (!this.viewCenter) this.viewCenter = { x: width / 2, y: height / 2 };
-    const visibleWidth = width / this.zoom;
-    const visibleHeight = height / this.zoom;
-    this.svg.setAttribute('viewBox', [
-      this.viewCenter.x - visibleWidth / 2,
-      this.viewCenter.y - visibleHeight / 2,
-      visibleWidth,
-      visibleHeight,
-    ].join(' '));
+    const viewBox = createSvgViewBox(this.scene.artboard, {
+      zoom: this.zoom,
+      centerX: this.viewCenter.x,
+      centerY: this.viewCenter.y,
+    });
+    this.svg.setAttribute('preserveAspectRatio', VEYRA_SVG_PRESERVE_ASPECT_RATIO);
+    this.svg.setAttribute('viewBox', [viewBox.x, viewBox.y, viewBox.width, viewBox.height].join(' '));
   }
 
   render(scene, selectedRef = null) {

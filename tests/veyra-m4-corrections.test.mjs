@@ -137,6 +137,7 @@ assert.ok(VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX < VEYRA_HIT_TEST_TOLERANCE_PX, 
   const artboard = { width: 1000, height: 1000 };
   const ellipse = createNode('ellipse', {
     id: 'huge-ellipse', transform: { x: 500, y: 500 }, geometry: { width: 50, height: 50 },
+    paint: { fill: { type: 'solid', color: '#111111' }, stroke: 'none', strokeWidth: 0 },
   });
   const document = makeArtboardDocument(ellipse, artboard);
   const viewport = { width: 4000, height: 4000, zoom: 8, centerX: 500, centerY: 500 };
@@ -154,6 +155,7 @@ assert.ok(VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX < VEYRA_HIT_TEST_TOLERANCE_PX, 
     id: 'nonuniform-ellipse',
     transform: { x: 300, y: 200, rotation: Math.PI / 7, scaleX: 4, scaleY: 0.2 },
     geometry: { width: 120, height: 80 },
+    paint: { fill: { type: 'solid', color: '#111111' }, stroke: 'none', strokeWidth: 0 },
   });
   const document = makeArtboardDocument(ellipse, artboard);
   const viewport = { width: 900, height: 500, zoom: 2.5, centerX: 300, centerY: 200 };
@@ -168,6 +170,7 @@ assert.ok(VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX < VEYRA_HIT_TEST_TOLERANCE_PX, 
   const rounded = createNode('rectangle', {
     id: 'large-rounded', transform: { x: 400, y: 400 },
     geometry: { width: 120, height: 120, cornerRadius: 50 },
+    paint: { fill: { type: 'solid', color: '#111111' }, stroke: 'none', strokeWidth: 0 },
   });
   const document = makeArtboardDocument(rounded, artboard);
   const viewport = { width: 3200, height: 3200, zoom: 8, centerX: 400, centerY: 400 };
@@ -185,6 +188,7 @@ assert.ok(VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX < VEYRA_HIT_TEST_TOLERANCE_PX, 
     id: 'rotated-rounded',
     transform: { x: 300, y: 200, rotation: Math.PI / 4, scaleX: 2.2, scaleY: 0.55 },
     geometry: { width: 180, height: 100, cornerRadius: 40 },
+    paint: { fill: { type: 'solid', color: '#111111' }, stroke: 'none', strokeWidth: 0 },
   });
   const document = makeArtboardDocument(rounded, artboard);
   const viewport = { width: 1000, height: 500, zoom: 2, centerX: 310, centerY: 190 };

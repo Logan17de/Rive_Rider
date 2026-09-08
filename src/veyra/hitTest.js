@@ -225,7 +225,7 @@ function roundedRectangleScreenPoints(node, localToScreen) {
   ];
   const result = [];
   for (const corner of corners) {
-    for (let index = 0; index < perQuarter; index += 1) {
+    for (let index = 0; index <= perQuarter; index += 1) {
       const angle = corner.start + (index / perQuarter) * quarterSweep;
       result.push(apply(localToScreen, {
         x: corner.cx + Math.cos(angle) * radius,
