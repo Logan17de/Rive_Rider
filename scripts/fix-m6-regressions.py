@@ -50,11 +50,15 @@ write(p, t)
 p = 'tests/veyra-foundation.test.mjs'
 t = read(p)
 t = repl(t, "assert.equal(migrated.version, 3);", "assert.equal(migrated.version, 5);", 'foundation migrated version')
+t = repl(t, "assert.equal(migratedV2.version, 3);", "assert.equal(migratedV2.version, 5);", 'foundation migrated v2 version')
 write(p, t)
 
 p = 'tests/veyra-model.test.mjs'
 t = read(p)
 t = repl(t, "assert.equal(starter.version, 3);", "assert.equal(starter.version, 5);", 'model starter project version')
+old = """// Test: every accepted format version is loadable and stamps by feature content.\n{\n  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4]);\n  const target = createNode('rectangle', { id: 'version_target', name: 'Version target' });\n  const timeline = createTimeline({ id: 'version_timeline', name: 'Version timeline' });\n  const machine = createStateMachine({\n    id: 'version_machine',\n    inputs: [createMachineInput({ id: 'version_input', name: 'Tap', type: 'trigger' })],\n    states: [createMachineState({ id: 'version_state', timeline: timeline.id })],\n  });\n  const fixture = createDocument({ nodes: [target], timelines: [timeline], stateMachines: [machine] });\n  for (const version of VEYRA_SUPPORTED_VERSIONS) {\n    const plain = parseVeyra(JSON.stringify({ ...fixture, version }));\n    assert.equal(plain.version, 3, `model output stamp for listener-free v${version}`);\n    const listener = createPointerListener({ id: `listener_v${version}`, target: target.id, machine: machine.id, input: 'Tap', event: 'pointerdown', action: 'fire' });\n    const withListener = parseVeyra(JSON.stringify({ ...fixture, version, listeners: [listener] }));\n    assert.equal(withListener.version, 4, `model output stamp for listener-bearing v${version}`);\n  }\n  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 5 })), /Unsupported Veyra version/);\n  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 99 })), /Unsupported Veyra version/);\n  console.log('✓ every accepted version loads; output stamp follows listener content');\n}"""
+new = """// Test: every accepted historical/project format is loadable and canonicalizes to v5.\n{\n  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5]);\n  const target = createNode('rectangle', { id: 'version_target', name: 'Version target' });\n  const timeline = createTimeline({ id: 'version_timeline', name: 'Version timeline' });\n  const machine = createStateMachine({\n    id: 'version_machine',\n    inputs: [createMachineInput({ id: 'version_input', name: 'Tap', type: 'trigger' })],\n    states: [createMachineState({ id: 'version_state', timeline: timeline.id })],\n  });\n  const fixture = createDocument({ nodes: [target], timelines: [timeline], stateMachines: [machine] });\n  for (const version of VEYRA_SUPPORTED_VERSIONS) {\n    const plain = parseVeyra(JSON.stringify({ ...fixture, version }));\n    assert.equal(plain.version, 5, `canonical project output stamp for listener-free v${version}`);\n    const listener = createPointerListener({ id: `listener_v${version}`, target: target.id, machine: machine.id, input: 'Tap', event: 'pointerdown', action: 'fire' });\n    const withListener = parseVeyra(JSON.stringify({ ...fixture, version, listeners: [listener] }));\n    assert.equal(withListener.version, 5, `canonical project output stamp for listener-bearing v${version}`);\n  }\n  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 6 })), /Unsupported Veyra version/);\n  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 99 })), /Unsupported Veyra version/);\n  console.log('✓ every accepted historical/project version loads and canonicalizes to v5');\n}"""
+t = repl(t, old, new, 'model version compatibility block')
 write(p, t)
 
 p = 'tests/veyra-manifest.test.mjs'
@@ -63,6 +67,10 @@ t = repl(t, "assert.equal(manifest.document.version, 3);", "assert.equal(manifes
 old = """assert.deepEqual(manifest.document.counts, {\n  assets: 3,\n  nodes: 1,"""
 new = """assert.deepEqual(manifest.document.counts, {\n  artboards: 1,\n  components: 0,\n  componentInstances: 0,\n  assets: 3,\n  nodes: 1,"""
 t = repl(t, old, new, 'manifest project counts')
+t = repl(t,
+    "assert.equal(actions.length, 53, 'Action catalog grows additively with canonical semantic CRUD plus M4 listener CRUD.');",
+    "assert.equal(actions.length, 65, 'Action catalog grows additively with the 12 canonical M6 project/Component mutations.');",
+    'manifest M6 action count')
 write(p, t)
 
 p = 'tests/veyra-listeners.test.mjs'
@@ -87,6 +95,10 @@ t = repl(t, anchor, insert, 'M5 frame projection helper')
 t = repl(t, "assert.deepEqual(store.document.artboard, { ...baseFrame, x: 40, width: 760 });", "assert.deepEqual(authoredFrame(store.document.artboard), { ...baseFrame, x: 40, width: 760 });", 'M5 left frame')
 t = repl(t, "assert.deepEqual(store.document.artboard, { ...baseFrame, y: 30, height: 570 });", "assert.deepEqual(authoredFrame(store.document.artboard), { ...baseFrame, y: 30, height: 570 });", 'M5 top frame')
 t = repl(t, "const { background, ...frame } = store.document.artboard;", "const { background, ...frame } = authoredFrame(store.document.artboard);", 'M5 composed frame')
+t = repl(t,
+    "assert.match(browser, /x: Number\\(store\\.document\\.artboard\\.x \\|\\| 0\\)/);",
+    "assert.match(browser, /const active = activeArtboard\\(\\);/);\nassert.match(browser, /const startArtboard = \\{ x: active\\.x, y: active\\.y, width: active\\.width, height: active\\.height \\};/);\nassert.match(browser, /artboardId: active\\.id/);",
+    'M5 active artboard browser contract')
 write(p, t)
 
 # Old golden .veyra files intentionally remain v3 migration fixtures. Their v5 SVG
