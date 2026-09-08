@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scripts/fix-m6-core-anchor.py'
       - 'scripts/apply-m6-core.py'
       - 'scripts/apply-m6-control.py'
       - 'scripts/apply-m6-ai-surface.py'
@@ -25,6 +26,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Repair staging anchor
+        run: python3 scripts/fix-m6-core-anchor.py
       - name: Apply M6 core
         run: python3 scripts/apply-m6-core.py
       - name: Apply M6 control surfaces
@@ -39,7 +42,7 @@ jobs:
         run: npm test
       - name: Commit clean M6 implementation
         run: |
-          rm scripts/apply-m6-core.py scripts/apply-m6-control.py scripts/apply-m6-ai-surface.py scripts/apply-m6-browser.py
+          rm scripts/fix-m6-core-anchor.py scripts/apply-m6-core.py scripts/apply-m6-control.py scripts/apply-m6-ai-surface.py scripts/apply-m6-browser.py
           rm .github/workflows/apply-m6-project-graph.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
