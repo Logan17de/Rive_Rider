@@ -1,0 +1,46 @@
+name: Apply M4 Interaction Loop
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-m4-interaction-loop.yml'
+      - 'scripts/apply-m4-interaction-loop.py'
+      - 'scripts/fix-m4-integration.py'
+      - 'tests/veyra-interaction-loop.test.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply M4 integration
+        run: |
+          python3 scripts/apply-m4-interaction-loop.py
+          python3 scripts/fix-m4-integration.py
+      - name: Syntax check
+        run: npm run check
+      - name: Test
+        run: npm test
+      - name: Commit clean M4 implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-m4-interaction-loop.yml scripts/apply-m4-interaction-loop.py scripts/fix-m4-integration.py
+          git add -A
+          git diff --cached --check
+          git commit -m "Implement M4 current interaction loop [m4-applied]"
+          git push origin HEAD:main
