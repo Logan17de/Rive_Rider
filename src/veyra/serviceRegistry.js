@@ -1,3 +1,6 @@
+// Canonical M3 service metadata. Adding/removing an operation here must stay
+// mechanically aligned with createVeyraControlPlane, manifest declarations,
+// and browser adapter tests; this registry is metadata, not a second service implementation.
 export const VEYRA_SERVICE_DEFINITIONS = Object.freeze({
   getManifest: Object.freeze({ mode: 'read', deterministic: true, mutates: false, summary: 'Return the canonical bounded project manifest.' }),
   queryEntities: Object.freeze({ mode: 'read', deterministic: true, mutates: false, summary: 'Query stable entities through the canonical semantic index.' }),
