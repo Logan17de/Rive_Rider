@@ -34,20 +34,21 @@ export function createShellInteractionBridge({ document = null, onIntent = null,
     return resolver;
   }
 
+  function emit(intent) {
+    if (onIntent) onIntent(intent);
+    else report(`Interaction intent has no transport: ${intent.op}`, onDiagnostic);
+  }
+
   function resolve(event, scene = currentDocument, sceneRevision = revision, viewport = {}) {
     resolver.setViewport(viewport);
     const result = resolver.resolve(event, scene, sceneRevision);
-    if (event.type !== 'pointermove') {
-      for (const intent of result.intents || []) {
-        if (onIntent) onIntent(intent);
-        else report(`Interaction intent has no transport: ${intent.op}`, onDiagnostic);
-      }
+    // Resolver owns lifecycle semantics. The shell executes each returned
+    // transition/direct intent exactly once; it does not independently observe
+    // the same browser event through another interaction path.
+    for (const transition of result.transitions || []) {
+      if (transition.intent) emit(transition.intent);
     }
-    if (event.type === 'pointermove') {
-      for (const transition of result.transitions || []) {
-        if (transition.intent && onIntent) onIntent(transition.intent);
-      }
-    }
+    for (const intent of result.intents || []) emit(intent);
     return result;
   }
 
@@ -67,9 +68,6 @@ export function createShellInteractionBridge({ document = null, onIntent = null,
  * can call the real handler functions directly — including their
  * `stopPropagation`/`preventDefault` calls — instead of a parallel
  * reimplementation that could drift from what `veyra.js` really wires up.
- *
- * `veyra.js` calls this once and passes the three returned functions straight
- * to `addEventListener(..., true)`; it does not duplicate their bodies.
  */
 export function createPreviewPointerHandlers({
   canvas,
@@ -127,8 +125,6 @@ export function createPreviewPointerHandlers({
 
   function onPointerUp(event) {
     const result = resolvePreviewPointer(event);
-    // Preview owns eligible pointerup events as well as pointerdown/move. Keep
-    // ineligible pan gestures on the ancestor's normal bubble-phase path.
     if (previewPointerEligible(event)) event.stopPropagation();
     return result;
   }
@@ -136,8 +132,6 @@ export function createPreviewPointerHandlers({
   function onPointerDown(event) {
     if (!previewPointerEligible(event)) return;
     const result = resolvePreviewPointer(event);
-    // Preview owns eligible primary pointerdown events; prevent renderer child
-    // handlers from starting selection or drag gestures.
     event.stopPropagation();
     if (result?.intents?.length || result?.transitions?.length) event.preventDefault();
   }
