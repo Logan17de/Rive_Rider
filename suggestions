@@ -3,17 +3,16 @@ Veyra milestone suggestions
 
 Current milestone
 -----------------
-- M4 interaction loop is independently VERIFIED.
-- Active work is now `milestone.md` M5 — Workspace UX Stabilization.
-- M5 includes right-button drag canvas panning, middle/Space pan, zoom/focus recovery, hierarchy focus + visibility controls, resizable/collapsible panels, transform/resize stabilization, and the full theme overhaul.
+- M0–M5 foundation, interaction and workspace UX work is independently VERIFIED.
+- Active work is now `milestone.md` M6 — Multi-Artboard, Components & Project Graph, mapping to master `plan.md` M2.
+- Keep M6 focused on stable artboard/component/instance identity, component evaluation/runtime isolation, cross-artboard dependency/ownership and canonical UI/AI control parity.
 
-Queued work after M5
+Queued work after M6
 --------------------
-1. Resume the master `plan.md` sequence with M2 — Multi-artboard, Components and project graph.
-2. Then implement View Models / Data Binding / Property Groups / enums / converters / lists.
-3. Continue into full layered state-machine parity and later Rive feature families in plan order.
-4. Add path-topology commands (`addVertex` / `removeVertex`) plus a mechanical UI-to-command parity audit when it fits the active feature boundary.
-5. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
+1. Resume the master `plan.md` sequence with View Models / Data Binding / Property Groups / enums / converters / lists.
+2. Continue into full layered state-machine parity and later Rive feature families in plan order.
+3. Add path-topology commands (`addVertex` / `removeVertex`) plus a mechanical UI-to-command parity audit when it fits the active feature boundary.
+4. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
 
 Guardrails
 ----------
@@ -21,3 +20,4 @@ Guardrails
 - Future work stays here until the current milestone is independently accepted.
 - Stable IDs and human display names remain separate contracts.
 - UI convenience must not introduce a second mutation model or bypass the canonical control plane/Store validation boundary.
+- Component/instance implementation must not pre-empt the next View Model/Data Binding milestone with an incompatible ad-hoc data system.
