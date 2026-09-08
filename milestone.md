@@ -182,7 +182,7 @@ M3 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits: workflow-gated M3 correction implementation; final SHA to be recorded after CI commit
+- Correction commits: 5c4f916f85763bfe553004fbd9eab240be41c0d1 — Fix M3 control-plane convergence blockers [m3-corrected]
 - Changed files: src/veyra/controlPlane.js, src/veyra/store.js, src/veyra/commands.js, src/veyra/serviceRegistry.js, src/veyra/manifest.js, src/index.js, veyra.js, tests/veyra-resolver.test.mjs, tests/veyra-control-plane-corrections.test.mjs, milestone.md
 - Tests added/changed: dedicated M3 correction suite for repeated implicit creates, snapshot preview/dispatch alignment, failed-command seed stability, undo/redo generation behavior, provenance preservation/mechanical audit, browser canonical-dispatch mapping/direct-seam audit; M2 browser resolver test strengthened from brittle direct-wrapper regex to control-plane behavioral parity + thin-adapter check
 - npm test: PASS in correction workflow gate
