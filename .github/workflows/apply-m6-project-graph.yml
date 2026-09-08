@@ -9,6 +9,7 @@ on:
       - 'scripts/apply-m6-control.py'
       - 'scripts/apply-m6-ai-surface.py'
       - 'scripts/apply-m6-browser.py'
+      - 'scripts/fix-m6-regressions.py'
       - '.github/workflows/apply-m6-project-graph.yml'
 
 permissions:
@@ -36,6 +37,8 @@ jobs:
         run: python3 scripts/apply-m6-ai-surface.py
       - name: Apply M6 browser integration
         run: python3 scripts/apply-m6-browser.py
+      - name: Apply M6 regression fixes
+        run: python3 scripts/fix-m6-regressions.py
       - name: Syntax check
         run: npm run check
       - name: Test
@@ -57,7 +60,7 @@ jobs:
           exit "$code"
       - name: Commit clean M6 implementation
         run: |
-          rm scripts/fix-m6-core-anchor.py scripts/apply-m6-core.py scripts/apply-m6-control.py scripts/apply-m6-ai-surface.py scripts/apply-m6-browser.py
+          rm scripts/fix-m6-core-anchor.py scripts/apply-m6-core.py scripts/apply-m6-control.py scripts/apply-m6-ai-surface.py scripts/apply-m6-browser.py scripts/fix-m6-regressions.py
           rm .github/workflows/apply-m6-project-graph.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
