@@ -39,7 +39,22 @@ jobs:
       - name: Syntax check
         run: npm run check
       - name: Test
-        run: npm test
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/m6-tests.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo '--- M6 FAILURES ---'
+            grep -n -E '^(FAIL |.*AssertionError|.*TypeError|.*ReferenceError|.*SyntaxError|.*ERR_)' /tmp/m6-tests.log | head -120 || true
+            echo '--- FAILURE CONTEXT ---'
+            grep -n -B3 -A14 -E '^FAIL ' /tmp/m6-tests.log | head -320 || true
+            echo '--- TAIL ---'
+            tail -80 /tmp/m6-tests.log
+          else
+            tail -50 /tmp/m6-tests.log
+          fi
+          exit "$code"
       - name: Commit clean M6 implementation
         run: |
           rm scripts/fix-m6-core-anchor.py scripts/apply-m6-core.py scripts/apply-m6-control.py scripts/apply-m6-ai-surface.py scripts/apply-m6-browser.py
