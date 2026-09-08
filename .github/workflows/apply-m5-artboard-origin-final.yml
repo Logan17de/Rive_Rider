@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/apply-m5-artboard-origin-final.py'
+      - 'scripts/fix-m5-artboard-origin-final-tests.py'
       - '.github/workflows/apply-m5-artboard-origin-final.yml'
 
 permissions:
@@ -23,7 +24,9 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply focused final M5 correction
-        run: python3 scripts/apply-m5-artboard-origin-final.py
+        run: |
+          python3 scripts/apply-m5-artboard-origin-final.py
+          python3 scripts/fix-m5-artboard-origin-final-tests.py
       - name: Syntax check
         run: npm run check
       - name: Test
@@ -31,6 +34,7 @@ jobs:
       - name: Commit clean correction implementation
         run: |
           rm scripts/apply-m5-artboard-origin-final.py
+          rm scripts/fix-m5-artboard-origin-final-tests.py
           rm .github/workflows/apply-m5-artboard-origin-final.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
