@@ -48,3 +48,29 @@ export {
 export { createMachineInteractionBridge } from './veyra/interactionHost.js';
 export { hitTestPoint, VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX, VEYRA_HIT_TEST_TOLERANCE_PX, VEYRA_POINTER_EVENT_MODES } from './veyra/hitTest.js';
 export { createSvgViewBox, createSvgViewBoxScreenTransform, VEYRA_SVG_PRESERVE_ASPECT_RATIO } from './veyra/viewport.js';
+export {
+  VEYRA_MIN_NODE_SCALE,
+  VEYRA_PAN_DRAG_THRESHOLD_PX,
+  VEYRA_UI_THEMES,
+  VEYRA_WORKSPACE_LAYOUT_DEFAULTS,
+  VEYRA_WORKSPACE_PANEL_LIMITS,
+  VEYRA_ZOOM_MAX,
+  VEYRA_ZOOM_MIN,
+  clampZoom,
+  evaluatedRefBounds,
+  fitArtboardViewport,
+  fitBoundsViewport,
+  navigationPanKind,
+  normalizeTheme,
+  normalizeWheelDelta,
+  normalizeWorkspaceLayout,
+  panGestureMoved,
+  panViewportByScreen,
+  resizeNodeTransform,
+  setWorkspacePanelCollapsed,
+  setWorkspacePanelSize,
+  shouldSuppressCanvasContextMenu,
+  wheelZoomFactor,
+  workspaceCssVariables,
+  zoomViewportAtScreen,
+} from './veyra/workspace.js';

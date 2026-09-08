@@ -21,6 +21,10 @@ export const VEYRA_SERVICE_NAMES = Object.freeze(Object.keys(VEYRA_SERVICE_DEFIN
 // Command-backed helpers must route through controlPlane.dispatchCommand;
 // direct Store/runtime seams are explicit and must carry a reason.
 export const VEYRA_BROWSER_MUTATION_COMPATIBILITY = Object.freeze({
+  setViewport: Object.freeze({ transport: 'runtime', reason: 'Viewport state is ephemeral editor state and never authored document content.' }),
+  fitArtboard: Object.freeze({ transport: 'runtime', reason: 'Viewport fitting is an ephemeral editor navigation action.' }),
+  fitSelection: Object.freeze({ transport: 'runtime', reason: 'Selection fitting changes only ephemeral editor viewport state.' }),
+  focusReference: Object.freeze({ transport: 'runtime', reason: 'Focus/locate changes selection/view state but does not author project content.' }),
   applyCommand: Object.freeze({ transport: 'command', action: 'setProperty' }),
   addListener: Object.freeze({ transport: 'command', action: 'addListener' }),
   updateListener: Object.freeze({ transport: 'command', action: 'updateListener' }),

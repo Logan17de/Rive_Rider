@@ -56,11 +56,27 @@ import { createVeyraControlPlane } from './src/veyra/controlPlane.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
 import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
+import {
+  VEYRA_WORKSPACE_LAYOUT_DEFAULTS,
+  evaluatedRefBounds,
+  fitArtboardViewport,
+  fitBoundsViewport,
+  navigationPanKind,
+  normalizeTheme,
+  normalizeWheelDelta,
+  normalizeWorkspaceLayout,
+  panGestureMoved,
+  setWorkspacePanelCollapsed,
+  setWorkspacePanelSize,
+  shouldSuppressCanvasContextMenu,
+  wheelZoomFactor,
+  workspaceCssVariables,
+} from './src/veyra/workspace.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
 const UI_THEME_KEY = 'veyra.ui-theme.v1';
-const UI_THEMES = new Set(['magenta', 'blue', 'green', 'orange', 'yellow']);
+const UI_LAYOUT_KEY = 'veyra.workspace-layout.v1';
 
 const documentName = $('documentName');
 const saveState = $('saveState');
@@ -106,9 +122,15 @@ const timelineGridWrap = $('timelineGridWrap');
 const timelineRuler = $('timelineRuler');
 const keyframeBar = $('keyframeBar');
 const playhead = $('playhead');
+const workspace = document.querySelector('.workspace');
+const leftSplitter = $('leftSplitter');
+const rightSplitter = $('rightSplitter');
+const timelineSplitter = $('timelineSplitter');
+const hierarchyCollapse = $('hierarchyCollapse');
+const inspectorCollapse = $('inspectorCollapse');
 
 function applyTheme(theme) {
-  const nextTheme = UI_THEMES.has(theme) ? theme : 'magenta';
+  const nextTheme = normalizeTheme(theme);
   document.documentElement.dataset.theme = nextTheme;
   themeSelect.value = nextTheme;
   return nextTheme;
@@ -116,9 +138,22 @@ function applyTheme(theme) {
 
 applyTheme(localStorage.getItem(UI_THEME_KEY));
 themeSelect.onchange = () => {
+  const before = serializeVeyra(store.document);
   const nextTheme = applyTheme(themeSelect.value);
   localStorage.setItem(UI_THEME_KEY, nextTheme);
+  if (serializeVeyra(store.document) !== before) throw new Error('Theme change mutated authored document.');
 };
+
+function loadWorkspaceLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UI_LAYOUT_KEY) || 'null');
+    return normalizeWorkspaceLayout(saved || {}, { width: window.innerWidth, height: window.innerHeight });
+  } catch {
+    return normalizeWorkspaceLayout({}, { width: window.innerWidth, height: window.innerHeight });
+  }
+}
+
+let workspaceLayout = loadWorkspaceLayout();
 
 let toastTimer = null;
 let autosaveTimer = null;
@@ -190,6 +225,11 @@ const renderer = new VeyraRenderer($('veyraCanvas'), {
   moveNode: (nodeId, next) => store.mutate((documentModel) => {
     writeProperty(documentModel, nodePropertyAddress(nodeId, 'transform.x'), next.x);
     writeProperty(documentModel, nodePropertyAddress(nodeId, 'transform.y'), next.y);
+  }, 'drag'),
+  resizeNode: (nodeId, next) => store.mutate((documentModel) => {
+    for (const property of ['x', 'y', 'scaleX', 'scaleY']) {
+      writeProperty(documentModel, nodePropertyAddress(nodeId, `transform.${property}`), next[property]);
+    }
   }, 'drag'),
   moveGroup: (groupId, delta) => store.mutate((documentModel) => {
     const target = nodeById(documentModel, groupId);
@@ -267,6 +307,27 @@ const renderer = new VeyraRenderer($('veyraCanvas'), {
   commit: () => store.commit(),
   cancel: () => store.cancel(),
 });
+
+function applyWorkspaceLayout(persist = true) {
+  workspaceLayout = normalizeWorkspaceLayout(workspaceLayout, { width: window.innerWidth, height: window.innerHeight });
+  for (const [property, value] of Object.entries(workspaceCssVariables(workspaceLayout, { width: window.innerWidth, height: window.innerHeight }))) {
+    document.documentElement.style.setProperty(property, value);
+  }
+  workspace.dataset.leftCollapsed = String(workspaceLayout.leftCollapsed);
+  workspace.dataset.rightCollapsed = String(workspaceLayout.rightCollapsed);
+  timelinePanel.dataset.collapsed = String(workspaceLayout.bottomCollapsed);
+  hierarchyCollapse?.setAttribute('aria-expanded', String(!workspaceLayout.leftCollapsed));
+  inspectorCollapse?.setAttribute('aria-expanded', String(!workspaceLayout.rightCollapsed));
+  $('toggleHierarchyPanel')?.setAttribute('aria-expanded', String(!workspaceLayout.leftCollapsed));
+  $('toggleInspector')?.setAttribute('aria-expanded', String(!workspaceLayout.rightCollapsed));
+  timelineToggle.setAttribute('aria-expanded', String(!workspaceLayout.bottomCollapsed));
+  timelineToggle.title = workspaceLayout.bottomCollapsed ? 'Expand timeline' : 'Collapse timeline';
+  if (persist) localStorage.setItem(UI_LAYOUT_KEY, JSON.stringify(workspaceLayout));
+  requestAnimationFrame(() => syncArtboardFrame());
+  return { ...workspaceLayout };
+}
+
+applyWorkspaceLayout(false);
 
 function showToast(message, error = false) {
   toast.textContent = message;
@@ -384,6 +445,13 @@ function renderHierarchy() {
       !node.visible,
     );
 
+    const focus = document.createElement('button');
+    focus.className = 'treeUtility treeFocus';
+    focus.title = 'Focus object';
+    focus.setAttribute('aria-label', `Focus ${node.name}`);
+    focus.append(icon('fit'));
+    focus.onclick = () => focusEditorReference({ kind: 'node', id: node.id });
+
     const locked = document.createElement('button');
     locked.className = 'treeUtility';
     locked.title = node.locked ? 'Unlock object' : 'Lock object';
@@ -396,7 +464,7 @@ function renderHierarchy() {
       !node.locked,
     );
 
-    row.append(select, visible, locked);
+    row.append(select, focus, visible, locked);
     hierarchy.appendChild(row);
     for (const child of children.get(node.id) || []) appendNode(child, depth + 1);
   };
@@ -447,6 +515,24 @@ function renderHierarchy() {
     select.appendChild(name);
     select.onclick = () => store.select({ kind, id: object.id });
     row.appendChild(select);
+    if (['bone', 'mesh', 'control'].includes(kind)) {
+      const focus = document.createElement('button');
+      focus.className = 'treeUtility treeFocus';
+      focus.title = `Focus ${kind}`;
+      focus.setAttribute('aria-label', `Focus ${object.name}`);
+      focus.append(icon('fit'));
+      focus.onclick = () => focusEditorReference({ kind, id: object.id });
+      row.appendChild(focus);
+    }
+    if ('visible' in object && ['bone', 'mesh', 'control'].includes(kind)) {
+      const visible = document.createElement('button');
+      visible.className = 'treeUtility';
+      visible.title = object.visible ? `Hide ${kind}` : `Show ${kind}`;
+      visible.setAttribute('aria-label', visible.title);
+      visible.append(icon(object.visible ? 'eye' : 'eye-off'));
+      visible.onclick = () => rigPropertyMutation(kind, object, 'visible', `${object.visible ? 'Hide' : 'Show'} ${object.name}`, !object.visible);
+      row.appendChild(visible);
+    }
     hierarchy.appendChild(row);
   };
 
@@ -2076,10 +2162,8 @@ deleteNodeButton.onclick = () => store.removeSelection();
 
 // Timeline event handlers
 timelineToggle.onclick = () => {
-  const collapsed = timelinePanel.dataset.collapsed === 'true';
-  timelinePanel.dataset.collapsed = collapsed ? 'false' : 'true';
-  timelineToggle.setAttribute('aria-expanded', String(!collapsed));
-  timelineToggle.title = collapsed ? 'Collapse timeline' : 'Expand timeline';
+  workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'bottom', !workspaceLayout.bottomCollapsed, { width: window.innerWidth, height: window.innerHeight });
+  applyWorkspaceLayout();
 };
 
 timelineSelect.onchange = () => {
@@ -2299,49 +2383,104 @@ function setZoom(next, anchor = null) {
   updateZoomLabel();
 }
 
-function fitCanvas() {
-  zoom = renderer.resetView();
+function applyViewportState(next, status = null) {
+  const applied = renderer.setViewport(next);
+  zoom = applied.zoom;
   evaluateCurrentFrame();
   syncArtboardFrame();
   updateZoomLabel();
-  setStatus('Canvas fitted');
+  if (status) setStatus(status);
+  return applied;
+}
+
+function fitCanvas() {
+  return applyViewportState(fitArtboardViewport(store.document.artboard), 'Artboard fitted');
+}
+
+function focusEditorReference(ref, { select = true, padding = 54 } = {}) {
+  if (!ref?.kind || !ref?.id) return false;
+  if (!evaluatedScene) evaluateCurrentFrame();
+  const bounds = evaluatedRefBounds(evaluatedScene, ref);
+  if (!bounds) {
+    showToast(`Cannot locate ${ref.kind}:${ref.id}`, true);
+    return false;
+  }
+  if (select) store.select(ref);
+  const rect = stageViewport.getBoundingClientRect();
+  const next = fitBoundsViewport(bounds, store.document.artboard, {
+    width: stageViewport.clientWidth || rect.width,
+    height: stageViewport.clientHeight || rect.height,
+  }, { padding });
+  applyViewportState(next, `Focused ${ref.kind}`);
+  return true;
+}
+
+function fitSelection() {
+  if (!store.selectedRef) {
+    showToast('Select an object to fit', true);
+    return false;
+  }
+  return focusEditorReference(store.selectedRef, { select: false, padding: 44 });
 }
 
 $('zoomOut').onclick = () => setZoom(zoom / 1.2);
 $('zoomIn').onclick = () => setZoom(zoom * 1.2);
 $('zoomFit').onclick = fitCanvas;
+$('zoom100').onclick = () => applyViewportState({ ...renderer.getViewport(), zoom: 1 }, 'Canvas 100%');
+$('fitSelection').onclick = fitSelection;
+$('focusSelection').onclick = () => store.selectedRef ? focusEditorReference(store.selectedRef) : showToast('Select an object to focus', true);
 
 stageViewport.addEventListener('wheel', (event) => {
   event.preventDefault();
   if (event.ctrlKey || event.metaKey || event.altKey) {
     const anchor = renderer.clientPoint(event.clientX, event.clientY);
-    const factor = Math.exp(-event.deltaY * 0.002);
-    setZoom(zoom * factor, anchor);
+    setZoom(zoom * wheelZoomFactor(event.deltaY, event.deltaMode), anchor);
     setStatus(`Canvas zoom ${Math.round(zoom * 100)}%`);
     return;
   }
-  const horizontal = event.shiftKey ? event.deltaY + event.deltaX : event.deltaX;
-  const vertical = event.shiftKey ? 0 : event.deltaY;
+  const horizontal = normalizeWheelDelta(event.shiftKey ? event.deltaY + event.deltaX : event.deltaX, event.deltaMode) * 0.8;
+  const vertical = event.shiftKey ? 0 : normalizeWheelDelta(event.deltaY, event.deltaMode) * 0.8;
   const matrix = canvas.getScreenCTM();
-  const worldPerPixel = matrix ? 1 / matrix.a : store.document.artboard.width / Math.max(1, zoom * canvas.clientWidth);
+  const worldPerPixel = matrix ? 1 / Math.max(1e-9, Math.abs(matrix.a)) : store.document.artboard.width / Math.max(1, zoom * canvas.clientWidth);
   renderer.panBy(horizontal * worldPerPixel, vertical * worldPerPixel);
   syncArtboardFrame();
   setStatus(event.shiftKey ? 'Canvas panned horizontally' : 'Canvas panned');
 }, { passive: false });
 
 let panGesture = null;
+let spacePanHeld = false;
+let spacePanUsed = false;
+let suppressNextCanvasContextMenu = false;
 stageViewport.addEventListener('pointerdown', (event) => {
-  const shouldPan = currentTool === 'pan' || event.altKey || event.button === 1;
-  if (!shouldPan) return;
-  event.preventDefault();
+  const kind = navigationPanKind(event, { tool: currentTool, spaceHeld: spacePanHeld });
+  if (!kind) return;
+  if (kind === 'right') suppressNextCanvasContextMenu = false;
+  if (kind !== 'right') event.preventDefault();
   event.stopImmediatePropagation();
-  panGesture = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY };
+  panGesture = {
+    kind,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    moved: false,
+  };
   stageViewport.setPointerCapture?.(event.pointerId);
   stageViewport.classList.add('isPanning');
 }, true);
 
 stageViewport.addEventListener('pointermove', (event) => {
   if (!panGesture || event.pointerId !== panGesture.pointerId) return;
+  if (!panGesture.moved) {
+    panGesture.moved = panGestureMoved(
+      { x: panGesture.startX, y: panGesture.startY },
+      { x: event.clientX, y: event.clientY },
+    );
+  }
+  if (!panGesture.moved) return;
+  if (panGesture.kind === 'space') spacePanUsed = true;
+  if (panGesture.kind === 'right') event.preventDefault();
   const before = renderer.clientPoint(panGesture.clientX, panGesture.clientY);
   const after = renderer.clientPoint(event.clientX, event.clientY);
   renderer.panBy(before.x - after.x, before.y - after.y);
@@ -2352,16 +2491,76 @@ stageViewport.addEventListener('pointermove', (event) => {
 
 const finishPan = (event) => {
   if (!panGesture || event.pointerId !== panGesture.pointerId) return;
-  stageViewport.releasePointerCapture?.(event.pointerId);
+  const finished = panGesture;
   panGesture = null;
+  try { stageViewport.releasePointerCapture?.(event.pointerId); } catch {}
   stageViewport.classList.remove('isPanning');
+  if (shouldSuppressCanvasContextMenu(finished)) suppressNextCanvasContextMenu = true;
   syncArtboardFrame();
-  setStatus('Canvas panned');
+  if (finished.moved) setStatus('Canvas panned');
 };
 stageViewport.addEventListener('pointerup', finishPan);
 stageViewport.addEventListener('pointercancel', finishPan);
+stageViewport.addEventListener('lostpointercapture', finishPan);
+stageViewport.addEventListener('contextmenu', (event) => {
+  if (!suppressNextCanvasContextMenu) return;
+  event.preventDefault();
+  event.stopPropagation();
+  suppressNextCanvasContextMenu = false;
+});
 
 new ResizeObserver(() => syncArtboardFrame()).observe(stageViewport);
+
+function wireWorkspaceSplitter(element, panel) {
+  if (!element) return;
+  element.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const property = panel === 'left' ? 'leftWidth' : panel === 'right' ? 'rightWidth' : 'bottomHeight';
+    const startSize = workspaceLayout[property];
+    element.setPointerCapture?.(event.pointerId);
+    element.classList.add('isDragging');
+    const onMove = (nextEvent) => {
+      const delta = panel === 'left'
+        ? nextEvent.clientX - startX
+        : panel === 'right'
+          ? startX - nextEvent.clientX
+          : startY - nextEvent.clientY;
+      workspaceLayout = setWorkspacePanelSize(workspaceLayout, panel, startSize + delta, { width: window.innerWidth, height: window.innerHeight });
+      applyWorkspaceLayout(false);
+    };
+    const onEnd = (nextEvent) => {
+      element.removeEventListener('pointermove', onMove);
+      element.removeEventListener('pointerup', onEnd);
+      element.removeEventListener('pointercancel', onEnd);
+      element.classList.remove('isDragging');
+      try { element.releasePointerCapture?.(nextEvent.pointerId); } catch {}
+      applyWorkspaceLayout(true);
+    };
+    element.addEventListener('pointermove', onMove);
+    element.addEventListener('pointerup', onEnd);
+    element.addEventListener('pointercancel', onEnd);
+  });
+  element.addEventListener('dblclick', () => {
+    const property = panel === 'left' ? 'leftWidth' : panel === 'right' ? 'rightWidth' : 'bottomHeight';
+    workspaceLayout = setWorkspacePanelSize(workspaceLayout, panel, VEYRA_WORKSPACE_LAYOUT_DEFAULTS[property], { width: window.innerWidth, height: window.innerHeight });
+    applyWorkspaceLayout();
+  });
+}
+wireWorkspaceSplitter(leftSplitter, 'left');
+wireWorkspaceSplitter(rightSplitter, 'right');
+wireWorkspaceSplitter(timelineSplitter, 'bottom');
+hierarchyCollapse.onclick = () => {
+  workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'left', !workspaceLayout.leftCollapsed, { width: window.innerWidth, height: window.innerHeight });
+  applyWorkspaceLayout();
+};
+inspectorCollapse.onclick = () => {
+  workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'right', !workspaceLayout.rightCollapsed, { width: window.innerWidth, height: window.innerHeight });
+  applyWorkspaceLayout();
+};
+window.addEventListener('resize', () => applyWorkspaceLayout(false));
 
 // The three handlers below are built by createPreviewPointerHandlers so an
 // integration test can call the EXACT SAME functions directly (including
@@ -2378,6 +2577,7 @@ const previewPointerHandlers = createPreviewPointerHandlers({
   getViewCenter: () => renderer.viewCenter,
   getZoom: () => renderer.zoom,
   getArtboardSize: () => ({ width: store.document.artboard.width, height: store.document.artboard.height }),
+  isAuthoringEvent: (event) => event.target instanceof Element && Boolean(event.target.closest('.resizeHandle')),
   onNoHit: () => showToast('No interaction target under pointer', true),
 });
 
@@ -2439,9 +2639,14 @@ artboardFrame.addEventListener('pointerdown', (event) => {
 });
 
 const toggleInspectorButton = $('toggleInspector');
+const toggleHierarchyButton = $('toggleHierarchyPanel');
 toggleInspectorButton.onclick = () => {
-  const expanded = inspectorPanel.classList.toggle('isCollapsed') === false;
-  toggleInspectorButton.setAttribute('aria-expanded', String(expanded));
+  workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'right', !workspaceLayout.rightCollapsed, { width: window.innerWidth, height: window.innerHeight });
+  applyWorkspaceLayout();
+};
+toggleHierarchyButton.onclick = () => {
+  workspaceLayout = setWorkspacePanelCollapsed(workspaceLayout, 'left', !workspaceLayout.leftCollapsed, { width: window.innerWidth, height: window.innerHeight });
+  applyWorkspaceLayout();
 };
 
 window.addEventListener('keydown', (event) => {
@@ -2473,6 +2678,12 @@ window.addEventListener('keydown', (event) => {
   } else if (!editing && commandKey && key === 'y') {
     event.preventDefault();
     store.redo();
+  } else if (!editing && !commandKey && !event.altKey && key === 'f') {
+    event.preventDefault();
+    if (event.shiftKey) {
+      if (store.selectedRef) focusEditorReference(store.selectedRef);
+      else showToast('Select an object to focus', true);
+    } else fitSelection();
   } else if (!editing && !commandKey && !event.altKey && ['v', 'e', 'p', 'b', 'm', 'c', 'k', 'h'].includes(key)) {
     event.preventDefault();
     setTool({ v: 'select', e: 'vertex', p: 'pencil', b: 'bone', m: 'mesh', c: 'control', k: 'constraint', h: 'pan' }[key]);
@@ -2481,7 +2692,10 @@ window.addEventListener('keydown', (event) => {
     commitDraftPath();
   } else if (!editing && event.key === ' ') {
     event.preventDefault();
-    playAnimation();
+    if (!event.repeat) {
+      spacePanHeld = true;
+      spacePanUsed = false;
+    }
   } else if (!editing && (event.key === 'Delete' || event.key === 'Backspace')) {
     if (selectedKeyframe) {
       event.preventDefault();
@@ -2491,6 +2705,10 @@ window.addEventListener('keydown', (event) => {
       store.removeSelection();
     }
   } else if (!editing && event.key === 'Escape') {
+    if (renderer.cancelActiveGesture()) {
+      setStatus('Authoring gesture cancelled');
+      return;
+    }
     if (currentTool === 'pencil') {
       cancelDraftPath();
       setTool('select', false);
@@ -2504,6 +2722,14 @@ window.addEventListener('keydown', (event) => {
       store.select(null);
     }
   }
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.key !== ' ') return;
+  const wasHeld = spacePanHeld;
+  spacePanHeld = false;
+  if (wasHeld && !spacePanUsed && !panGesture) playAnimation();
+  spacePanUsed = false;
 });
 
 window.addEventListener('beforeunload', () => {
@@ -2535,6 +2761,11 @@ function dispatchCompatibilityCommand(action, args, command) {
 }
 
 globalThis.veyra = Object.freeze({
+  getViewportState: () => ({ ...renderer.getViewport(), layout: { ...workspaceLayout }, theme: document.documentElement.dataset.theme }),
+  setViewport: (viewport) => applyViewportState(viewport, 'Viewport updated'),
+  fitArtboard: () => fitCanvas(),
+  fitSelection: () => fitSelection(),
+  focusReference: (ref) => focusEditorReference(ref),
   getManifest: (options = {}) => controlPlane.getManifest(options),
   queryEntities: (query = {}, options = {}) => controlPlane.queryEntities(query, options),
   resolveSemantic: (intent, options = {}) => controlPlane.resolveSemantic(intent, options),

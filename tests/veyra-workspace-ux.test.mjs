@@ -1,8 +1,4 @@
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-TEST = ROOT / 'tests/veyra-workspace-ux.test.mjs'
-TEST.write_text(r'''import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { invertMatrix, multiplyMatrices, transformMatrix, transformPoint } from '../src/veyra/contracts.js';
 import { evaluateDocument } from '../src/veyra/evaluation.js';
@@ -196,4 +192,3 @@ assert.match(htmlSource, /id="fitSelection"/);
 assert.match(htmlSource, /id="focusSelection"/);
 
 console.log('veyra M5 workspace UX stabilization tests passed');
-''', encoding='utf-8')

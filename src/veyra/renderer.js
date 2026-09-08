@@ -7,8 +7,9 @@ import {
   transformAttribute,
 } from './geometry.js';
 import { referenceId } from './references.js';
-import { transformPoint } from './contracts.js';
+import { transformMatrix, transformPoint } from './contracts.js';
 import { createSvgViewBox, VEYRA_SVG_PRESERVE_ASPECT_RATIO } from './viewport.js';
+import { resizeNodeTransform } from './workspace.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -55,6 +56,7 @@ export class VeyraRenderer {
     this.viewCenter = null;
     this.viewDocumentId = null;
     this.draftPath = [];
+    this.activeDragCancel = null;
   }
 
   setTool(tool) {
@@ -102,6 +104,34 @@ export class VeyraRenderer {
     this.viewCenter.x += Number(x) || 0;
     this.viewCenter.y += Number(y) || 0;
     this.#applyViewBox();
+  }
+
+  getViewport() {
+    return {
+      zoom: this.zoom,
+      centerX: this.viewCenter?.x ?? this.scene?.artboard.width / 2 ?? 0,
+      centerY: this.viewCenter?.y ?? this.scene?.artboard.height / 2 ?? 0,
+    };
+  }
+
+  setViewport(viewport = {}) {
+    if (!this.scene) return this.getViewport();
+    const zoom = Math.min(8, Math.max(0.1, Number(viewport.zoom ?? this.zoom) || 1));
+    const centerX = Number(viewport.centerX ?? this.viewCenter?.x ?? this.scene.artboard.width / 2);
+    const centerY = Number(viewport.centerY ?? this.viewCenter?.y ?? this.scene.artboard.height / 2);
+    if (![zoom, centerX, centerY].every(Number.isFinite)) throw new TypeError('Viewport values must be finite.');
+    this.zoom = zoom;
+    this.viewCenter = { x: centerX, y: centerY };
+    this.#applyViewBox();
+    return this.getViewport();
+  }
+
+  cancelActiveGesture() {
+    if (!this.activeDragCancel) return false;
+    const cancel = this.activeDragCancel;
+    this.activeDragCancel = null;
+    cancel();
+    return true;
   }
 
   clientPoint(clientX, clientY) {
@@ -420,6 +450,26 @@ export class VeyraRenderer {
         hit.addEventListener('pointerdown', (event) => this.#startGroupDrag(event, node, group));
         group.appendChild(hit);
       }
+      if (node.type !== 'group' && !node.locked && this.tool === 'select') {
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerY = (bounds.minY + bounds.maxY) / 2;
+        const positions = {
+          nw: [bounds.minX, bounds.minY], n: [centerX, bounds.minY], ne: [bounds.maxX, bounds.minY],
+          e: [bounds.maxX, centerY], se: [bounds.maxX, bounds.maxY], s: [centerX, bounds.maxY],
+          sw: [bounds.minX, bounds.maxY], w: [bounds.minX, centerY],
+        };
+        for (const [handle, [cx, cy]] of Object.entries(positions)) {
+          const resizeHandle = svgElement('circle', {
+            class: `resizeHandle resizeHandle-${handle}`,
+            'data-resize-handle': handle,
+            cx, cy,
+            r: 5 / this.zoom,
+            'stroke-width': 1.5 / this.zoom,
+          });
+          resizeHandle.addEventListener('pointerdown', (event) => this.#startResizeDrag(event, node, handle, group, bounds));
+          group.appendChild(resizeHandle);
+        }
+      }
       group.appendChild(svgElement('circle', {
         class: 'originPoint',
         cx: 0,
@@ -498,27 +548,66 @@ export class VeyraRenderer {
   #captureDrag(event, move, end) {
     this.dragging = true;
     this.svg.setPointerCapture?.(event.pointerId);
-    const pointerMove = (nextEvent) => move(nextEvent);
-    const pointerEnd = (nextEvent) => {
+    let settled = false;
+    const cleanup = () => {
       this.svg.removeEventListener('pointermove', pointerMove);
       this.svg.removeEventListener('pointerup', pointerEnd);
       this.svg.removeEventListener('pointercancel', pointerCancel);
-      this.svg.releasePointerCapture?.(event.pointerId);
+      this.svg.removeEventListener('lostpointercapture', pointerCancel);
       this.dragging = false;
       this.dragKind = null;
+      this.activeDragCancel = null;
+    };
+    const pointerMove = (nextEvent) => move(nextEvent);
+    const pointerEnd = (nextEvent) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try { this.svg.releasePointerCapture?.(event.pointerId); } catch {}
       end(nextEvent);
     };
     const pointerCancel = () => {
-      this.svg.removeEventListener('pointermove', pointerMove);
-      this.svg.removeEventListener('pointerup', pointerEnd);
-      this.svg.removeEventListener('pointercancel', pointerCancel);
-      this.dragging = false;
-      this.dragKind = null;
+      if (settled) return;
+      settled = true;
+      cleanup();
       this.callbacks.cancel?.();
     };
+    this.activeDragCancel = pointerCancel;
     this.svg.addEventListener('pointermove', pointerMove);
     this.svg.addEventListener('pointerup', pointerEnd);
     this.svg.addEventListener('pointercancel', pointerCancel);
+    this.svg.addEventListener('lostpointercapture', pointerCancel);
+  }
+
+  #startResizeDrag(event, node, handle, group, bounds) {
+    if (event.button !== 0 || this.tool !== 'select' || node.locked) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const screenMatrix = group.getScreenCTM?.();
+    if (!screenMatrix) return;
+    const inverse = screenMatrix.inverse();
+    const localPoint = (pointerEvent) => {
+      const point = new DOMPoint(pointerEvent.clientX, pointerEvent.clientY).matrixTransform(inverse);
+      return { x: point.x, y: point.y };
+    };
+    const startNode = { ...node, transform: { ...node.transform } };
+    this.dragging = true;
+    this.dragKind = 'resize';
+    this.callbacks.select?.({ kind: 'node', id: node.id });
+    this.callbacks.begin?.(`Resize ${node.name}`);
+    this.#captureDrag(
+      event,
+      (nextEvent) => {
+        const nextTransform = resizeNodeTransform(startNode, bounds, handle, localPoint(nextEvent), {
+          aspectLock: nextEvent.shiftKey,
+          centerResize: nextEvent.altKey,
+        });
+        this.callbacks.resizeNode?.(node.id, nextTransform);
+        const liveGroup = this.svg.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
+        if (liveGroup) liveGroup.setAttribute('transform', transformAttribute(transformMatrix(nextTransform)));
+      },
+      () => this.callbacks.commit?.(),
+    );
   }
 
   #startNodeDrag(event, node, group) {

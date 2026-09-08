@@ -80,9 +80,11 @@ export function createPreviewPointerHandlers({
   getViewCenter,
   getZoom,
   getArtboardSize,
+  isAuthoringEvent = null,
   onNoHit = null,
 } = {}) {
   function previewPointerEligible(event) {
+    if (isAuthoringEvent?.(event)) return false;
     return isPreviewPointerEligible({
       event,
       tool: getTool ? getTool() : 'select',
