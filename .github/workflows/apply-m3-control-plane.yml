@@ -1,0 +1,42 @@
+name: Apply M3 Control Plane
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-m3-control-plane.yml'
+      - 'scripts/apply-m3-control-plane.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply M3 integration
+        run: python3 scripts/apply-m3-control-plane.py
+      - name: Syntax check
+        run: npm run check
+      - name: Test
+        run: npm test
+      - name: Commit clean verified M3
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-m3-control-plane.yml scripts/apply-m3-control-plane.py
+          git add -A
+          git diff --cached --check
+          git commit -m "Implement M3 unified control plane and dependency ownership graph [m3-applied]"
+          git push origin HEAD:main
