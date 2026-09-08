@@ -6,6 +6,28 @@ Agents may complete every task inside this milestone, but must not start work ou
 
 When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill the handoff, commit, and stop.
 
+## Progress snapshot
+
+> These percentages are weighted engineering estimates, not line-count completion. They measure verified capability against the current `plan.md` target and should be refreshed whenever a milestone is verified, corrected, or advanced.
+
+| Area | Current estimate | Notes |
+| --- | ---: | --- |
+| AI-native identity / semantics / control architecture | **~92%** | Stable typed identity, universal semantics, name-independent resolver, canonical control plane, dependency/ownership graph, preview/dispatch/verify are substantially in place. |
+| Core editor / engine foundation | **~78–82%** | Strong model/store/history/timeline/rig/interaction foundation; several advanced authoring/runtime families are still missing. |
+| Modern Rive editor/runtime feature parity | **~40–44%** | Current vector/animation/rig/state-machine/interaction core exists, but most large modern Rive feature families remain. |
+| Full Veyra target: Rive parity + every feature AI-readable/controlable | **~39–42%** | Architecture is ahead of raw feature breadth. |
+| Remaining full-target work | **~58–61%** | Primarily Components/artboards, Data Binding/View Models, full state machines/listeners/events, paint/effects, text/media, layout, advanced rigging/animation, scripting/WGSL, runtimes/SDKs/export, collaboration and MCP/agent layer. |
+
+### Roadmap position
+
+- `plan.md` **M0 — AI Identity & Control Foundation:** **VERIFIED / essentially complete**.
+- `plan.md` **M1 — Close current interaction loop:** **~95% complete**, currently blocked only by the focused M4 correction pass below.
+- `plan.md` **M2–M14:** not yet completed as primary roadmap milestones; some prerequisite capabilities already exist from the current engine.
+
+### Progress maintenance rule
+
+Every future milestone verification or milestone advance must update this **Progress snapshot** in the same `milestone.md` commit. Do not leave stale percentages after a milestone is accepted or materially re-scoped.
+
 ## Mandatory agent rules
 
 1. Preserve the validation boundary and all accepted M0–M4 architecture.
