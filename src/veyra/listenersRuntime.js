@@ -17,7 +17,9 @@ function targetId(listener) {
 }
 
 function listenerRevision(document) {
-  return (document?.listeners || []).map((listener) => [
+  // Revision metadata is opaque and never reparsed into identity. JSON tuples
+  // avoid delimiter collisions for otherwise-valid punctuation in stable IDs.
+  return JSON.stringify((document?.listeners || []).map((listener) => [
     listener.id,
     targetId(listener),
     listener.event,
@@ -25,7 +27,7 @@ function listenerRevision(document) {
     referenceId(listener.timeline, 'timeline') || '',
     referenceId(listener.machine, 'stateMachine') || '',
     referenceId(listener.input, 'machineInput') || '',
-  ].join(':')).join('|');
+  ]));
 }
 
 function intentFor(listener) {
@@ -53,6 +55,26 @@ function intentsFor(document, event, nodeId) {
     .map((listener) => ({ listenerId: listener.id, intent: intentFor(listener) }));
 }
 
+function lifecycleTargetId(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  return referenceId(value.target ?? value, 'node') || null;
+}
+
+function lifecycleTargetRef(hit) {
+  return hit?.id ? { kind: 'node', id: hit.id } : null;
+}
+
+function hoverState(hit, revision, sceneRevision) {
+  if (!hit?.id) return null;
+  return {
+    kind: 'node',
+    id: hit.id,
+    listenerRevision: revision,
+    sceneRevision,
+  };
+}
+
 const RESOLVE_LISTENER_OPTION_KEYS = Object.freeze([
   'event', 'scene', 'document', 'viewport', 'hoverKey', 'sceneRevision',
 ]);
@@ -71,7 +93,8 @@ function assertKnownOptions(options, functionName, acceptedKeys) {
 /**
  * Resolve one plain event into pure runtime intents and hover transitions.
  * Hover enter/leave is defined by top-hit changes observed on pointermove.
- * Stateful click qualification is added by createListenerResolver.
+ * Lifecycle identity is a structured stable node ref plus revision metadata;
+ * node IDs are never split or parsed by punctuation delimiters.
  */
 export function resolveListenerIntents(options = {}) {
   assertKnownOptions(options, 'resolveListenerIntents', RESOLVE_LISTENER_OPTION_KEYS);
@@ -83,8 +106,8 @@ export function resolveListenerIntents(options = {}) {
   const hitTestable = type.startsWith('pointer') || type === 'click';
   const hit = hitTestable ? hitTestPoint(pointOf(event), scene || document, viewport) : null;
   const revision = listenerRevision(document);
-  const nextHoverKey = hit ? `${hit.id}:${revision}:${sceneRevision}` : null;
-  const previousId = typeof hoverKey === 'string' ? hoverKey.split(':')[0] : (hoverKey?.id || null);
+  const nextHoverKey = hoverState(hit, revision, sceneRevision);
+  const previousId = lifecycleTargetId(hoverKey);
   const nextId = hit?.id || null;
   const transitions = [];
   if (type === 'pointermove' && previousId !== nextId) {
@@ -108,8 +131,8 @@ export function resolveListenerIntents(options = {}) {
  *
  * Veyra click rule: one primary pointerdown records the evaluated top target;
  * pointer movement may enter/leave other targets, but click fires only when the
- * matching pointerup's evaluated top target is the same stable node id. The
- * pointerup listener intents are emitted first, then click intents.
+ * matching pointerup's evaluated top target is the same full stable node id.
+ * The pointerup listener intents are emitted first, then click intents.
  */
 export function createListenerResolver(options = {}) {
   assertKnownOptions(options, 'createListenerResolver', RESOLVER_OPTION_KEYS);
@@ -139,16 +162,18 @@ export function createListenerResolver(options = {}) {
       const type = String(event?.type || event?.event || '');
       const pointerId = pointerIdOf(event);
       if (type === 'pointerdown') {
-        downTargets.set(pointerId, result.hit?.id || null);
+        downTargets.set(pointerId, lifecycleTargetRef(result.hit));
         return { ...result, clickQualified: false };
       }
       if (type === 'pointerup') {
         const downTarget = downTargets.get(pointerId) || null;
         downTargets.delete(pointerId);
-        const upTarget = result.hit?.id || null;
-        const clickQualified = Boolean(downTarget && downTarget === upTarget);
+        const upTarget = lifecycleTargetRef(result.hit);
+        const downId = lifecycleTargetId(downTarget);
+        const upId = lifecycleTargetId(upTarget);
+        const clickQualified = Boolean(downId && downId === upId);
         if (clickQualified) {
-          result.intents.push(...intentsFor(currentDocument, 'click', upTarget).map((item) => item.intent));
+          result.intents.push(...intentsFor(currentDocument, 'click', upId).map((item) => item.intent));
         }
         return { ...result, clickQualified };
       }
