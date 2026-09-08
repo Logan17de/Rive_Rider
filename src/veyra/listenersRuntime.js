@@ -2,7 +2,14 @@ import { hitTestPoint } from './hitTest.js';
 import { referenceId } from './references.js';
 
 function pointOf(event) {
-  return { x: Number(event?.x ?? event?.clientX ?? event?.offsetX ?? 0), y: Number(event?.y ?? event?.clientY ?? event?.offsetY ?? 0) };
+  return {
+    x: Number(event?.x ?? event?.clientX ?? event?.offsetX ?? 0),
+    y: Number(event?.y ?? event?.clientY ?? event?.offsetY ?? 0),
+  };
+}
+
+function pointerIdOf(event) {
+  return String(event?.pointerId ?? 'primary');
 }
 
 function targetId(listener) {
@@ -10,14 +17,40 @@ function targetId(listener) {
 }
 
 function listenerRevision(document) {
-  return (document?.listeners || []).map((listener) => `${listener.id}:${targetId(listener)}:${listener.event}:${listener.action}`).join('|');
+  return (document?.listeners || []).map((listener) => [
+    listener.id,
+    targetId(listener),
+    listener.event,
+    listener.action,
+    referenceId(listener.timeline, 'timeline') || '',
+    referenceId(listener.machine, 'stateMachine') || '',
+    referenceId(listener.input, 'machineInput') || '',
+  ].join(':')).join('|');
 }
 
 function intentFor(listener) {
   if (listener.action === 'setInput' || listener.action === 'fire') {
-    return { kind: 'runtime', op: listener.action, machineId: listener.machine, inputId: referenceId(listener.input, 'machineInput'), ...(listener.value !== undefined ? { value: listener.value } : {}) };
+    return {
+      kind: 'runtime',
+      op: listener.action,
+      machineId: referenceId(listener.machine, 'stateMachine'),
+      inputId: referenceId(listener.input, 'machineInput'),
+      ...(listener.value !== undefined ? { value: listener.value } : {}),
+    };
   }
-  return { kind: 'transport', op: listener.action, timelineId: referenceId(listener.timeline, 'timeline'), ...(listener.value !== undefined ? { value: listener.value } : {}) };
+  return {
+    kind: 'transport',
+    op: listener.action,
+    timelineId: referenceId(listener.timeline, 'timeline'),
+    ...(listener.value !== undefined ? { value: listener.value } : {}),
+  };
+}
+
+function intentsFor(document, event, nodeId) {
+  if (!nodeId) return [];
+  return (document.listeners || [])
+    .filter((listener) => listener.event === event && targetId(listener) === nodeId)
+    .map((listener) => ({ listenerId: listener.id, intent: intentFor(listener) }));
 }
 
 const RESOLVE_LISTENER_OPTION_KEYS = Object.freeze([
@@ -37,7 +70,8 @@ function assertKnownOptions(options, functionName, acceptedKeys) {
 
 /**
  * Resolve one plain event into pure runtime intents and hover transitions.
- * Accepted options: event, scene, document, viewport, hoverKey, sceneRevision.
+ * Hover enter/leave is defined by top-hit changes observed on pointermove.
+ * Stateful click qualification is added by createListenerResolver.
  */
 export function resolveListenerIntents(options = {}) {
   assertKnownOptions(options, 'resolveListenerIntents', RESOLVE_LISTENER_OPTION_KEYS);
@@ -46,39 +80,36 @@ export function resolveListenerIntents(options = {}) {
   } = options;
   if (!event || !document) return { hoverKey: null, listenerRevision: listenerRevision(document), transitions: [], intents: [] };
   const type = String(event.type || event.event || '');
-  const pointerEvent = type.startsWith('pointer');
-  const hit = pointerEvent ? hitTestPoint(pointOf(event), scene || document, viewport) : null;
+  const hitTestable = type.startsWith('pointer') || type === 'click';
+  const hit = hitTestable ? hitTestPoint(pointOf(event), scene || document, viewport) : null;
   const revision = listenerRevision(document);
   const nextHoverKey = hit ? `${hit.id}:${revision}:${sceneRevision}` : null;
   const previousId = typeof hoverKey === 'string' ? hoverKey.split(':')[0] : (hoverKey?.id || null);
   const nextId = hit?.id || null;
   const transitions = [];
-  if (pointerEvent && previousId !== nextId) {
+  if (type === 'pointermove' && previousId !== nextId) {
     if (previousId) {
-      for (const listener of document.listeners || []) {
-        if (listener.event !== 'pointerleave' || targetId(listener) !== previousId) continue;
-        transitions.push({ phase: 'leave', listenerId: listener.id, intent: intentFor(listener) });
+      for (const { listenerId, intent } of intentsFor(document, 'pointerleave', previousId)) {
+        transitions.push({ phase: 'leave', listenerId, intent });
       }
     }
     if (nextId) {
-      for (const listener of document.listeners || []) {
-        if (listener.event !== 'pointerenter' || targetId(listener) !== nextId) continue;
-        transitions.push({ phase: 'enter', listenerId: listener.id, intent: intentFor(listener) });
+      for (const { listenerId, intent } of intentsFor(document, 'pointerenter', nextId)) {
+        transitions.push({ phase: 'enter', listenerId, intent });
       }
     }
   }
-  const intents = [];
-  if (hit) {
-    for (const listener of document.listeners || []) {
-      if (listener.event === type && targetId(listener) === hit.id) intents.push(intentFor(listener));
-    }
-  }
+  const intents = intentsFor(document, type, nextId).map((item) => item.intent);
   return { hoverKey: nextHoverKey, listenerRevision: revision, transitions, intents, hit };
 }
 
 /**
- * Create a deterministic resolver retaining only the current hover key.
- * Accepted options: document, viewport.
+ * Deterministic pointer lifecycle resolver.
+ *
+ * Veyra click rule: one primary pointerdown records the evaluated top target;
+ * pointer movement may enter/leave other targets, but click fires only when the
+ * matching pointerup's evaluated top target is the same stable node id. The
+ * pointerup listener intents are emitted first, then click intents.
  */
 export function createListenerResolver(options = {}) {
   assertKnownOptions(options, 'createListenerResolver', RESOLVER_OPTION_KEYS);
@@ -87,6 +118,7 @@ export function createListenerResolver(options = {}) {
   let hoverKey = null;
   let sceneRevision = 0;
   let currentViewport = viewport;
+  const downTargets = new Map();
   return {
     setViewport(nextViewport = {}) {
       currentViewport = nextViewport;
@@ -96,6 +128,7 @@ export function createListenerResolver(options = {}) {
       if (nextDocument !== currentDocument) {
         currentDocument = nextDocument;
         hoverKey = null;
+        downTargets.clear();
       }
       return currentDocument;
     },
@@ -103,11 +136,29 @@ export function createListenerResolver(options = {}) {
       sceneRevision = revision;
       const result = resolveListenerIntents({ event, scene, document: currentDocument, viewport: currentViewport, hoverKey, sceneRevision });
       hoverKey = result.hoverKey;
-      return result;
+      const type = String(event?.type || event?.event || '');
+      const pointerId = pointerIdOf(event);
+      if (type === 'pointerdown') {
+        downTargets.set(pointerId, result.hit?.id || null);
+        return { ...result, clickQualified: false };
+      }
+      if (type === 'pointerup') {
+        const downTarget = downTargets.get(pointerId) || null;
+        downTargets.delete(pointerId);
+        const upTarget = result.hit?.id || null;
+        const clickQualified = Boolean(downTarget && downTarget === upTarget);
+        if (clickQualified) {
+          result.intents.push(...intentsFor(currentDocument, 'click', upTarget).map((item) => item.intent));
+        }
+        return { ...result, clickQualified };
+      }
+      if (type === 'pointercancel') downTargets.delete(pointerId);
+      return { ...result, clickQualified: false };
     },
     get hoverKey() { return hoverKey; },
+    get downTargets() { return new Map(downTargets); },
     setSceneRevision(revision) { sceneRevision = revision; return sceneRevision; },
-    reset() { hoverKey = null; },
+    reset() { hoverKey = null; downTargets.clear(); },
   };
 }
 
@@ -115,6 +166,5 @@ export function runtimeIntentForListener(listener) {
   return intentFor(listener);
 }
 
-// Compatibility aliases keep the pure seam discoverable to existing callers.
 export const resolvePointerEvent = resolveListenerIntents;
 export const resolveListenerEvent = resolveListenerIntents;
