@@ -1,46 +1,79 @@
 /**
  * DOM-free interaction transport boundary.
  *
- * TransportPort is the host-owned, synchronous playback surface consumed by
- * the interaction dispatcher:
- *
- *   {
- *     hasTimeline(timelineId) -> boolean,
- *     setActiveTimeline(timelineId) -> void,
- *     play({ restart }) -> void,
- *     stop() -> void,
- *     seek(frame) -> void,
- *   }
- *
- * createInteractionDispatcher({ transport, onDiagnostic }) returns
- * { dispatch(intent) }, where dispatch returns { transportApplied: boolean }.
- * transportApplied is true only for a transport intent whose timeline exists;
- * it lets the host preserve its redraw boundary without duplicating intent
- * semantics. The dispatcher owns intent semantics; the host owns playback
- * implementation, redraw, and any state-machine execution.
+ * Timeline intents use `transport`; machine setInput/fire intents use the
+ * persistent `runtime` bridge. Dispatch is synchronous and returns structured
+ * diagnostics so the shell never has to guess whether an intent executed.
  */
-export function createInteractionDispatcher({ transport, onDiagnostic = () => {} } = {}) {
+export function createInteractionDispatcher({ transport, runtime = null, onDiagnostic = () => {} } = {}) {
+  function report(result) {
+    if (!result?.ok && result?.message) onDiagnostic(result.message, result);
+    return result;
+  }
+
   function dispatch(intent) {
-    if (!intent) return { transportApplied: false };
+    if (!intent) return { ok: false, transportApplied: false, runtimeApplied: false, code: 'missing-intent' };
 
     if (intent.kind === 'transport') {
       const timelineId = intent.timelineId;
-      if (!transport.hasTimeline(timelineId)) {
-        onDiagnostic(`Interaction target timeline not found: ${timelineId}`);
-        return { transportApplied: false };
+      if (!transport?.hasTimeline?.(timelineId)) {
+        return report({
+          ok: false,
+          transportApplied: false,
+          runtimeApplied: false,
+          code: 'missing-timeline',
+          message: `Interaction target timeline not found: ${timelineId}`,
+          timelineId,
+        });
       }
       transport.setActiveTimeline(timelineId);
       if (intent.op === 'play') transport.play({ restart: true });
       else if (intent.op === 'stop') transport.stop();
       else if (intent.op === 'seek' && Number.isFinite(intent.value)) transport.seek(intent.value);
-      else if (intent.op === 'seek') onDiagnostic('Interaction seek requires a finite frame value');
-      return { transportApplied: true };
+      else if (intent.op === 'seek') {
+        return report({
+          ok: false,
+          transportApplied: false,
+          runtimeApplied: false,
+          code: 'invalid-seek',
+          message: 'Interaction seek requires a finite frame value',
+          timelineId,
+        });
+      } else {
+        return report({
+          ok: false,
+          transportApplied: false,
+          runtimeApplied: false,
+          code: 'unsupported-transport-op',
+          message: `Unsupported interaction transport operation: ${intent.op}`,
+          timelineId,
+        });
+      }
+      return { ok: true, transportApplied: true, runtimeApplied: false, timelineId, op: intent.op };
     }
 
     if (intent.kind === 'runtime') {
-      onDiagnostic(`Interaction runtime intent requires a state-machine bridge: ${intent.op}`);
+      if (!runtime?.dispatch) {
+        return report({
+          ok: false,
+          transportApplied: false,
+          runtimeApplied: false,
+          code: 'missing-runtime-bridge',
+          message: `Interaction runtime intent requires a state-machine bridge: ${intent.op}`,
+        });
+      }
+      const result = runtime.dispatch(intent);
+      if (!result?.ok) return report({ transportApplied: false, runtimeApplied: false, ...result });
+      return { transportApplied: false, runtimeApplied: true, ...result };
     }
-    return { transportApplied: false };
+
+    return report({
+      ok: false,
+      transportApplied: false,
+      runtimeApplied: false,
+      code: 'unsupported-intent-kind',
+      message: `Unsupported interaction intent kind: ${intent.kind}`,
+    });
   }
 
   return { dispatch };
