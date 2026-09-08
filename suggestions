@@ -1,23 +1,143 @@
-Verya milestone suggestions
-============================
+Veyra milestone suggestions
+===========================
 
 Current milestone
 -----------------
-- Complete and independently verify M0.1: stable typed identity for every current first-class persistent entity.
-- Treat keyframe IDs as persistent identity: create, move, rename, normalize legacy documents, and round-trip without changing IDs.
-- Keep human display names separate from references; reject duplicate IDs and resolve manifest references without name lookup.
-- Preserve T4b’s paused work in its stash until M0.1 is accepted and explicitly reauthorized.
+- Finish and independently verify the focused M4 interaction-loop correction pass in `milestone.md`.
+- Do not expand M4 with unrelated editor UX work while its hit-test/pointer correctness contract is still under verification.
 
-Next suggestions
-----------------
-1. After M0.1 acceptance, independently verify and reauthorize the paused headless Node API/CLI work before committing it.
-2. Complete Bézier/path hit-testing as a separate bounded milestone: implicit fill closure, transformed non-scaling strokes, deterministic flattening, and near-boundary tests.
-3. Add path-topology commands (`addVertex`/`removeVertex`) and a mechanical editor-to-command parity audit so every human authoring operation is AI-addressable.
-4. Add pointer-events semantics and the remaining opacity/ancestor regressions without coupling opacity to hit participation.
-5. Extend state-machine authoring/runtime and editor parity only after the identity, headless, and geometry contracts are independently verified.
+High-priority next milestone candidate — Workspace UX Stabilization
+------------------------------------------------------------------
+The editor is now technically capable enough that workspace usability is becoming the bottleneck. Before expanding into large new Rive feature families, stabilize the everyday authoring experience.
+
+### 1. Canvas navigation / graph feel
+- Rework zoom so it is smooth, predictable, and anchored to the pointer/cursor position where appropriate.
+- Define min/max zoom and make repeated wheel/trackpad zoom steps feel consistent instead of jumping too quickly.
+- Tune wheel/trackpad scroll and pan sensitivity independently from zoom sensitivity.
+- Support natural middle-mouse pan and Space+drag pan without fighting selection/authoring tools.
+- Preserve the current viewport center correctly through zoom, window resize, panel resize, and artboard resize.
+- Add `Fit Artboard`, `Fit Selection`, `100%`, and `Focus Selection` commands.
+- Prevent the user from effectively losing the scene after zooming/panning far away.
+- Make navigation behavior deterministic enough to test without depending on browser accident.
+
+### 2. Object focus / locate controls
+Every persistent drawable hierarchy item should expose a focus/locate affordance.
+
+Required behavior:
+- hierarchy row has a focus/target icon;
+- clicking it selects the object and moves the viewport to its evaluated bounds;
+- choose a sensible zoom that keeps the whole object visible with padding;
+- groups focus their evaluated child bounds rather than an invented rectangle;
+- repeated focus is deterministic;
+- focus works after arbitrary zoom/pan and after human renames;
+- stable refs/IDs drive lookup, never the display name;
+- expose the underlying focus operation cleanly enough that AI/runtime tools can request the same viewport action later.
+
+### 3. Hierarchy visibility controls
+- Keep/add an eye icon on every supported hierarchy row.
+- Eye icon must clearly reflect visible/hidden state.
+- Clicking it changes the canonical `visible` property through the normal mutation/command path where applicable.
+- Parent visibility and child visibility remain distinct and understandable.
+- Hidden rows stay discoverable in the hierarchy.
+- Do not conflate visibility with interaction `pointerEvents` or opacity.
+
+### 4. Resizable / collapsible workspace panels
+The left hierarchy, right inspector, and bottom timeline must no longer have fixed-only dimensions.
+
+Required behavior:
+- draggable splitter between hierarchy and canvas;
+- draggable splitter between canvas and inspector;
+- draggable splitter above the timeline/bottom panel;
+- sensible minimum/maximum sizes;
+- collapse/expand buttons for left, right, and bottom panels;
+- double-click or dedicated action may restore a useful default size;
+- persist panel sizes/collapsed state locally between reloads;
+- canvas/viewBox recalculates immediately after splitter changes;
+- no lost object, broken hit-test mapping, or timeline clipping after panel resize;
+- responsive fallback for small screens remains usable.
+
+### 5. Object transform/resize authoring
+- Audit current drag/move behavior for pointer-offset jumps and transform-space mistakes.
+- Add dependable on-canvas resize handles for supported node geometry.
+- Support corner and edge resize where meaningful.
+- Modifier behavior should be explicit and consistent (for example aspect lock / center resize / snapping where later supported).
+- Rotation, parent transforms, non-uniform scales, and pivots must not make resizing jump or invert unexpectedly.
+- Group resize behavior must be explicitly defined rather than guessed.
+- Authoring drag/resize transactions must use the existing Store begin/mutate/commit/cancel boundary and stay undoable.
+- Pointer interaction preview/listeners must remain isolated from authoring gestures.
+
+### 6. Theme system overhaul
+The current theme selector changes only part of the palette and the magenta/pink default is visually inconsistent.
+
+Replace ad-hoc color overrides with a complete semantic-token theme system covering the whole application:
+- app/background;
+- top bar;
+- panels;
+- canvas workspace;
+- artboard frame;
+- hierarchy rows;
+- inspector;
+- timeline;
+- borders/dividers;
+- buttons/tool states;
+- text/muted text;
+- selection;
+- focus;
+- controls/handles;
+- warnings/errors/success;
+- overlays/tooltips/modals if present.
+
+Requirements:
+- selecting a theme changes the complete application, not only internal accents;
+- no hard-coded magenta/pink should remain outside the theme token definitions unless semantically intentional;
+- provide a coherent neutral/dark default rather than the current mismatched pink-heavy palette;
+- each theme must maintain readable contrast and distinguish selected/hover/focus states;
+- preserve the selected theme locally;
+- theme switching must not alter document content or exported artwork colors.
+
+Suggested initial themes:
+- Neutral Dark (recommended default)
+- Graphite / Blue
+- Deep Teal
+- Warm Dark
+- Light Neutral
+
+### 7. Workspace visual cleanup
+- Reduce visual noise and inconsistent spacing.
+- Normalize icon sizes, button heights, panel headers, borders, and radii.
+- Improve selected/hover/focus hierarchy states.
+- Make canvas the visual center of the editor instead of the surrounding chrome competing with it.
+- Keep color reserved for meaningful state/action instead of tinting every surface.
+- Audit graph/timeline readability at different panel sizes and zoom levels.
+
+### 8. UX regression suite
+Add deterministic tests where practical for:
+1. zoom anchored around cursor;
+2. zoom/pan never produces NaN/invalid viewBox values;
+3. `Fit Artboard` returns the full artboard to view;
+4. focus-object finds the correct stable ref after extreme pan/zoom;
+5. focus-object remains correct after rename/reorder;
+6. left/right/bottom panel resize clamps to valid ranges;
+7. panel collapse/expand restores previous size;
+8. viewport/hit-test mapping remains correct after panel resize;
+9. hierarchy eye control changes only visibility;
+10. hidden object can still be focused/located from hierarchy (while remaining hidden unless user unhides it);
+11. drag/resize produces one undoable authored transaction;
+12. theme switch updates all semantic UI tokens but does not mutate the Veyra document;
+13. all existing M0–M4 architecture/interaction tests remain green.
+
+### Acceptance gate
+Do not call this milestone complete until the editor can be used for an extended authoring session without fighting zoom, pan, panel sizing, object location, resizing, or theme inconsistencies.
+
+Other queued work
+-----------------
+1. Add path-topology commands (`addVertex` / `removeVertex`) plus a mechanical UI-to-command parity audit.
+2. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
+3. Continue the master `plan.md` feature-family order after UX stabilization: multi-artboards/components, then View Models/Data Binding, then full layered state machines and later parity families.
 
 Guardrails
 ----------
-- Keep `milestone.md` as the authoritative one-TODO execution queue.
-- Do not put future TODOs into `milestone.md`; these are suggestions only.
-- Preserve stable IDs and human names as separate contracts.
+- `milestone.md` remains the only active implementation milestone.
+- Future work stays here until the current milestone is independently accepted.
+- Stable IDs and human display names remain separate contracts.
+- UI convenience must not introduce a second mutation model or bypass the canonical control plane/Store validation boundary.
