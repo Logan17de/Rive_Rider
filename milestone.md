@@ -21,7 +21,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 ### Roadmap position
 
 - `plan.md` **M0 — AI Identity & Control Foundation:** **VERIFIED / essentially complete**.
-- `plan.md` **M1 — Close current interaction loop:** **~95% complete**, currently blocked only by the focused M4 correction pass below.
+- `plan.md` **M1 — Close current interaction loop:** **implementation complete; awaiting independent verification** after the focused M4 correctness pass below.
 - `plan.md` **M2–M14:** not yet completed as primary roadmap milestones; some prerequisite capabilities already exist from the current engine.
 
 ### Progress maintenance rule
@@ -45,7 +45,7 @@ Every future milestone verification or milestone advance must update this **Prog
 # MILESTONE M4 — Close the Current Interaction Loop — CORRECTION PASS
 
 **Roadmap mapping:** `plan.md` M1 — Close current interaction loop  
-**Status:** `CORRECTIONS REQUIRED`
+**Status:** `AWAITING VERIFICATION`
 
 ## Verification result
 
@@ -62,9 +62,9 @@ The main M4 implementation is accepted in principle:
 - adaptive cubic-path flattening, implicit fill closure, and non-scaling stroke testing exist;
 - pointer -> listener -> machine -> evaluated animation is covered end to end;
 - minimal listener UI authoring exists;
-- latest `main` Tests workflow is green.
+- latest pre-correction `main` Tests workflow was green.
 
-Do **not** rebuild those systems. Fix only the correctness gaps below.
+The focused correctness gaps below are now implemented and are awaiting independent verification.
 
 ---
 
@@ -72,46 +72,36 @@ Do **not** rebuild those systems. Fix only the correctness gaps below.
 
 ### Problem
 
-`hitTestPoint()` currently converts world points to screen points approximately as:
+`hitTestPoint()` previously converted world points to screen points approximately as:
 
 ```js
 screenX = (worldX - centerX) * zoom + viewport.width / 2
 screenY = (worldY - centerY) * zoom + viewport.height / 2
 ```
 
-That only matches the renderer when the CSS viewport dimensions happen to correspond 1:1 with the artboard/viewBox scale.
+That only matched the renderer when CSS viewport dimensions happened to correspond 1:1 with the artboard/viewBox scale.
 
-The real editor SVG fills the available stage (`width: 100%; height: 100%`) and the renderer changes its `viewBox`. SVG's preserve-aspect-ratio mapping can therefore introduce a uniform scale and letterbox offsets whenever the canvas aspect ratio differs from the viewBox/artboard aspect ratio.
+### Correction implemented
 
-Result: the rendered object and the runtime hit target can disagree in the actual editor even though tests using a 960×640 viewport against a 960×640 artboard pass.
+Renderer and hit testing now share the same canonical SVG viewport contract in `src/veyra/viewport.js`:
 
-### Required behavior
+- `createSvgViewBox()` defines the renderer pan/zoom viewBox;
+- `createSvgViewBoxScreenTransform()` defines the DOM-free world→screen affine transform;
+- both explicitly use `preserveAspectRatio="xMidYMid meet"`;
+- centered pillarbox/letterbox offsets are part of the transform;
+- hit testing composes this transform with each evaluated node world matrix;
+- non-scaling stroke distances remain measured in final CSS screen pixels.
 
-Use one renderer-consistent mapping contract.
+The SVG renderer itself now consumes `createSvgViewBox()` and explicitly sets the same preserve-aspect-ratio contract, removing duplicated renderer/hit-test viewport math.
 
-Acceptable directions include:
+### Tests added
 
-- a DOM-free equivalent of the SVG viewBox + preserveAspectRatio transform passed into `hitTestPoint()`; or
-- an explicit world-to-screen matrix produced by the host/renderer and consumed by the DOM-free hit tester.
-
-Requirements:
-
-- exact same world->screen mapping for rendering and runtime hits;
-- correct centered letterboxing/pillarboxing behavior;
-- pan/view-center and zoom remain correct;
-- transformed paths/polygons/stars/rectangles/ellipses remain correct;
-- non-scaling stroke distances remain measured in final screen pixels;
-- DOM-free tests can construct the mapping deterministically without browser layout.
-
-### Mandatory tests
-
-1. artboard and viewport with identical aspect ratio;
-2. wider viewport than artboard;
-3. taller viewport than artboard;
-4. non-1 zoom plus non-default view center;
-5. a point at the visually rendered center hits in all cases;
-6. a point in letterbox/pillarbox space does not become a false geometry hit;
-7. transformed path/stroke hit boundary still matches after aspect-ratio mapping.
+- identical artboard/viewport aspect ratio;
+- wider viewport than artboard;
+- taller viewport than artboard;
+- letterbox/pillarbox miss regions;
+- non-1 zoom plus non-default view center;
+- transformed path/non-scaling-stroke boundary under aspect-ratio mapping.
 
 ---
 
@@ -119,42 +109,27 @@ Requirements:
 
 ### Problem
 
-The renderer draws current rectangles/ellipses using SVG geometry, but `hitTest.js` currently approximates them with fixed polygon counts:
+Ellipse and rounded-rectangle hit geometry previously used fixed polygon counts, so approximation error grew with object size, transform scale and editor zoom.
 
-- ellipse: 72 segments;
-- rounded rectangle: 8 segments per quarter corner.
+### Correction implemented
 
-Those counts do not depend on radius, transform scale, or editor zoom. At large object sizes / zoom, the screen-space error grows well beyond `VEYRA_HIT_TEST_TOLERANCE_PX = 0.35`.
+- ellipse fill containment is now analytical in exact local SVG geometry after inverse screen/world transform;
+- rounded-rectangle fill containment is now analytical in exact local SVG geometry after inverse screen/world transform;
+- curved stroke centerlines use adaptive screen-space tessellation instead of fixed segment counts;
+- tessellation count is derived from a conservative second-derivative interpolation-error bound in final screen pixels;
+- public hit tolerance remains `VEYRA_HIT_TEST_TOLERANCE_PX = 0.35`;
+- curve tessellation consumes only `0.0875px` of that budget (`VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX`), with the remaining allowance reserved for stroke hit tolerance;
+- rounded-corner arc endpoints are explicit so straight tangents and curved segments remain independently represented;
+- rotation, non-uniform scale, parent/evaluated transforms and zoom are handled through the composed affine matrix.
 
-So M4 currently claims exact evaluated rectangle/ellipse hit behavior while near curved boundaries can produce false negatives relative to the rendered SVG.
+### Tests added
 
-### Required behavior
-
-Use renderer-equivalent math or adaptive screen-space approximation whose maximum error is bounded by the documented tolerance.
-
-Preferred where practical:
-
-- analytical ellipse containment/distance in an appropriate coordinate space;
-- analytical rounded-rectangle containment/distance;
-
-or a proven adaptive tessellation bounded in final screen pixels.
-
-Requirements:
-
-- fill and stroke behavior agree with current SVG geometry;
-- rotation / non-uniform scale / parent transforms are supported;
-- non-scaling stroke remains screen-space correct;
-- accuracy does not degrade with zoom or large geometry;
-- tolerance is centralized and documented rather than being a magic fixed segment count.
-
-### Mandatory tests
-
-1. large ellipse at max/current high editor zoom with points just inside/outside a curved boundary;
-2. highly non-uniformly scaled ellipse;
-3. large rounded rectangle with a large corner radius at high zoom;
-4. rotated/scaled rounded rectangle;
-5. stroke-only ellipse/rounded rectangle where applicable;
-6. prove boundary error remains within the documented screen-space tolerance.
+- ~800px rendered ellipse radius at zoom 8 with 0.1px inside/outside fill checks;
+- highly non-uniformly scaled/rotated ellipse;
+- large rounded rectangle with large corner radius at zoom 8;
+- rotated/non-uniform rounded rectangle;
+- stroke-only ellipse and rounded rectangle near the final-pixel tolerance boundary;
+- centralized tolerance-budget assertions.
 
 ---
 
@@ -162,63 +137,27 @@ Requirements:
 
 ### Problem
 
-The current model accepts any non-empty string as a node ID.
+Hover identity previously encoded `<nodeId>:<listenerRevision>:<sceneRevision>` and recovered the node ID using delimiter parsing, corrupting valid IDs such as `button:primary`.
 
-`createListenerResolver()` currently stores hover state in a string similar to:
+### Correction implemented
 
-```text
-<nodeId>:<listenerRevision>:<sceneRevision>
-```
+- hover state is now a structured typed node identity object carrying `kind`, full `id`, `listenerRevision`, and `sceneRevision`;
+- down-target state is stored as a structured typed node ref;
+- target equality compares the complete stable ID;
+- listener revision metadata is an opaque JSON tuple serialization and is never reparsed into identity;
+- legacy string hover input, if supplied externally, is treated as the complete ID rather than split by punctuation;
+- document replacement/reset still clears hover/down state deterministically;
+- display names remain irrelevant.
 
-and recovers the previous target using:
+### Tests added
 
-```js
-hoverKey.split(':')[0]
-```
-
-A valid node ID such as:
-
-```text
-button:primary
-```
-
-is therefore read back as `button`.
-
-This can make pointerenter repeat while staying on the same target, prevent the correct pointerleave target from being identified, and generally makes interaction identity depend on an undocumented ID character restriction.
-
-### Required behavior
-
-Keep hover/down lifecycle identity structured rather than delimiter-parsed.
-
-For example:
-
-```js
-{
-  target: { kind: 'node', id: 'button:primary' },
-  listenerRevision: '...',
-  sceneRevision: 12
-}
-```
-
-or another deterministic representation that never reparses the stable ID text.
-
-Requirements:
-
-- no display names involved;
-- no undocumented forbidden characters introduced merely for pointer state;
-- existing simple IDs behave identically;
-- listener/scene revision metadata may remain advisory for invalidation, but target equality uses the full stable ref/ID;
-- reset/document replacement/down-target behavior remains deterministic.
-
-### Mandatory tests
-
-1. node ID containing `:`;
-2. node ID containing URL/property-address-like punctuation where the model permits it;
-3. moving repeatedly inside the same such target emits pointerenter only once;
-4. moving away emits exactly one pointerleave for the full original ID;
-5. down/up on the same punctuated ID still qualifies click;
-6. down on one punctuated ID and up on another does not qualify click;
-7. rename/display-name changes remain irrelevant.
+- colon-containing ID `button:primary`;
+- URL/property-address-like punctuation ID;
+- repeated pointermove inside same punctuated target emits one enter only;
+- moving between/away emits exactly one correct leave/enter sequence;
+- same punctuated down/up target qualifies click;
+- different punctuated down/up targets do not qualify click;
+- hostile display-name rename does not affect identity.
 
 ---
 
@@ -243,19 +182,19 @@ M4 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Renderer/hit-test screen mapping proof:
-- Aspect-ratio/letterbox proof:
-- Ellipse boundary proof:
-- Rounded-rectangle boundary proof:
-- Stable-ID pointer lifecycle proof:
-- Existing polygon/star/path/stroke regression proof:
-- Pointer -> listener -> machine regression proof:
-- Runtime non-mutation proof:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Correction commits: 991ea2f514f3fc5c0c458ff1844ba6557b0b5c24; bdd720efc4297f88832d7fb40bce7ba0ef0e4dc3; a47bd9bce38083be892194342526dfe745000b1d; 3f7d5bff6444b12f74c24cacf06c625f437e76bc; final gated integration 8c6e7e515966f5264e000e266dcaff3a7e041084
+- Changed files: src/veyra/viewport.js, src/veyra/hitTest.js, src/veyra/listenersRuntime.js, src/veyra/renderer.js, src/index.js, tests/veyra-m4-corrections.test.mjs, milestone.md
+- Tests added/changed: dedicated M4 correctness adversarial suite covering aspect-ratio mapping, curved fill/stroke boundaries, and punctuation-safe pointer lifecycle
+- npm test: PASS — 29/29 suites in gated correction workflow
+- npm run check: PASS — 37/37 source files in gated correction workflow
+- Renderer/hit-test screen mapping proof: renderer uses createSvgViewBox(); hit tester uses paired createSvgViewBoxScreenTransform(); both explicitly share xMidYMid meet semantics
+- Aspect-ratio/letterbox proof: same/wider/taller viewport tests verify visual-center hits, centered offsets, letterbox/pillarbox misses, pan/view-center and zoom
+- Ellipse boundary proof: analytical fill containment plus adaptive final-screen stroke tessellation; high-zoom and non-uniform affine tests pass
+- Rounded-rectangle boundary proof: analytical fill containment plus adaptive final-screen corner-arc tessellation; high-zoom/rotated/non-uniform/stroke-only tests pass
+- Stable-ID pointer lifecycle proof: hover/down identities are structured typed refs; colon and URL-like IDs retain full identity through enter/leave/click lifecycle
+- Existing polygon/star/path/stroke regression proof: original veyra-hittest, M4 interaction-loop, shell bridge/integration and listener runtime suites remain green
+- Pointer -> listener -> machine regression proof: original M4 end-to-end interaction-loop suite remains green unchanged
+- Runtime non-mutation proof: original M4 serialization/history non-mutation assertions remain green unchanged
+- Suggestions added to `suggestions`: none
+- Known limitations: correction remains within current M4 legacy interaction scope; clipping/layout/components/accessibility/data-binding behavior remains deferred by the milestone non-goals
 ```
