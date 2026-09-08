@@ -1,0 +1,42 @@
+name: Apply M3 Corrections
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-m3-corrections.yml'
+      - 'scripts/apply-m3-corrections.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply correction pass
+        run: python3 scripts/apply-m3-corrections.py
+      - name: Syntax check
+        run: npm run check
+      - name: Test
+        run: npm test
+      - name: Commit clean M3 correction pass
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-m3-corrections.yml scripts/apply-m3-corrections.py
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix M3 control-plane convergence blockers [m3-corrected]"
+          git push origin HEAD:main
