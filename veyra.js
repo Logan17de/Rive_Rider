@@ -50,6 +50,7 @@ import { createArtboardResizeGesture } from './src/veyra/gestures.js';
 import { createMachineRuntime } from './src/veyra/stateMachine.js';
 import { createSceneSummary } from './src/veyra/summary.js';
 import { buildSemanticIndex, queryEntities, resolveSemantic } from './src/veyra/resolver.js';
+import { createVeyraControlPlane } from './src/veyra/controlPlane.js';
 import { createShellInteractionBridge, createPreviewPointerHandlers } from './src/veyra/shellBridge.js';
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
 
@@ -2399,17 +2400,33 @@ function machineRuntime(machineId) {
   return runtime;
 }
 
+const controlPlane = createVeyraControlPlane(store);
+
 globalThis.veyra = Object.freeze({
-  getSceneSummary: (options = {}) => createSceneSummary(store.document, options),
-  getSemanticIndex: (options = {}) => buildSemanticIndex(store.document, options),
+  getManifest: (options = {}) => controlPlane.getManifest(options),
   queryEntities: (query = {}, options = {}) => queryEntities(store.document, query, options),
   resolveSemantic: (intent, options = {}) => resolveSemantic(store.document, intent, options),
+  read: (refOrAddress, options = {}) => controlPlane.read(refOrAddress, options),
+  previewCommand: (command, options = {}) => controlPlane.previewCommand(command, options),
+  dispatchCommand: (command) => controlPlane.dispatchCommand(command),
+  dispatchPlan: (commands, policy = {}) => controlPlane.dispatchPlan(commands, policy),
+  validateDocument: () => controlPlane.validateDocument(),
+  verifyChange: (expected, options = {}) => controlPlane.verifyChange(expected, options),
+  getDependencyGraph: (refOrAddress = null, options = {}) => controlPlane.getDependencyGraph(refOrAddress, options),
+  getOwnership: (refOrAddress, options = {}) => controlPlane.getOwnership(refOrAddress, options),
+  getSceneSummary: (options = {}) => createSceneSummary(store.document, options),
+  getSemanticIndex: (options = {}) => buildSemanticIndex(store.document, options),
   getDocument: () => cloneValue(store.document),
   getEvaluatedScene: () => cloneValue(evaluateDocument(store.document)),
-  readProperty: (address) => readProperty(store.document, address),
+  readProperty: (address) => controlPlane.read(address).authoredValue,
   applyCommand: ({ label, address, value, source = 'script' }) => {
-    store.setProperty({ label, source, propertyAddresses: [address] }, address, value);
-    return readProperty(store.document, address);
+    const result = controlPlane.dispatchCommand({
+      action: 'setProperty',
+      args: { address, value },
+      command: { label, source, propertyAddresses: [address] },
+    });
+    if (!result.ok) throw new TypeError(result.error);
+    return controlPlane.read(address).authoredValue;
   },
   setMeshVertexWeights: ({ meshId, vertexId, weights, label = 'Set mesh vertex weights', source = 'script' }) => {
     store.execute({ label, source }, (documentModel) => {

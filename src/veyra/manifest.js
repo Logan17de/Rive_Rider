@@ -20,9 +20,10 @@ import {
   createTrackRef,
   createTimelineRef,
 } from './references.js';
-import { VEYRA_COMMAND_TABLE } from './commands.js';
+import { VEYRA_COMMAND_ACTIONS, VEYRA_COMMAND_TABLE } from './commands.js';
 import { createSceneSummary } from './summary.js';
 import { VEYRA_RESOLVER_CAPABILITIES, VEYRA_RESOLVER_SCORING } from './resolver.js';
+import { VEYRA_SERVICE_DEFINITIONS, VEYRA_UI_MUTATION_PARITY_AUDIT } from './serviceRegistry.js';
 
 export const VEYRA_MANIFEST_FORMAT = 'veyra-project-manifest';
 export const VEYRA_MANIFEST_VERSION = 1;
@@ -47,6 +48,12 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'semantics.indexed-query',
   'semantics.deterministic-resolution',
   'semantics.name-independent',
+  'control-plane.canonical-services',
+  'dependencies.forward-reverse-graph',
+  'ownership.authored-evaluated',
+  'commands.side-effect-free-preview',
+  'commands.atomic-plan',
+  'verification.structured-assertions',
 ]);
 
 function projectCapabilities(document) {
@@ -186,6 +193,15 @@ function semanticActionRefs() {
 
 function authoringContract() {
   return {
+    controlPlane: {
+      services: Object.entries(VEYRA_SERVICE_DEFINITIONS)
+        .map(([name, metadata]) => ({ name, ...cloneValue(metadata) }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      commandActions: [...VEYRA_COMMAND_ACTIONS],
+      uiMutationParityAudit: cloneValue(VEYRA_UI_MUTATION_PARITY_AUDIT),
+      identity: 'stable typed refs and property addresses; display names are advisory only',
+      planResultBindings: 'explicit-stable-ids-only',
+    },
 
     semanticResolver: {
       functions: [...VEYRA_RESOLVER_CAPABILITIES.functions],
@@ -294,7 +310,19 @@ function generatedCommandAction(commandName, command) {
     command.targetKind,
     command.parameters,
     command.capabilities,
-    { command: commandName, transport: command.transport, hostAvailability: command.hostAvailability },
+    {
+      command: commandName,
+      transport: command.transport,
+      hostAvailability: command.hostAvailability,
+      commandDescriptor: {
+        action: commandName,
+        args: command.params.map((parameterSpec) => ({
+          name: parameterSpec.name,
+          type: parameterSpec.type,
+          required: parameterSpec.required,
+        })),
+      },
+    },
   );
 }
 

@@ -227,6 +227,8 @@ const COMMAND_TABLE = {
       param('value', 'any', false),
       param('easing', 'string', false),
       param('easingParams', 'array', false),
+      param('trackId', 'string', false),
+      param('keyframeId', 'string', false),
     ],
     run: (store, args, command) => store.setKeyframe(
       {
@@ -236,6 +238,8 @@ const COMMAND_TABLE = {
         value: args.value,
         easing: args.easing,
         easingParams: args.easingParams,
+        trackId: args.trackId,
+        keyframeId: args.keyframeId,
       },
       command ?? {},
     ),
@@ -499,6 +503,8 @@ const COMMAND_MANIFEST_OVERRIDES = {
       manifestParameter('value', 'any', false, 'Value to key. Defaults to the current authored value.'),
       manifestParameter('easing', 'enum', false, 'Easing toward the next keyframe.', { enum: [...VEYRA_EASING_TYPES] }),
       manifestParameter('easingParams', 'array', false, 'Four numbers when easing is cubic-bezier; each parameter is bounded.', bounds('keyframe.easingParams.*')),
+      manifestParameter('trackId', 'string', false, 'Optional explicit stable id when a new track is created.'),
+      manifestParameter('keyframeId', 'string', false, 'Optional explicit stable id when a new keyframe is created.'),
     ],
     capabilities: ['animatable-only', 'creates-track-if-needed', 'transactional', 'undoable'],
   },

@@ -22,3 +22,22 @@ export {
   queryEntities,
   resolveSemantic,
 } from './veyra/resolver.js';
+
+
+export {
+  VEYRA_SERVICE_DEFINITIONS,
+  VEYRA_SERVICE_NAMES,
+  VEYRA_UI_MUTATION_PARITY_AUDIT,
+} from './veyra/serviceRegistry.js';
+export {
+  VEYRA_DEPENDENCY_EDGE_TYPES,
+  getDependencyGraph,
+} from './veyra/dependencyGraph.js';
+export {
+  createVeyraControlPlane,
+  dispatchVeyraPlan,
+  getOwnership,
+  previewVeyraCommand,
+  readVeyra,
+  verifyVeyraChange,
+} from './veyra/controlPlane.js';

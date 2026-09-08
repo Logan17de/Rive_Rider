@@ -48,13 +48,15 @@ function normalizeCommand(command) {
   if (!VEYRA_COMMAND_SOURCES.includes(source)) throw new TypeError(`Unsupported command source: ${source}`);
   const label = String(descriptor.label || '').trim();
   if (!label) throw new TypeError('Command label is required.');
-  return {
+  const normalized = {
     id: descriptor.id || createId('command'),
     source,
     label,
     timestamp: descriptor.timestamp || new Date().toISOString(),
     propertyAddresses: [...new Set((descriptor.propertyAddresses || []).map(String))],
   };
+  if (descriptor.planSteps !== undefined) normalized.planSteps = cloneValue(descriptor.planSteps);
+  return normalized;
 }
 
 function objectFor(document, kind, id) {
@@ -564,7 +566,7 @@ export class VeyraStore {
     return true;
   }
 
-  setKeyframe({ timelineId, address, frame, value, easing = 'linear', easingParams }, commandDescriptor = {}) {
+  setKeyframe({ timelineId, address, frame, value, easing = 'linear', easingParams, trackId, keyframeId }, commandDescriptor = {}) {
     if (!timelineById(this.document, timelineId)) throw new TypeError(`Timeline ${timelineId} does not exist.`);
     if (!isAnimatableProperty(this.document, address)) {
       throw new TypeError(`Property ${address} is not animatable.`);
@@ -577,12 +579,12 @@ export class VeyraStore {
       const timeline = timelineById(document, timelineId);
       let track = trackByAddress(timeline, address);
       if (!track) {
-        track = createTrack(address);
+        track = createTrack(address, trackId ? { id: trackId } : {});
         timeline.tracks.push(track);
       }
       const existingIndex = track.keyframes.findIndex((candidate) => candidate.frame === frame);
       const existing = existingIndex >= 0 ? track.keyframes[existingIndex] : null;
-      const keyframe = createKeyframe({ id: existing?.id, frame, value: resolvedValue, easing, easingParams });
+      const keyframe = createKeyframe({ id: existing?.id || keyframeId, frame, value: resolvedValue, easing, easingParams });
       if (existingIndex >= 0) track.keyframes[existingIndex] = keyframe;
       else track.keyframes.push(keyframe);
       track.keyframes.sort((a, b) => a.frame - b.frame);

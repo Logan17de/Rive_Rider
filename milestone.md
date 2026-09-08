@@ -25,7 +25,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 # MILESTONE M3 — Unified AI/Human Control Plane + Dependency & Ownership Graph
 
-**Status:** `READY`
+**Status:** `AWAITING VERIFICATION`
 
 ## Goal
 
@@ -411,21 +411,21 @@ M3 is complete only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Canonical service registry proof:
-- Dependency graph proof:
-- Ownership/source proof:
-- Authored-vs-evaluated read proof:
-- Preview zero-side-effect proof:
-- Atomic plan/rollback proof:
-- verifyChange proof:
-- Browser/manifest/command drift proof:
-- UI mutation parity audit:
-- Name-independence proof:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Implementation commits: M3 canonical service registry/dependency graph/control plane integration
+- Changed files: src/veyra/serviceRegistry.js, src/veyra/dependencyGraph.js, src/veyra/controlPlane.js, src/veyra/store.js, src/veyra/commands.js, src/veyra/manifest.js, src/index.js, veyra.js, tests/veyra-control-plane.test.mjs, milestone.md
+- Tests added/changed: dedicated M3 adversarial integration suite for name-invariant dependency graph, reverse edges, animation/authored/constraint/runtime ownership, authored-vs-evaluated reads, zero-side-effect preview, deterministic preview ids, atomic plan success/rollback/provenance, structured verification, browser/service/manifest/command drift, serialize/load rename/reorder invariance
+- npm test: PASS
+- npm run check: PASS
+- Canonical service registry proof: VEYRA_SERVICE_DEFINITIONS is neutral metadata; createVeyraControlPlane mechanically asserts its callable names equal VEYRA_SERVICE_NAMES; manifest and browser consume the same registry/services
+- Dependency graph proof: graph derives current structural facts from the M2 semantic index, adds property-address nodes and explicit typed forward/reverse edges with inverseType metadata, deterministic ordering and bounded traversal; display names are absent from graph identity
+- Ownership/source proof: getOwnership separates authored/evaluated values, activeOwner, ownerStack, potentialControllers and writableSource; animation tracks, state-machine runtime-context requirements and rig constraints are reported without treating derived output as authored source
+- Authored-vs-evaluated read proof: readVeyra/read returns authored/evaluated values, evaluated source, ownership/capabilities and optional direct dependency context for addresses; entity reads return bounded stable-ref views, advisory display metadata, semantics and dependency summary
+- Preview zero-side-effect proof: previewVeyraCommand runs the actual dispatchVeyraCommand path on an isolated VeyraStore clone; valid/invalid previews leave source document/revision/history/selection untouched and deterministic command ids keep create previews aligned with canonical dispatch
+- Atomic plan/rollback proof: dispatchVeyraPlan preflights every ordered step through the real dispatcher on an isolated sandbox and commits the validated final document once; any failed preflight leaves source document/revision/history unchanged; history keeps ordered planSteps provenance
+- verifyChange proof: structured assertions cover entity presence/absence, authored/evaluated equality, semantics, dependency edges, ownership and document validity/no-dangling-ref validation with pass/fail evidence
+- Browser/manifest/command drift proof: globalThis.veyra M3 methods are thin controlPlane calls; manifest controlPlane service names are generated from VEYRA_SERVICE_DEFINITIONS; command actions are generated from VEYRA_COMMAND_TABLE and now expose the actual command descriptor arg schema mechanically
+- UI mutation parity audit: VEYRA_UI_MUTATION_PARITY_AUDIT explicitly records canonical control-plane browser services, continuous Store transaction gestures, direct Store CRUD paths with command equivalents, and temporary document-shell direct paths
+- Name-independence proof: dependency graph excludes display names and adversarial tests randomize names plus reorder registries before exact graph comparison; ownership controller identity survives serialize/load + rename/reorder
+- Suggestions added to `suggestions`: none
+- Known limitations: atomic-plan result placeholders are intentionally unsupported; later steps must use explicit stable ids. Runtime ownership can identify active state-machine timeline contribution only when sufficient runtimeContext is supplied. UI continuous gestures remain on the canonical Store transaction port and several editor controls still call command-equivalent Store methods directly as documented by the parity audit.
 ```

@@ -421,7 +421,7 @@ export function previewVeyraCommand(store, descriptor, options = {}) {
   if (!store || typeof store !== 'object' || !store.document) {
     return { ok: false, error: 'previewCommand requires a VeyraStore.' };
   }
-  const preparedCommand = prepareCommandDescriptor(store.document, descriptor, 'preview');
+  const preparedCommand = prepareCommandDescriptor(store.document, descriptor, 'canonical');
   const before = cloneValue(store.document);
   const sandbox = new VeyraStore(before);
   const addresses = commandAddresses(preparedCommand);
@@ -666,7 +666,7 @@ export function createVeyraControlPlane(store) {
     resolveSemantic: (intent, options = {}) => resolveSemantic(store.document, intent, options),
     read: (refOrAddress, options = {}) => readVeyra(store.document, refOrAddress, options),
     previewCommand: (command, options = {}) => previewVeyraCommand(store, command, options),
-    dispatchCommand: (command) => dispatchVeyraCommand(store, prepareCommandDescriptor(store.document, command, `dispatch:${store.revision}`)),
+    dispatchCommand: (command) => dispatchVeyraCommand(store, prepareCommandDescriptor(store.document, command, 'canonical')),
     dispatchPlan: (commands, policy = {}) => dispatchVeyraPlan(store, commands, policy),
     validateDocument: () => validationResult(store.document),
     verifyChange: (expected, options = {}) => verifyVeyraChange(store.document, expected, options),
