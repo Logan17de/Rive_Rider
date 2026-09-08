@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/apply-m6-component-corrections.py'
+      - 'scripts/fix-m6-component-correction-fixture.py'
       - '.github/workflows/apply-m6-component-corrections.yml'
 
 permissions:
@@ -24,6 +25,8 @@ jobs:
       - run: npm ci
       - name: Apply focused M6 corrections
         run: python3 scripts/apply-m6-component-corrections.py
+      - name: Repair adversarial fixture
+        run: python3 scripts/fix-m6-component-correction-fixture.py
       - name: Syntax check
         run: npm run check
       - name: Test
@@ -46,6 +49,7 @@ jobs:
       - name: Commit clean M6 correction implementation
         run: |
           rm scripts/apply-m6-component-corrections.py
+          rm scripts/fix-m6-component-correction-fixture.py
           rm .github/workflows/apply-m6-component-corrections.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
