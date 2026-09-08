@@ -8,294 +8,210 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 ## Mandatory agent rules
 
-1. Preserve the validation boundary. Invalid listener refs/actions, machine targets, hit-test inputs, and interaction topology must fail before authored state is committed.
-2. Human names are display metadata only. Listener targeting, machine interaction, hit testing, dependencies, and tests use stable refs/IDs and evaluated structure.
-3. Persistent listener authoring must use the canonical M3 control plane / command bus. Do not create an interaction-only mutation path.
-4. Runtime machine inputs/triggers/playback are ephemeral runtime state. Do not write runtime output back into authored document state or persistent history.
-5. Hit testing must use the evaluated scene and the renderer's geometry semantics. Do not use display names or bounding-box guesses where this milestone requires exact geometry.
-6. Pointer participation is independent from visual opacity. Do not make opacity implicitly disable hit participation unless an explicit interaction rule says so.
-7. Preview/read/query services remain read-only. Pointer simulation used for tests must not mutate authored state unless a validated persistent command is explicitly dispatched.
-8. Preserve editor-tool isolation: canvas authoring gestures and runtime interaction events must not accidentally trigger each other.
-9. Keep current legacy machine inputs for compatibility, but do not expand them into the future data architecture. View Models/Data Binding come later.
-10. Do not implement Components/multi-artboards, View Models/Data Binding, layered state-machine parity, accessibility/event parity, Text, Layout, scripting/WGSL, MCP/headless transport, or collaboration in this milestone.
-11. Do not weaken M0–M3 tests, name-independence rules, control-plane drift tests, or capability declarations.
-12. Run `npm test` and `npm run check` before handoff.
+1. Preserve the validation boundary and all accepted M0–M4 architecture.
+2. Human names are display metadata only; stable typed refs/IDs remain authoritative.
+3. Do not rewrite listener CRUD, machine runtime bridging, command/control-plane integration, or interaction transport that already passed review.
+4. Runtime interaction remains ephemeral and must not mutate authored document/history.
+5. Hit testing must agree with the actual SVG renderer in **screen space**, including renderer viewBox/preserve-aspect-ratio behavior and non-scaling strokes.
+6. Exact/current geometry must not become more approximate as artboard size, transform scale, or editor zoom increases.
+7. Stable IDs are arbitrary non-empty strings under the current model. Do not parse identity by undocumented delimiter conventions.
+8. Do not weaken existing M0–M4 tests or capability declarations.
+9. Run `npm test` and `npm run check` before handoff.
 
 ---
 
-# MILESTONE M4 — Close the Current Interaction Loop
+# MILESTONE M4 — Close the Current Interaction Loop — CORRECTION PASS
 
 **Roadmap mapping:** `plan.md` M1 — Close current interaction loop  
-**Status:** `AWAITING VERIFICATION`
+**Status:** `CORRECTIONS REQUIRED`
 
-## Goal
+## Verification result
 
-Finish the interaction system that already exists in partial form so a current Veyra project can reliably execute this complete loop:
+The main M4 implementation is accepted in principle:
 
-```text
-pointer input
-  -> evaluated hit target
-  -> listener resolution
-  -> listener action
-  -> timeline or persistent machine runtime input/trigger
-  -> state transition/runtime evaluation
-  -> evaluated animation frame
-  -> visible render
-```
+- persistent listener CRUD exists through Store / command / control plane;
+- listener topology and machine/input type validation are implemented;
+- listener dependencies remain machine-readable and name-independent;
+- persistent machine runtime bridging for `setInput` / `fire` exists;
+- timeline `play` / `stop` / `seek` transport remains working;
+- pointer enter/leave/down/up/click lifecycle is centralized in one resolver;
+- pointer participation is explicit and opacity-independent;
+- polygon/star/custom-path hits no longer use broad bounding-box fallbacks;
+- adaptive cubic-path flattening, implicit fill closure, and non-scaling stroke testing exist;
+- pointer -> listener -> machine -> evaluated animation is covered end to end;
+- minimal listener UI authoring exists;
+- latest `main` Tests workflow is green.
 
-At the end of M4, current listeners must be fully authorable through the same Store/command/control-plane contracts as other persistent features, machine listener intents must actually execute in the editor host, and supported current shapes/paths must participate in deterministic evaluated hit testing rather than broad bounding-box guesses.
-
-This milestone closes the **current legacy interaction branch**. It does not attempt the later full Rive Listener/Event/Data Binding architecture.
-
----
-
-## Task 1 — Complete current listener authored CRUD parity
-
-Audit the current listener model first, then complete create/read/update/delete for the listener capabilities Veyra already supports.
-
-Current compatibility scope includes pointer listeners and the existing action families such as:
-
-```text
-play
-stop
-seek
-setInput
-fire
-```
-
-### Requirements
-
-- stable listener IDs remain authoritative;
-- listener target/timeline/machine/input references are typed ID-backed refs where applicable;
-- add/update/remove listener operations exist in `VeyraStore`;
-- equivalent JSON-safe `VEYRA_COMMAND_TABLE` actions exist;
-- supplied command provenance reaches history;
-- manifest/actions/capabilities advertise only behavior that actually works;
-- dependency graph includes listener target/action dependencies in both directions;
-- semantic query/index continues to expose listener relationships without relying on names;
-- serialization/normalization validates dangling targets/actions before commit;
-- deleting referenced entities follows an explicit deterministic listener cleanup/blocking policy with tests;
-- undo/redo and preview work through the canonical control plane.
-
-Do not implement the later full Rive multi-action/data-bound listener system unless a minimal schema normalization is genuinely required for correctness of the current model.
+Do **not** rebuild those systems. Fix only the correctness gaps below.
 
 ---
 
-## Task 2 — Implement the machine-listener host bridge
+## Correction 1 — Hit-test screen mapping must match the SVG renderer at arbitrary canvas sizes
 
-The current runtime can resolve machine-oriented listener intents, but the editor host must actually apply them.
+### Problem
 
-Implement the host bridge for current machine actions:
+`hitTestPoint()` currently converts world points to screen points approximately as:
 
-```text
-setInput(machineRef, inputRef, value)
-fire(machineRef, inputRef)
+```js
+screenX = (worldX - centerX) * zoom + viewport.width / 2
+screenY = (worldY - centerY) * zoom + viewport.height / 2
 ```
 
-### Requirements
+That only matches the renderer when the CSS viewport dimensions happen to correspond 1:1 with the artboard/viewBox scale.
 
-- machine and input are resolved by stable IDs, never display names;
-- use one persistent runtime instance per active machine/document context rather than constructing an unrelated runtime for every pointer event;
-- `setInput` validates input type/value through the runtime's existing contract;
-- `fire` follows trigger semantics exactly once per intended event;
-- runtime mutations do not create authored Store history entries;
-- deleting/replacing a machine invalidates stale runtime instances deterministically;
-- unsupported/missing runtime targets return structured diagnostics rather than being silently ignored;
-- manifest/host availability must stop claiming `unsupported` once the bridge is actually available;
-- direct timeline `play`/`stop`/`seek` interaction behavior must remain working.
+The real editor SVG fills the available stage (`width: 100%; height: 100%`) and the renderer changes its `viewBox`. SVG's preserve-aspect-ratio mapping can therefore introduce a uniform scale and letterbox offsets whenever the canvas aspect ratio differs from the viewBox/artboard aspect ratio.
 
----
-
-## Task 3 — Define deterministic pointer and `click` lifecycle semantics
-
-Complete the current pointer event model and add explicit `click` behavior.
-
-At minimum support the current interaction lifecycle for:
-
-```text
-pointerenter
-pointerleave
-pointermove
-pointerdown
-pointerup
-click
-```
+Result: the rendered object and the runtime hit target can disagree in the actual editor even though tests using a 960×640 viewport against a 960×640 artboard pass.
 
 ### Required behavior
 
-Define and test, rather than leaving browser accident as the contract:
+Use one renderer-consistent mapping contract.
 
-- evaluated hit target selection and draw-order precedence;
-- enter/leave changes when the top eligible target changes;
-- down/up dispatch ordering;
-- `click` only when the down/up lifecycle qualifies under the documented Veyra rule;
-- pointer movement between down and up;
-- overlapping targets;
-- hidden/non-interactive/pass-through participation;
-- ancestor visibility/interaction participation;
-- interaction participation independent of opacity;
-- pointer runtime must not interfere with active editor drawing/vertex/rig gestures.
+Acceptable directions include:
 
-If an explicit current `pointerEvents`/interaction-participation property is needed, add it through the full feature completeness path for the affected current entity kind: model, property address/capability, command path, manifest, UI where appropriate, serialization, tests, and name independence.
+- a DOM-free equivalent of the SVG viewBox + preserveAspectRatio transform passed into `hitTestPoint()`; or
+- an explicit world-to-screen matrix produced by the host/renderer and consumed by the DOM-free hit tester.
 
----
+Requirements:
 
-## Task 4 — Exact evaluated hit testing for current geometry
+- exact same world->screen mapping for rendering and runtime hits;
+- correct centered letterboxing/pillarboxing behavior;
+- pan/view-center and zoom remain correct;
+- transformed paths/polygons/stars/rectangles/ellipses remain correct;
+- non-scaling stroke distances remain measured in final screen pixels;
+- DOM-free tests can construct the mapping deterministically without browser layout.
 
-Replace approximate bounds-only interaction hits for the current supported geometry where exact behavior is required.
+### Mandatory tests
 
-Cover at least:
-
-- rectangle;
-- ellipse;
-- polygon;
-- star;
-- editable/custom path fills;
-- current strokes where the renderer treats them as interactive geometry.
-
-### Path/geometry requirements
-
-- operate on evaluated geometry/world transforms;
-- deterministic Bézier/path flattening or equivalent exact-enough mathematical test with a documented tolerance;
-- implicit closure for filled open paths must match rendered fill semantics;
-- stroke-width participation must match current transformed stroke behavior, including non-scaling behavior if the current renderer supports it;
-- transformed/rotated/scaled shapes must hit in the correct world position;
-- near-boundary tests must be deterministic;
-- no broad bounding-box fallback may report a hit outside the rendered current polygon/star/path merely because the point lies inside its bounds;
-- group/container behavior must follow child/evaluated geometry rather than inventing filled group rectangles.
-
-Clipping, Layout and Component-aware hit testing are explicitly deferred until those feature families exist, but the API should remain extensible for them.
+1. artboard and viewport with identical aspect ratio;
+2. wider viewport than artboard;
+3. taller viewport than artboard;
+4. non-1 zoom plus non-default view center;
+5. a point at the visually rendered center hits in all cases;
+6. a point in letterbox/pillarbox space does not become a false geometry hit;
+7. transformed path/stroke hit boundary still matches after aspect-ratio mapping.
 
 ---
 
-## Task 5 — Integrate pointer → listener → runtime → evaluated render
+## Correction 2 — SVG ellipse and rounded-rectangle hits must obey the documented screen-space accuracy contract
 
-Wire the interaction transport so resolved intents are consumed by the correct host subsystem.
+### Problem
 
-Required current routing:
+The renderer draws current rectangles/ellipses using SVG geometry, but `hitTest.js` currently approximates them with fixed polygon counts:
+
+- ellipse: 72 segments;
+- rounded rectangle: 8 segments per quarter corner.
+
+Those counts do not depend on radius, transform scale, or editor zoom. At large object sizes / zoom, the screen-space error grows well beyond `VEYRA_HIT_TEST_TOLERANCE_PX = 0.35`.
+
+So M4 currently claims exact evaluated rectangle/ellipse hit behavior while near curved boundaries can produce false negatives relative to the rendered SVG.
+
+### Required behavior
+
+Use renderer-equivalent math or adaptive screen-space approximation whose maximum error is bounded by the documented tolerance.
+
+Preferred where practical:
+
+- analytical ellipse containment/distance in an appropriate coordinate space;
+- analytical rounded-rectangle containment/distance;
+
+or a proven adaptive tessellation bounded in final screen pixels.
+
+Requirements:
+
+- fill and stroke behavior agree with current SVG geometry;
+- rotation / non-uniform scale / parent transforms are supported;
+- non-scaling stroke remains screen-space correct;
+- accuracy does not degrade with zoom or large geometry;
+- tolerance is centralized and documented rather than being a magic fixed segment count.
+
+### Mandatory tests
+
+1. large ellipse at max/current high editor zoom with points just inside/outside a curved boundary;
+2. highly non-uniformly scaled ellipse;
+3. large rounded rectangle with a large corner radius at high zoom;
+4. rotated/scaled rounded rectangle;
+5. stroke-only ellipse/rounded rectangle where applicable;
+6. prove boundary error remains within the documented screen-space tolerance.
+
+---
+
+## Correction 3 — Pointer lifecycle state must not encode stable IDs with `:` delimiters
+
+### Problem
+
+The current model accepts any non-empty string as a node ID.
+
+`createListenerResolver()` currently stores hover state in a string similar to:
 
 ```text
-listener play/stop/seek -> timeline playback bridge
-listener setInput/fire  -> persistent machine runtime bridge
+<nodeId>:<listenerRevision>:<sceneRevision>
 ```
 
-Then ensure machine runtime output can affect the evaluated/rendered scene through the existing machine/timeline evaluation path.
+and recovers the previous target using:
 
-### Requirements
+```js
+hoverKey.split(':')[0]
+```
 
-- one event must not be executed twice because both resolver and transport observe it;
-- runtime step timing is deterministic in tests;
-- transition conditions react to the updated machine input/trigger;
-- state changes select/evaluate the expected timeline;
-- crossfade/current existing transition behavior remains valid;
-- render invalidation occurs when runtime output changes;
-- authored document serialization is unchanged by runtime-only interaction;
-- stopping/resetting/replacing runtime context does not leave stale evaluated overrides.
+A valid node ID such as:
 
----
+```text
+button:primary
+```
 
-## Task 6 — Canonical control-plane and machine-readable exposure
+is therefore read back as `button`.
 
-Bring interaction authoring/inspection under the M3 contracts.
+This can make pointerenter repeat while staying on the same target, prevent the correct pointerleave target from being identified, and generally makes interaction identity depend on an undocumented ID character restriction.
 
-At minimum:
+### Required behavior
 
-- listener CRUD commands are in the canonical command table;
-- manifest listener capabilities/action schemas are generated from real current support;
-- dependency graph reports listener targets and runtime uses;
-- `read()` can inspect current listener entities through stable refs;
-- `previewCommand()` can preview listener authored changes with zero side effects;
-- `verifyChange()` can assert listener existence/reference topology through existing entity/dependency assertions, extending the assertion vocabulary only if genuinely needed;
-- browser compatibility mutation helpers, if added, route through the canonical dispatcher;
-- runtime-only interaction APIs are explicitly marked runtime-only rather than persistent commands.
+Keep hover/down lifecycle identity structured rather than delimiter-parsed.
 
-Do not add an AI-only listener editing surface.
+For example:
 
----
+```js
+{
+  target: { kind: 'node', id: 'button:primary' },
+  listenerRevision: '...',
+  sceneRevision: 12
+}
+```
 
-## Task 7 — Minimal human editor listener authoring parity
+or another deterministic representation that never reparses the stable ID text.
 
-Current listeners must not be code/AI-only authored objects.
+Requirements:
 
-Provide a bounded editor UI for the current listener model that can at least:
+- no display names involved;
+- no undocumented forbidden characters introduced merely for pointer state;
+- existing simple IDs behave identically;
+- listener/scene revision metadata may remain advisory for invalidation, but target equality uses the full stable ref/ID;
+- reset/document replacement/down-target behavior remains deterministic.
 
-- inspect listeners attached to the selected supported target;
-- create a supported pointer listener;
-- choose the supported event;
-- configure the supported current action and its typed target/value fields;
-- update it;
-- remove it;
-- show precise validation when a referenced machine/input/timeline is incompatible or missing.
+### Mandatory tests
 
-The UI may be utilitarian; correctness and shared command/model semantics matter more than visual polish in this milestone.
-
-Where continuous or selection-only UI operations cannot sensibly use a command descriptor, keep the existing audited Store transaction/read ports rather than inventing a second mutation system.
-
----
-
-## Task 8 — End-to-end and adversarial interaction suite
-
-Add dedicated tests covering at least:
-
-1. listener add/update/remove through Store + command + control-plane preview/dispatch + undo/redo;
-2. listener refs survive rename/reorder/serialize-load unchanged;
-3. invalid/dangling listener targets/actions fail before commit;
-4. pointer hit outside polygon/star/path geometry but inside its bounding box does **not** hit;
-5. path fill implicit closure behaves consistently with renderer semantics;
-6. stroke near-boundary hit tests are deterministic under transforms;
-7. opacity change alone does not remove interaction participation;
-8. hidden/non-interactive/pass-through rules behave exactly as documented;
-9. pointer enter/leave/down/up/click lifecycle is deterministic;
-10. overlapping targets use documented evaluated draw-order precedence;
-11. listener `setInput` changes the intended machine runtime input by stable ref;
-12. listener `fire` triggers exactly the intended trigger lifecycle;
-13. pointer -> listener -> machine transition -> evaluated timeline property produces the expected visible/evaluated value;
-14. the same full loop still works after all relevant human names are randomized/misleading;
-15. runtime interaction does not change serialized authored document/history;
-16. authoring tool gestures do not accidentally dispatch runtime listeners;
-17. timeline listener `play`/`stop`/`seek` regressions remain green;
-18. all M0–M3 tests remain green.
-
-Where practical, add a golden interaction fixture that contains overlapping shapes, a custom path, a listener, a machine, inputs, transitions and timelines so the whole loop is exercised against one realistic graph.
-
----
-
-## Explicit non-goals
-
-Do not implement in M4:
-
-- headless Node API / CLI transport;
-- MCP server;
-- path topology authoring commands such as `addVertex` / `removeVertex` unless strictly required to repair existing hit-test correctness;
-- multi-artboards / Components;
-- View Models / Data Binding / Property Groups / converters / lists;
-- full layered state-machine parity or visual graph editor;
-- full future Rive listener sources/actions, data-bound listener parameters, accessibility semantics or general event system;
-- clipping/layout/component-aware hit testing before those systems exist;
-- Text;
-- scripting/WGSL;
-- collaboration/runtime SDK/export work.
-
-Follow-up ideas stay in `suggestions`.
+1. node ID containing `:`;
+2. node ID containing URL/property-address-like punctuation where the model permits it;
+3. moving repeatedly inside the same such target emits pointerenter only once;
+4. moving away emits exactly one pointerleave for the full original ID;
+5. down/up on the same punctuated ID still qualifies click;
+6. down on one punctuated ID and up on another does not qualify click;
+7. rename/display-name changes remain irrelevant.
 
 ---
 
 ## Acceptance criteria
 
-M4 is complete only when:
+M4 is VERIFIED only when:
 
-- current listener CRUD is fully persistent, validated, undoable and available through Store/command/control-plane/manifest/UI;
-- machine listener `setInput` and `fire` intents execute against the correct persistent runtime by stable refs;
-- timeline listener actions remain functional;
-- deterministic `click` and pointer lifecycle semantics are implemented;
-- current polygon/star/path/fill/stroke interaction hits use evaluated geometry rather than broad bounds guesses;
-- relevant Bézier/path/transform/boundary regressions are covered;
-- interaction participation is not implicitly coupled to opacity;
-- pointer -> listener -> runtime/state transition -> evaluated frame/render works end to end;
-- runtime-only interaction does not mutate authored document/history;
-- dependency/manifest/control-plane surfaces truthfully describe listener/runtime support;
-- all targeting remains name-independent;
-- all existing tests remain green;
+- all original M4 listener/runtime/control-plane/UI behavior remains green;
+- hit testing uses the same screen mapping as the SVG renderer for arbitrary viewport aspect ratios;
+- ellipse and rounded-rectangle curved boundaries satisfy the documented final-screen tolerance rather than fixed-segment approximation error;
+- polygon/star/path/Bézier/non-scaling-stroke regressions remain green;
+- pointer lifecycle preserves the complete stable ID without delimiter parsing;
+- pointer -> listener -> machine -> evaluated render remains end-to-end green;
+- runtime interaction still leaves authored serialization/history unchanged;
+- all M0–M3 tests remain green;
 - `npm test` passes;
 - `npm run check` passes;
 - latest GitHub Actions Tests run passes.
@@ -305,22 +221,19 @@ M4 is complete only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits: b593291a707df7259515f167902755f11ace2e55 — Implement M4 current interaction loop [m4-applied]
-- Changed files: model/store/commands/controlPlane/capabilities/manifest/serviceRegistry/index, hitTest/listenersRuntime/interactionTransport/interactionHost/shellBridge, veyra.js, listener + M4 tests, milestone.md
-- Tests added/changed: dedicated M4 end-to-end/adversarial interaction suite; listener registry expectation strengthened to typed machine refs + click
-- npm test: PASS — 28/28 suites in workflow gate
-- npm run check: PASS — 36/36 source files in workflow gate
-- Listener CRUD/control-plane proof: add/update/remove listener Store methods + JSON command actions + deterministic preview IDs + undo/redo/provenance tests
-- Listener validation/lifecycle proof: normalization rejects dangling/mixed/type-incompatible refs; delete cascades are deterministic; click is down/up-same-stable-target
-- Machine runtime bridge proof: one persistent MachineRuntime per machine id/document getter; structured missing-target diagnostics; setInput/fire step exactly once per event without authored writes
-- Pointer/click lifecycle proof: enter/leave follows top-hit changes; pointermove/down/up direct intents execute exactly once; click follows pointerdown/up stable-target qualification
-- Exact evaluated hit-test proof: transformed rectangle/ellipse/polygon/star/path use rendered geometry, no bounds fallback; visibility/pointerEvents rules are explicit and opacity-independent
-- Bézier/stroke/transform proof: adaptive screen-space cubic flattening uses a 0.35px tolerance; filled open paths implicitly close; non-scaling strokes use screen-space distance
-- Pointer -> listener -> machine -> evaluated render proof: runtime bridge output is merged into the animation evaluation layer and invalidates render after interaction
-- Runtime non-mutation proof: M4 tests compare serialization/history before and after runtime interaction
-- Manifest/dependency/control-plane proof: listener command actions generated from canonical table; machine listener host availability is available; existing listener runtimeUses dependency edges stay bidirectional
-- Human UI listener authoring proof: selected-node inspector can add/edit/remove current pointer listeners and pointer participation through canonical commands/properties
-- Name-independence proof: M4 fixture reruns after misleading renames/serialize-load using stable refs only
-- Suggestions added to `suggestions`: none
-- Known limitations: current legacy listener model remains one action per pointer listener; clipping/layout/components/accessibility/data binding remain deferred per M4 non-goals
+- Correction commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Renderer/hit-test screen mapping proof:
+- Aspect-ratio/letterbox proof:
+- Ellipse boundary proof:
+- Rounded-rectangle boundary proof:
+- Stable-ID pointer lifecycle proof:
+- Existing polygon/star/path/stroke regression proof:
+- Pointer -> listener -> machine regression proof:
+- Runtime non-mutation proof:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
