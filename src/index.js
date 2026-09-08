@@ -43,5 +43,7 @@ export {
   verifyVeyraChange,
 } from './veyra/controlPlane.js';
 
+// M4 interaction runtime seams stay DOM-free so hosts and adversarial tests
+// exercise the same persistent machine bridge and evaluated hit-test contract.
 export { createMachineInteractionBridge } from './veyra/interactionHost.js';
 export { hitTestPoint, VEYRA_HIT_TEST_TOLERANCE_PX, VEYRA_POINTER_EVENT_MODES } from './veyra/hitTest.js';
