@@ -56,21 +56,13 @@ browser = replace_once(
 )
 write('veyra.js', browser)
 
-# M3 mechanically checks the new control-plane browser adapters, while the
-# unchanged M2 suite already mechanically checks queryEntities/resolveSemantic.
+# M3 mechanically checks the new M3-only browser adapters. The existing M2
+# suite remains the canonical mechanical check for queryEntities/resolveSemantic.
 tests = read('tests/veyra-control-plane.test.mjs')
 tests = replace_once(
     tests,
-    """for (const service of ['getManifest', 'queryEntities', 'resolveSemantic', 'read', 'previewCommand', 'dispatchCommand', 'dispatchPlan', 'validateDocument', 'verifyChange', 'getDependencyGraph', 'getOwnership']) {
-  assert.match(browserSource, new RegExp(`${service}:.*controlPlane\\.${service}\\(`), `browser ${service} must be a thin canonical adapter`);
-}
-""",
-    """for (const service of ['getManifest', 'read', 'previewCommand', 'dispatchCommand', 'dispatchPlan', 'validateDocument', 'verifyChange', 'getDependencyGraph', 'getOwnership']) {
-  assert.match(browserSource, new RegExp(`${service}:.*controlPlane\\.${service}\\(`), `browser ${service} must be a thin canonical adapter`);
-}
-assert.match(browserSource, /queryEntities:\\s*\\(query = \\{\\}, options = \\{\\}\\) => queryEntities\\(store\\.document, query, options\\)/);
-assert.match(browserSource, /resolveSemantic:\\s*\\(intent, options = \\{\\}\\) => resolveSemantic\\(store\\.document, intent, options\\)/);
-""",
-    'M3 browser adapter compatibility assertions',
+    "['getManifest', 'queryEntities', 'resolveSemantic', 'read', 'previewCommand', 'dispatchCommand', 'dispatchPlan', 'validateDocument', 'verifyChange', 'getDependencyGraph', 'getOwnership']",
+    "['getManifest', 'read', 'previewCommand', 'dispatchCommand', 'dispatchPlan', 'validateDocument', 'verifyChange', 'getDependencyGraph', 'getOwnership']",
+    'M3 browser service compatibility list',
 )
 write('tests/veyra-control-plane.test.mjs', tests)
