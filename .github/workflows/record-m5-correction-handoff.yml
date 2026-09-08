@@ -1,0 +1,39 @@
+name: Record M5 Correction Handoff
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/record-m5-correction-handoff.py'
+      - '.github/workflows/record-m5-correction-handoff.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Record M5 correction handoff
+        run: python3 scripts/record-m5-correction-handoff.py
+      - name: Syntax check
+        run: npm run check
+      - name: Test
+        run: npm test
+      - name: Commit clean handoff
+        run: |
+          rm scripts/record-m5-correction-handoff.py
+          rm .github/workflows/record-m5-correction-handoff.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Complete M5 correction handoff [m5-correction-handoff]'
+          git push
