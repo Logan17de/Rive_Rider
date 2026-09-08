@@ -23,7 +23,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 - `plan.md` **M0 — AI Identity & Control Foundation:** **VERIFIED**.
 - `plan.md` **M1 — Close current interaction loop:** **VERIFIED**.
 - Interstitial **M5 — Workspace UX Stabilization:** **VERIFIED**.
-- **Current milestone M6 maps to `plan.md` M2 — Multi-artboard, Components and project graph.**
+- **Current milestone M6 maps to `plan.md` M2 — Multi-artboard, Components and project graph; implementation is complete and awaiting independent verification.**
 
 ### Progress maintenance rule
 
@@ -34,7 +34,7 @@ Every future milestone verification or milestone advance must update this **Prog
 # MILESTONE M6 — Multi-Artboard, Components & Project Graph
 
 **Roadmap mapping:** `plan.md` M2 — Multi-artboard, Components and project graph  
-**Status:** `READY`
+**Status:** `AWAITING VERIFICATION`
 
 ## Goal
 
@@ -484,22 +484,22 @@ M6 is complete only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Legacy migration + artboard identity proof:
-- Artboard CRUD/UI proof:
-- Component source identity proof:
-- Component instance evaluation proof:
-- Fit/alignment/remap/mix proof:
-- Instance runtime-isolation proof:
-- Dependency/ownership graph proof:
-- Semantic/name-independence proof:
-- Command/manifest/browser parity proof:
-- Persistence/history proof:
-- Progress snapshot update:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Implementation commits: d0e8bf21dbd5c1db72c5a8a765a24562ee546c3f (project graph primitives); b990dcb692cf4dfe577d08cafaf18ca2ad50d32b (Component evaluation/runtime isolation); 3a20fec26ee76a6301a087607d16681fd4794c25 (typed project refs); 53a22a827fd597a47793358075eb5d2a9962d5b0 (M6 adversarial suite); 90c373586c0c0d74eaa6185fb12bae32fc606518 (clean integrated M6 implementation and staging cleanup).
+- Changed files: src/veyra/projectGraph.js; src/veyra/components.js; src/veyra/references.js; src/veyra/model.js; src/veyra/io.js; src/veyra/evaluation.js; src/veyra/store.js; src/veyra/commands.js; src/veyra/controlPlane.js; src/veyra/serviceRegistry.js; src/veyra/resolver.js; src/veyra/dependencyGraph.js; src/veyra/manifest.js; src/veyra/summary.js; src/veyra/gestures.js; src/index.js; veyra.js; M6/compatibility regression tests. Temporary M6 integration scripts/workflow were removed before handoff.
+- Tests added/changed: added tests/veyra-m6-project-graph.test.mjs; updated migration/version/golden/manifest/listener/M5 compatibility assertions to test canonical v5 migration rather than pre-M6 output bytes; preserved all M0–M5 suites.
+- npm test: PASS — 33 of 33 suites in gated integration run 34193121853, including veyra-m6-project-graph, all M0–M5 suites, golden, identity, resolver, control-plane, hit-test and interaction suites.
+- npm run check: PASS — 40 of 40 source files in gated integration run 34193121853.
+- Legacy migration + artboard identity proof: v1–v4 inputs remain readable and canonicalize to v5; legacy singular artboard data maps to exactly one deterministic artboard_legacy_<document-id hash> ref; old persistent entity IDs are retained; non-zero M5 frame origin survives exactly; old v3 golden fixtures are retained as migration inputs and are byte-stable after their first canonical v5 write.
+- Artboard CRUD/UI proof: Store + canonical command registry provide add/update/reorder/duplicate/remove artboard operations; duplication deterministically creates fresh descendant IDs; dependency-unsafe deletion fails closed; the browser exposes an ephemeral stable-ID active-artboard list/editor and routes authored mutations through the canonical dispatcher; active-artboard fit/resize uses the preserved M5 camera/frame contract.
+- Component source identity proof: Components have explicit stable component refs separate from source artboard refs; one source artboard cannot acquire duplicate Component identities; marking a source does not clone/re-ID source content; source rename/move/reorder does not affect Component identity; dependent unmark/delete is guarded.
+- Component instance evaluation proof: authored componentInstance records reference source Components instead of cloning source nodes; evaluation expands source content only into evaluated instance context with source/instance provenance; per-instance overrides are bounded typed property-address overrides and never write back to source authored values.
+- Fit/alignment/remap/mix proof: machine-readable fit modes are none/contain/cover/stretch; horizontal/vertical alignment are start/center/end; runtime mix is validated to 0..1; timeline/stateMachine remaps use typed source refs; nested Components are enabled with max depth 16; clipping capability is explicitly none-only and clip=true is rejected.
+- Instance runtime-isolation proof: createComponentRuntimeRegistry maintains independent per-componentInstance timeline/state-machine buckets; timeline time, input/trigger and machine stepping on one instance do not mutate another instance or authored source runtime; transient runtime state is pruned/reset separately from authored instance persistence.
+- Dependency/ownership graph proof: artboard ownership is explicit for scoped entities; dependency graph includes Component->source artboard, instance->Component, instance->owning artboard, override->source target/property and runtime->source controller relationships; cross-artboard illegal ownership/cycles fail closed; nested Component cycles/depth are validated before evaluation.
+- Semantic/name-independence proof: artboard/component/componentInstance are first-class resolver/semantic targets; structural/source and instance-local evidence remain separate; stable IDs remain authoritative across renames, duplicate human names and misleading names; ambiguous equivalent instances do not resolve by first match.
+- Command/manifest/browser parity proof: manifest action catalog is 65 actions after the 12 additive M6 project/Component authored mutations; project manifest/summary expose artboards, Components, instances, ownership, capabilities and dependencies; globalThis.veyra M6 authored helpers call dispatchCompatibilityCommand rather than introducing a parallel mutation path; preview/dispatch implicit IDs ignore human command labels/provenance and match on the same snapshot.
+- Persistence/history proof: canonical serialization persists artboards/Components/instances/overrides and omits the singular compatibility artboard alias; parse-normalize-serialize is deterministic; Store mutations remain transactional/undoable; rejected ownership/dependency/validation operations leave document/history/revision unchanged; runtime playback remains ephemeral.
+- Progress snapshot update: verified percentages intentionally remain unchanged because M6 has not been independently verified; roadmap position now records implementation complete / awaiting verification.
+- Suggestions added to suggestions: none.
+- Known limitations: M6 intentionally supports no Component clipping beyond clip=false (capability: clipping='none-only'); View Models/Data Binding, full Layout, Text, broader advanced effects, full layered state-machine expansion, scripting/WGSL/path effects, MCP/headless CLI, distributable runtime SDKs, collaboration and external Libraries remain deferred roadmap work; transient Component runtime playback state is not serialized.
 ```
