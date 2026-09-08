@@ -8,400 +8,171 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 ## Mandatory agent rules
 
-1. Preserve the validation boundary. Invalid commands, dangling refs, unsupported writes, ownership conflicts, and ambiguous targets must fail before committed state.
-2. Human names are display metadata only. Stable typed refs, property addresses, semantic records, and canonical command IDs are authoritative.
-3. Do not create a second AI-only model, command system, dependency graph, or mutation path.
-4. Human UI, browser AI, future MCP/headless adapters, scripts, and tests must reuse the same canonical services.
-5. Authored values and evaluated/derived values must remain distinct. Never mutate evaluated output as if it were authored source.
-6. Dependency and ownership results must be deterministic, JSON-safe, evidence-backed, and name-independent.
-7. Preview/dry-run operations must never mutate document, revision, history, selection, runtime state, or semantic records.
-8. Multi-command plans must be atomic: either the authorized plan commits completely or committed state remains unchanged.
-9. Do not silently invent ownership for systems that are not active or whose runtime state is unavailable. Return explicit `unknown`, `inactive`, or `runtime-context-required` information instead.
-10. Do not implement new Rive feature families, MCP, CLI/headless transport, Components, View Models/Data Binding, Layout, Text, advanced state machines, scripting/WGSL, or geometry hit-testing in this milestone.
-11. Do not weaken existing M0/M1/M2 tests or capability declarations.
-12. Run `npm test` and `npm run check` before handoff.
+1. Preserve the validation boundary and atomic Store semantics.
+2. Human names are display metadata only; stable typed refs/addresses are authoritative.
+3. Do not create a second command path to fix these issues. Repair the canonical control plane / Store-command wiring.
+4. Preview and execution must share the same prepared command for the same current snapshot without making repeated legitimate creates collide.
+5. AI/script/user provenance supplied to canonical commands must not silently become another source or label.
+6. Browser compatibility APIs with command equivalents must be thin aliases over the canonical control plane; remaining unavoidable direct seams must be explicitly machine-audited.
+7. Do not weaken M0–M3 tests or capability declarations.
+8. Run `npm test` and `npm run check` before handoff.
 
 ---
 
-# MILESTONE M3 — Unified AI/Human Control Plane + Dependency & Ownership Graph
+# MILESTONE M3 — Unified AI/Human Control Plane + Dependency & Ownership Graph — CORRECTION PASS
 
-**Status:** `AWAITING VERIFICATION`
+**Status:** `CORRECTIONS REQUIRED`
 
-## Goal
+## Verification result
 
-Close the remaining P0 control-plane gap before adding major Rive feature families.
+The main M3 implementation is accepted in principle:
 
-After M3, Veyra must have one canonical machine-readable service layer through which an AI or human-facing adapter can:
+- canonical DOM-free service registry/control plane exists;
+- dependency graph provides deterministic forward/reverse typed edges;
+- authored/evaluated ownership inspection exists;
+- canonical read exposes ownership/source context;
+- preview uses the real dispatcher on an isolated Store;
+- atomic plan preflight/rollback exists;
+- structured `verifyChange` exists;
+- manifest service/command declarations are mechanically generated;
+- dedicated M3 adversarial tests exist;
+- latest `main` GitHub Actions Tests run is green.
 
-- inspect the project manifest;
-- query/resolve stable entities;
-- read authored and evaluated values;
-- inspect dependencies and dependents;
-- understand who currently owns/overrides a property;
-- preview a command without side effects;
-- dispatch one validated command;
-- dispatch an atomic multi-command plan;
-- validate the document;
-- verify the result of an edit.
-
-The browser-facing `globalThis.veyra` surface must become a thin adapter over those same canonical services rather than an independently maintained feature list.
-
-This milestone covers **current Veyra entity kinds and current evaluation systems only**. Future Components, Data Binding, Layout, scripts, etc. must be able to plug into the same contracts later.
+Do **not** rewrite those completed systems. Fix only the contract gaps below.
 
 ---
 
-## Task 1 — Create one canonical Veyra service/control registry
+## Correction 1 — Repeated canonical create commands must not reuse the same generated ID
 
-Introduce a DOM-free canonical service module/registry that composes the existing authoritative systems rather than duplicating them:
+### Problem
 
-- `createProjectManifest()`;
-- `buildSemanticIndex()` / `queryEntities()` / `resolveSemantic()`;
-- property addressing/read APIs;
-- `VEYRA_COMMAND_TABLE` / `dispatchVeyraCommand()`;
-- document validation/normalization;
-- dependency/ownership services added by this milestone.
-
-Target public direction from `plan.md`:
-
-```text
-veyra.getManifest(options)
-veyra.queryEntities(query, options)
-veyra.resolveSemantic(intent, options)
-veyra.read(refOrAddress, options)
-veyra.previewCommand(command, options)
-veyra.dispatchCommand(command)
-veyra.dispatchPlan(commands, policy)
-veyra.validateDocument()
-veyra.verifyChange(expected, options)
-veyra.getDependencyGraph(refOrAddress?, options)
-veyra.getOwnership(refOrAddress, options)
-```
-
-### Requirements
-
-- one implementation per operation;
-- JSON-safe inputs/outputs;
-- no DOM dependency in the core service layer;
-- browser/MCP/headless layers are adapters only;
-- capability metadata and real callable services agree mechanically;
-- service names/actions cannot drift from the manifest/command table silently.
-
-Do not delete useful existing APIs merely to satisfy naming. Preserve compatibility through thin aliases/adapters where sensible.
-
----
-
-## Task 2 — Build the deterministic current-graph dependency model
-
-Create a reusable dependency graph for current persistent entities and relevant property addresses.
-
-The graph must distinguish at least:
-
-```text
-dependsOn
-usedBy / dependents
-owns / ownedBy
-reads
-writes / controls
-animates / animatedBy
-references / referencedBy
-runtimeUses
-semanticRelation
-```
-
-Cover current relationships where applicable:
-
-### Scene / hierarchy / paint
-
-- node parent/child;
-- paint owner and gradient-stop owner;
-- path/mesh-vertex ownership;
-- asset references that exist in the current model.
-
-### Rigging
-
-- bone parent/child;
-- mesh weights -> bones;
-- constraints -> bones/controls/paths;
-- control/constraint relationships.
-
-### Animation
-
-- timeline -> tracks -> keyframes;
-- track -> property address -> target entity/property;
-- machine state -> timeline.
-
-### State machines / interactions
-
-- machine -> states/inputs/transitions/conditions;
-- transitions -> endpoint states;
-- conditions -> machine inputs;
-- listeners -> targets/timelines/machines/inputs.
-
-### Semantics
-
-- semantic record -> target;
-- semantic relation edges;
-- semantic record lifecycle dependencies.
-
-### Requirements
-
-- stable typed refs/property addresses only;
-- names never participate in graph identity;
-- deterministic ordering;
-- forward and reverse traversal;
-- bounded traversal (`depth`, `maxNodes`, `maxEdges` or equivalent);
-- missing/invalid refs fail precisely;
-- no document mutation.
-
-Do not duplicate resolver relationship logic blindly. Extract/share graph construction where practical so semantic indexing and dependency inspection cannot contradict each other.
-
----
-
-## Task 3 — Implement authored/evaluated ownership inspection
-
-Add a canonical ownership API for a property address or supported entity/property target.
-
-For a property, an AI must be able to ask:
-
-```text
-What is the authored value?
-What is the evaluated value?
-Which systems can affect it?
-Which system currently supplies/overrides the evaluated value?
-What would overwrite a direct authored edit?
-```
-
-For the systems Veyra currently implements, ownership analysis must recognize where applicable:
-
-- direct authored property;
-- timeline track/keyframe animation;
-- active/current state-machine timeline contribution when sufficient runtime context is supplied;
-- rig constraints / evaluated transforms;
-- mesh deformation / bone influence where relevant;
-- runtime/listener-driven state when the necessary runtime context is available.
-
-### Result contract
-
-Use a machine-readable shape that separates potential controllers from active ownership, for example:
+`prepareCommandDescriptor()` currently derives implicit IDs from:
 
 ```js
-{
-  target: { address: 'node:.../transform/x' },
-  authoredValue: 100,
-  evaluatedValue: 140,
-  activeOwner: {
-    kind: 'animation-track',
-    ref: { kind: 'track', id: '...' },
-    evidence: [...]
-  },
-  ownerStack: [...],
-  potentialControllers: [...],
-  writableSource: { ... },
-  warnings: [...]
-}
+{ documentId, descriptor, salt }
 ```
 
-Exact shape may evolve, but it must explicitly communicate when runtime context is required rather than guessing.
+and standalone preview + dispatch both use the constant salt `canonical`.
 
-### Hard rule
+Because the seed contains only the document **ID**, not the current document state/generation context, dispatching the same valid create descriptor again after the first successful create produces the same generated entity ID. The second create can therefore fail as a duplicate instead of creating another object.
 
-If the visible/evaluated value is derived, the API must identify the authored source an edit should target instead of encouraging writes to derived output.
+This affects implicit-ID creation paths such as:
 
----
+- `add`;
+- `addSemantic`;
+- `addTimeline`;
+- rig/asset creation commands;
+- state-machine child creation;
+- `setKeyframe` when it must create a track/keyframe;
+- any other prepared create action using the same scheme.
 
-## Task 4 — Canonical read API with source/ownership context
+### Required behavior
 
-Implement `read(refOrAddress, options)` or an equivalent canonical service.
+For one current Store/document snapshot:
 
-For property addresses, support at least:
+- preview and the immediately corresponding dispatch of the same descriptor must predict/use the same stable ID;
+- after that successful mutation changes the current state, repeating the same create descriptor must generate a **different valid stable ID**;
+- no wall-clock/random value may be required merely to avoid collision;
+- explicit caller-supplied IDs remain authoritative;
+- atomic-plan deterministic explicit-ID behavior remains intact;
+- duplicate explicit IDs must still fail precisely.
 
-- authored value;
-- evaluated value when requested;
-- capability information;
-- ownership result;
-- direct dependencies/dependents where requested.
+Use a deterministic current-state/generation seed or another canonical mechanism that satisfies all of the above. Do not turn `add` into accidental idempotency.
 
-For entity refs, return a bounded machine-readable entity view containing:
+### Mandatory tests
 
-- stable typed ref;
-- advisory display metadata;
-- semantics;
-- capabilities;
-- dependency summary;
-- ownership/source summary where meaningful.
-
-### Requirements
-
-- read-only;
-- name-independent;
-- JSON-safe;
-- bounded options;
-- precise unknown/missing/unsupported results;
-- no need for callers to scrape internal Store/model objects.
-
----
-
-## Task 5 — Side-effect-free command preview / dry run
-
-Implement canonical command preview using the same real command validation/mutation path as execution.
-
-A preview must answer, as applicable:
-
-- would the command succeed?;
-- what stable entities/property addresses would change?;
-- authored before/after values;
-- relevant evaluated before/after values where deterministic;
-- dependencies/dependents affected;
-- ownership conflicts or overwrite warnings;
-- lifecycle cascades;
-- validation errors;
-- whether the change is reversible/undoable.
-
-### Hard requirements
-
-- do not reimplement command mutation logic;
-- run against an isolated clone/sandbox Store or equivalent;
-- real dispatcher validation must be exercised;
-- original Store document/revision/history/selection/runtime state remain byte-for-byte/logically unchanged;
-- preview result is deterministic for the same document + command + options.
+1. preview `add` -> dispatch `add`: predicted and actual refs match;
+2. repeat the identical `add` descriptor on the now-changed Store: succeeds with a different ref;
+3. preview before the second dispatch predicts that second ref correctly;
+4. same repeated-create behavior for at least one non-node registry (`addSemantic`, `addTimeline`, rig entity, or machine child);
+5. explicit duplicate ID still fails atomically;
+6. failed preview/dispatch does not consume or corrupt the next deterministic generated ID;
+7. undo/redo followed by preview/dispatch has deterministic, documented behavior and does not silently collide.
 
 ---
 
-## Task 6 — Atomic multi-command plan dispatch
+## Correction 2 — Preserve canonical command provenance for every mutating command
 
-Implement `dispatchPlan(commands, policy)` over the canonical command system.
+### Problem
 
-Minimum requirements:
+The control plane accepts JSON command provenance such as:
 
-- ordered JSON-safe command descriptors;
-- preflight validation/preview of the full plan;
-- atomic application;
-- rollback of the entire plan if any command fails;
-- one machine-readable result containing each step outcome;
-- command provenance preserved;
-- no partial document/history state after failure;
-- stable refs produced by earlier plan steps can be referenced by later steps through an explicit, deterministic mechanism if supported; otherwise explicitly declare that limitation rather than guessing.
-
-The plan API must not resolve human names during execution. Semantic intent must already have been resolved to stable refs/addresses before destructive application.
-
----
-
-## Task 7 — Verification and change assertions
-
-Add a canonical `verifyChange(expected, options)` service suitable for both AI and tests.
-
-It must support deterministic assertions over current Veyra capabilities such as:
-
-- entity exists / does not exist by stable ref;
-- authored property equals expected value;
-- evaluated property equals expected value;
-- semantic record/relation exists;
-- dependency edge exists / does not exist;
-- ownership matches expected controller/source;
-- command/plan produced no unexpected dangling refs or validation errors.
-
-Return structured pass/fail evidence rather than only booleans.
-
-This service is read-only and must never "fix" failed expectations.
-
----
-
-## Task 8 — Browser adapter + command/manifest/UI drift prevention
-
-Refactor `globalThis.veyra` so the new services are thin calls into the canonical control plane.
-
-At minimum expose/reuse:
-
-```text
-getManifest
-queryEntities
-resolveSemantic
-read
-previewCommand
-dispatchCommand
-dispatchPlan
-validateDocument
-verifyChange
-getDependencyGraph
-getOwnership
+```js
+command: { source: 'ai', label: '...' }
 ```
 
-### Drift prevention
+but some command-table entries still call older Store methods that do not accept/forward that descriptor. For example, `add` dispatches to `store.add(type, options)`, while `VeyraStore.add()` commits with its own string label. The supplied AI/script provenance is therefore lost and can be recorded as the default user source.
 
-Add mechanical tests proving:
+A canonical control plane cannot claim common provenance while silently dropping it for part of the command catalog.
 
-- every dispatchable command advertised to AI maps to a real `VEYRA_COMMAND_TABLE` action;
-- browser `dispatchCommand` uses the same dispatcher;
-- browser query/resolution uses the same resolver implementation;
-- manifest capability/service declarations map to real callable services;
-- newly added current-editor mutation commands cannot be exposed in one machine-readable surface but absent from the others.
+### Required behavior
 
-Audit current human editor mutation paths. For current operations that already have command-table equivalents, route the UI through the canonical dispatcher/service path where practical in this milestone. Where a direct Store mutation remains temporarily necessary, document it in a **machine-readable parity audit** rather than hiding it.
+Audit every mutating `VEYRA_COMMAND_TABLE` action.
 
-The goal is measurable convergence toward one mutation plane, not a cosmetic wrapper around several divergent APIs.
+For commands that create a committed Store history entry:
 
----
+- supplied `source`, `label`, property addresses, and supported provenance metadata must reach that history entry;
+- human/UI callers that omit a descriptor keep sensible existing defaults;
+- no mutation logic is duplicated in `commands.js`;
+- transaction/history-only actions retain their intentional semantics;
+- plan-level provenance and ordered `planSteps` remain correct.
 
-## Task 9 — Adversarial integration suite
+If a command intentionally cannot preserve descriptor provenance, declare it mechanically and do not advertise a stronger contract.
 
-Add dedicated tests covering at least:
+### Mandatory tests
 
-1. dependency graph is identical after human names are randomized;
-2. dependency reverse edges agree with forward edges;
-3. timeline-track ownership of an animated property is reported correctly;
-4. an unanimated authored property reports authored ownership;
-5. constraint/rig-derived ownership or influence is reported without pretending derived values are directly writable;
-6. runtime-context-required ownership is reported explicitly when state-machine/runtime state is absent;
-7. `read()` distinguishes authored and evaluated values;
-8. preview of a valid command reports changes but mutates nothing;
-9. preview of an invalid command fails with zero side effects;
-10. a successful plan applies all commands in order;
-11. a failing plan leaves document/revision/history unchanged;
-12. verifyChange returns structured evidence for pass and fail cases;
-13. browser service adapters return the same results as direct canonical services;
-14. service/manifest/command registry drift tests are mechanical rather than hard-coded duplicate lists;
-15. serialize/load + rename/reorder preserves dependency and ownership identity;
-16. all M0/M1/M2 tests remain green.
+At minimum prove through `createVeyraControlPlane(...).dispatchCommand()` that:
+
+1. `add` with `source: ai` records `source: ai` and the supplied label;
+2. a delete/removal command preserves supplied provenance;
+3. one timeline/rig/state-machine mutation preserves supplied provenance;
+4. invalid commands create no provenance/history entry;
+5. a mechanical audit covers all mutating command-table actions so future actions cannot silently drop provenance.
 
 ---
 
-## Explicit non-goals
+## Correction 3 — Finish the browser mutation-plane convergence promised by M3
 
-Do not implement in M3:
+### Problem
 
-- MCP server;
-- headless CLI/transport;
-- new component/artboard system;
-- View Models/Data Binding;
-- new layout system;
-- richer listener/state-machine feature parity;
-- Bézier/path hit-testing;
-- path-topology authoring;
-- Text;
-- scripting/WGSL;
-- collaboration;
-- runtime SDK/export work.
+The new M3 services are exposed through `controlPlane`, but `globalThis.veyra` still contains compatibility mutation helpers that directly call `VeyraStore` even when a canonical command equivalent already exists.
 
-Those systems will plug into this control/ownership contract later rather than inventing their own AI surfaces.
+Examples currently include browser helpers such as timeline/keyframe mutations that call Store methods directly. `queryEntities` / `resolveSemantic` also bypass the control-plane wrapper for source-code compatibility, even though the control plane already exposes them.
+
+M3 explicitly requires the browser AI surface to be a thin adapter over the same canonical services and requires direct seams to be visible rather than hidden.
+
+### Required behavior
+
+- Route compatibility browser mutation helpers through `controlPlane.dispatchCommand()` whenever an equivalent command-table action exists.
+- Preserve their public return shapes where reasonable so compatibility is not needlessly broken.
+- Route canonical read/query/resolve browser methods through the control plane, or replace brittle source-regex compatibility tests with behavior/identity tests that prove both surfaces use the same underlying implementation.
+- Expand `VEYRA_UI_MUTATION_PARITY_AUDIT` (or rename/generalize it if appropriate) to include **browser/globalThis mutation seams**, not only human UI seams.
+- Any remaining direct Store mutation with no command equivalent must be explicitly listed with reason and follow-up category.
+- Do not hide direct mutation paths behind comments while manifest metadata claims full convergence.
+
+### Mandatory tests
+
+1. browser compatibility `createTimeline`/equivalent command-backed helper reaches the same canonical dispatcher and provenance path;
+2. browser keyframe add/remove/move helpers with command equivalents use the canonical dispatcher;
+3. browser canonical query/resolver results equal direct control-plane results without duplicating resolver logic;
+4. a mechanical browser mutation audit identifies every remaining direct Store mutation helper;
+5. no command-backed browser mutation helper bypasses the canonical dispatcher;
+6. existing public compatibility tests remain behaviorally valid.
 
 ---
 
 ## Acceptance criteria
 
-M3 is complete only when:
+M3 is VERIFIED only when:
 
-- one canonical DOM-free control/service layer exists for the current project model;
-- dependency graph supports deterministic forward/reverse inspection over the current graph;
-- ownership inspection clearly separates authored, evaluated, potential and active controllers;
-- canonical read exposes source/ownership context;
-- command preview uses the real dispatcher with zero side effects;
-- multi-command plans are atomic and rollback completely on failure;
-- deterministic change verification exists;
-- browser AI APIs are thin adapters over the same services;
-- manifest/service/command capability drift is mechanically tested;
-- names never participate in dependency/ownership identity;
-- derived output is never presented as a directly writable authored source;
-- all existing tests remain green;
+- all original M3 architecture/tests remain green;
+- repeated identical implicit-ID create descriptors remain valid after prior successful creates and do not collide;
+- preview and dispatch still predict/use identical IDs for the same current snapshot;
+- canonical mutating commands preserve supplied provenance consistently;
+- command-backed browser mutation compatibility helpers use the canonical dispatcher;
+- remaining direct UI/browser Store seams are machine-readable and honest;
+- dependency/ownership/read/preview/plan/verify behavior remains unchanged except for the required fixes;
+- all M0/M1/M2 tests remain green;
 - `npm test` passes;
 - `npm run check` passes;
 - latest GitHub Actions Tests run passes.
@@ -411,21 +182,18 @@ M3 is complete only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits: M3 canonical service registry/dependency graph/control plane integration
-- Changed files: src/veyra/serviceRegistry.js, src/veyra/dependencyGraph.js, src/veyra/controlPlane.js, src/veyra/store.js, src/veyra/commands.js, src/veyra/manifest.js, src/index.js, veyra.js, tests/veyra-control-plane.test.mjs, milestone.md
-- Tests added/changed: dedicated M3 adversarial integration suite for name-invariant dependency graph, reverse edges, animation/authored/constraint/runtime ownership, authored-vs-evaluated reads, zero-side-effect preview, deterministic preview ids, atomic plan success/rollback/provenance, structured verification, browser/service/manifest/command drift, serialize/load rename/reorder invariance
-- npm test: PASS
-- npm run check: PASS
-- Canonical service registry proof: VEYRA_SERVICE_DEFINITIONS is neutral metadata; createVeyraControlPlane mechanically asserts its callable names equal VEYRA_SERVICE_NAMES; manifest and browser consume the same registry/services
-- Dependency graph proof: graph derives current structural facts from the M2 semantic index, adds property-address nodes and explicit typed forward/reverse edges with inverseType metadata, deterministic ordering and bounded traversal; display names are absent from graph identity
-- Ownership/source proof: getOwnership separates authored/evaluated values, activeOwner, ownerStack, potentialControllers and writableSource; animation tracks, state-machine runtime-context requirements and rig constraints are reported without treating derived output as authored source
-- Authored-vs-evaluated read proof: readVeyra/read returns authored/evaluated values, evaluated source, ownership/capabilities and optional direct dependency context for addresses; entity reads return bounded stable-ref views, advisory display metadata, semantics and dependency summary
-- Preview zero-side-effect proof: previewVeyraCommand runs the actual dispatchVeyraCommand path on an isolated VeyraStore clone; valid/invalid previews leave source document/revision/history/selection untouched and deterministic command ids keep create previews aligned with canonical dispatch
-- Atomic plan/rollback proof: dispatchVeyraPlan preflights every ordered step through the real dispatcher on an isolated sandbox and commits the validated final document once; any failed preflight leaves source document/revision/history unchanged; history keeps ordered planSteps provenance
-- verifyChange proof: structured assertions cover entity presence/absence, authored/evaluated equality, semantics, dependency edges, ownership and document validity/no-dangling-ref validation with pass/fail evidence
-- Browser/manifest/command drift proof: globalThis.veyra M3 methods are thin controlPlane calls; manifest controlPlane service names are generated from VEYRA_SERVICE_DEFINITIONS; command actions are generated from VEYRA_COMMAND_TABLE and now expose the actual command descriptor arg schema mechanically
-- UI mutation parity audit: VEYRA_UI_MUTATION_PARITY_AUDIT explicitly records canonical control-plane browser services, continuous Store transaction gestures, direct Store CRUD paths with command equivalents, and temporary document-shell direct paths
-- Name-independence proof: dependency graph excludes display names and adversarial tests randomize names plus reorder registries before exact graph comparison; ownership controller identity survives serialize/load + rename/reorder
-- Suggestions added to `suggestions`: none
-- Known limitations: atomic-plan result placeholders are intentionally unsupported; later steps must use explicit stable ids. Runtime ownership can identify active state-machine timeline contribution only when sufficient runtimeContext is supplied. UI continuous gestures remain on the canonical Store transaction port and several editor controls still call command-equivalent Store methods directly as documented by the parity audit.
+- Correction commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Repeated-create deterministic-id proof:
+- Preview/dispatch id-alignment proof:
+- Command provenance audit proof:
+- Browser canonical-dispatch proof:
+- Remaining direct mutation seams:
+- Dependency/ownership regression proof:
+- Name-independence proof:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
