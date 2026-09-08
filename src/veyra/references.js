@@ -3,6 +3,10 @@
 // intentionally excluded; they are addressed through their owning entity.
 export const VEYRA_REFERENCE_KINDS = Object.freeze([
   'document',
+  'artboard',
+  'component',
+  'componentInstance',
+  'componentOverride',
   'node',
   'pathVertex',
   'bone',
@@ -32,77 +36,28 @@ export function createReference(kind, id) {
   return { kind, id: normalizedId };
 }
 
-export function createDocumentRef(id) {
-  return createReference('document', id);
-}
-
-export function createNodeRef(id) {
-  return createReference('node', id);
-}
-
-export function createPathVertexRef(id) {
-  return createReference('pathVertex', id);
-}
-
-export function createAssetRef(id) {
-  return createReference('asset', id);
-}
-
-export function createBoneRef(id) {
-  return createReference('bone', id);
-}
-
-export function createMeshRef(id) {
-  return createReference('mesh', id);
-}
-
-export function createMeshVertexRef(id) {
-  return createReference('meshVertex', id);
-}
-
-export function createConstraintRef(id) {
-  return createReference('constraint', id);
-}
-
-export function createControlRef(id) {
-  return createReference('control', id);
-}
-
-export function createTimelineRef(id) {
-  return createReference('timeline', id);
-}
-
-export function createTrackRef(id) {
-  return createReference('track', id);
-}
-
-export function createKeyframeRef(id) {
-  return createReference('keyframe', id);
-}
-
-export function createStateMachineRef(id) {
-  return createReference('stateMachine', id);
-}
-
-export function createMachineStateRef(id) {
-  return createReference('machineState', id);
-}
-
-export function createMachineInputRef(id) {
-  return createReference('machineInput', id);
-}
-
-export function createMachineTransitionRef(id) {
-  return createReference('machineTransition', id);
-}
-
-export function createMachineConditionRef(id) {
-  return createReference('machineCondition', id);
-}
-
-export function createListenerRef(id) {
-  return createReference('listener', id);
-}
+export function createDocumentRef(id) { return createReference('document', id); }
+export function createArtboardRef(id) { return createReference('artboard', id); }
+export function createComponentRef(id) { return createReference('component', id); }
+export function createComponentInstanceRef(id) { return createReference('componentInstance', id); }
+export function createComponentOverrideRef(id) { return createReference('componentOverride', id); }
+export function createNodeRef(id) { return createReference('node', id); }
+export function createPathVertexRef(id) { return createReference('pathVertex', id); }
+export function createAssetRef(id) { return createReference('asset', id); }
+export function createBoneRef(id) { return createReference('bone', id); }
+export function createMeshRef(id) { return createReference('mesh', id); }
+export function createMeshVertexRef(id) { return createReference('meshVertex', id); }
+export function createConstraintRef(id) { return createReference('constraint', id); }
+export function createControlRef(id) { return createReference('control', id); }
+export function createTimelineRef(id) { return createReference('timeline', id); }
+export function createTrackRef(id) { return createReference('track', id); }
+export function createKeyframeRef(id) { return createReference('keyframe', id); }
+export function createStateMachineRef(id) { return createReference('stateMachine', id); }
+export function createMachineStateRef(id) { return createReference('machineState', id); }
+export function createMachineInputRef(id) { return createReference('machineInput', id); }
+export function createMachineTransitionRef(id) { return createReference('machineTransition', id); }
+export function createMachineConditionRef(id) { return createReference('machineCondition', id); }
+export function createListenerRef(id) { return createReference('listener', id); }
 
 export function createPaintRef(ownerKindOrRef, ownerId = null) {
   let ownerKind;
@@ -143,13 +98,8 @@ export function paintOwnerReference(value) {
   return createReference(ownerKind, ownerId);
 }
 
-export function createGradientStopRef(id) {
-  return createReference('gradientStop', id);
-}
-
-export function createSemanticRecordRef(id) {
-  return createReference('semanticRecord', id);
-}
+export function createGradientStopRef(id) { return createReference('gradientStop', id); }
+export function createSemanticRecordRef(id) { return createReference('semanticRecord', id); }
 
 export function createSemanticTargetRef(kindOrRefOrId, id = null) {
   if (kindOrRefOrId && typeof kindOrRefOrId === 'object') {
