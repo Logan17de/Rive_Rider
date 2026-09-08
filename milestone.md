@@ -8,171 +8,294 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 ## Mandatory agent rules
 
-1. Preserve the validation boundary and atomic Store semantics.
-2. Human names are display metadata only; stable typed refs/addresses are authoritative.
-3. Do not create a second command path to fix these issues. Repair the canonical control plane / Store-command wiring.
-4. Preview and execution must share the same prepared command for the same current snapshot without making repeated legitimate creates collide.
-5. AI/script/user provenance supplied to canonical commands must not silently become another source or label.
-6. Browser compatibility APIs with command equivalents must be thin aliases over the canonical control plane; remaining unavoidable direct seams must be explicitly machine-audited.
-7. Do not weaken M0–M3 tests or capability declarations.
-8. Run `npm test` and `npm run check` before handoff.
+1. Preserve the validation boundary. Invalid listener refs/actions, machine targets, hit-test inputs, and interaction topology must fail before authored state is committed.
+2. Human names are display metadata only. Listener targeting, machine interaction, hit testing, dependencies, and tests use stable refs/IDs and evaluated structure.
+3. Persistent listener authoring must use the canonical M3 control plane / command bus. Do not create an interaction-only mutation path.
+4. Runtime machine inputs/triggers/playback are ephemeral runtime state. Do not write runtime output back into authored document state or persistent history.
+5. Hit testing must use the evaluated scene and the renderer's geometry semantics. Do not use display names or bounding-box guesses where this milestone requires exact geometry.
+6. Pointer participation is independent from visual opacity. Do not make opacity implicitly disable hit participation unless an explicit interaction rule says so.
+7. Preview/read/query services remain read-only. Pointer simulation used for tests must not mutate authored state unless a validated persistent command is explicitly dispatched.
+8. Preserve editor-tool isolation: canvas authoring gestures and runtime interaction events must not accidentally trigger each other.
+9. Keep current legacy machine inputs for compatibility, but do not expand them into the future data architecture. View Models/Data Binding come later.
+10. Do not implement Components/multi-artboards, View Models/Data Binding, layered state-machine parity, accessibility/event parity, Text, Layout, scripting/WGSL, MCP/headless transport, or collaboration in this milestone.
+11. Do not weaken M0–M3 tests, name-independence rules, control-plane drift tests, or capability declarations.
+12. Run `npm test` and `npm run check` before handoff.
 
 ---
 
-# MILESTONE M3 — Unified AI/Human Control Plane + Dependency & Ownership Graph — CORRECTION PASS
+# MILESTONE M4 — Close the Current Interaction Loop
 
-**Status:** `AWAITING VERIFICATION`
+**Roadmap mapping:** `plan.md` M1 — Close current interaction loop  
+**Status:** `READY`
 
-## Verification result
+## Goal
 
-The main M3 implementation is accepted in principle:
+Finish the interaction system that already exists in partial form so a current Veyra project can reliably execute this complete loop:
 
-- canonical DOM-free service registry/control plane exists;
-- dependency graph provides deterministic forward/reverse typed edges;
-- authored/evaluated ownership inspection exists;
-- canonical read exposes ownership/source context;
-- preview uses the real dispatcher on an isolated Store;
-- atomic plan preflight/rollback exists;
-- structured `verifyChange` exists;
-- manifest service/command declarations are mechanically generated;
-- dedicated M3 adversarial tests exist;
-- latest `main` GitHub Actions Tests run is green.
-
-Do **not** rewrite those completed systems. Fix only the contract gaps below.
-
----
-
-## Correction 1 — Repeated canonical create commands must not reuse the same generated ID
-
-### Problem
-
-`prepareCommandDescriptor()` currently derives implicit IDs from:
-
-```js
-{ documentId, descriptor, salt }
+```text
+pointer input
+  -> evaluated hit target
+  -> listener resolution
+  -> listener action
+  -> timeline or persistent machine runtime input/trigger
+  -> state transition/runtime evaluation
+  -> evaluated animation frame
+  -> visible render
 ```
 
-and standalone preview + dispatch both use the constant salt `canonical`.
+At the end of M4, current listeners must be fully authorable through the same Store/command/control-plane contracts as other persistent features, machine listener intents must actually execute in the editor host, and supported current shapes/paths must participate in deterministic evaluated hit testing rather than broad bounding-box guesses.
 
-Because the seed contains only the document **ID**, not the current document state/generation context, dispatching the same valid create descriptor again after the first successful create produces the same generated entity ID. The second create can therefore fail as a duplicate instead of creating another object.
-
-This affects implicit-ID creation paths such as:
-
-- `add`;
-- `addSemantic`;
-- `addTimeline`;
-- rig/asset creation commands;
-- state-machine child creation;
-- `setKeyframe` when it must create a track/keyframe;
-- any other prepared create action using the same scheme.
-
-### Required behavior
-
-For one current Store/document snapshot:
-
-- preview and the immediately corresponding dispatch of the same descriptor must predict/use the same stable ID;
-- after that successful mutation changes the current state, repeating the same create descriptor must generate a **different valid stable ID**;
-- no wall-clock/random value may be required merely to avoid collision;
-- explicit caller-supplied IDs remain authoritative;
-- atomic-plan deterministic explicit-ID behavior remains intact;
-- duplicate explicit IDs must still fail precisely.
-
-Use a deterministic current-state/generation seed or another canonical mechanism that satisfies all of the above. Do not turn `add` into accidental idempotency.
-
-### Mandatory tests
-
-1. preview `add` -> dispatch `add`: predicted and actual refs match;
-2. repeat the identical `add` descriptor on the now-changed Store: succeeds with a different ref;
-3. preview before the second dispatch predicts that second ref correctly;
-4. same repeated-create behavior for at least one non-node registry (`addSemantic`, `addTimeline`, rig entity, or machine child);
-5. explicit duplicate ID still fails atomically;
-6. failed preview/dispatch does not consume or corrupt the next deterministic generated ID;
-7. undo/redo followed by preview/dispatch has deterministic, documented behavior and does not silently collide.
+This milestone closes the **current legacy interaction branch**. It does not attempt the later full Rive Listener/Event/Data Binding architecture.
 
 ---
 
-## Correction 2 — Preserve canonical command provenance for every mutating command
+## Task 1 — Complete current listener authored CRUD parity
 
-### Problem
+Audit the current listener model first, then complete create/read/update/delete for the listener capabilities Veyra already supports.
 
-The control plane accepts JSON command provenance such as:
+Current compatibility scope includes pointer listeners and the existing action families such as:
 
-```js
-command: { source: 'ai', label: '...' }
+```text
+play
+stop
+seek
+setInput
+fire
 ```
 
-but some command-table entries still call older Store methods that do not accept/forward that descriptor. For example, `add` dispatches to `store.add(type, options)`, while `VeyraStore.add()` commits with its own string label. The supplied AI/script provenance is therefore lost and can be recorded as the default user source.
+### Requirements
 
-A canonical control plane cannot claim common provenance while silently dropping it for part of the command catalog.
+- stable listener IDs remain authoritative;
+- listener target/timeline/machine/input references are typed ID-backed refs where applicable;
+- add/update/remove listener operations exist in `VeyraStore`;
+- equivalent JSON-safe `VEYRA_COMMAND_TABLE` actions exist;
+- supplied command provenance reaches history;
+- manifest/actions/capabilities advertise only behavior that actually works;
+- dependency graph includes listener target/action dependencies in both directions;
+- semantic query/index continues to expose listener relationships without relying on names;
+- serialization/normalization validates dangling targets/actions before commit;
+- deleting referenced entities follows an explicit deterministic listener cleanup/blocking policy with tests;
+- undo/redo and preview work through the canonical control plane.
 
-### Required behavior
-
-Audit every mutating `VEYRA_COMMAND_TABLE` action.
-
-For commands that create a committed Store history entry:
-
-- supplied `source`, `label`, property addresses, and supported provenance metadata must reach that history entry;
-- human/UI callers that omit a descriptor keep sensible existing defaults;
-- no mutation logic is duplicated in `commands.js`;
-- transaction/history-only actions retain their intentional semantics;
-- plan-level provenance and ordered `planSteps` remain correct.
-
-If a command intentionally cannot preserve descriptor provenance, declare it mechanically and do not advertise a stronger contract.
-
-### Mandatory tests
-
-At minimum prove through `createVeyraControlPlane(...).dispatchCommand()` that:
-
-1. `add` with `source: ai` records `source: ai` and the supplied label;
-2. a delete/removal command preserves supplied provenance;
-3. one timeline/rig/state-machine mutation preserves supplied provenance;
-4. invalid commands create no provenance/history entry;
-5. a mechanical audit covers all mutating command-table actions so future actions cannot silently drop provenance.
+Do not implement the later full Rive multi-action/data-bound listener system unless a minimal schema normalization is genuinely required for correctness of the current model.
 
 ---
 
-## Correction 3 — Finish the browser mutation-plane convergence promised by M3
+## Task 2 — Implement the machine-listener host bridge
 
-### Problem
+The current runtime can resolve machine-oriented listener intents, but the editor host must actually apply them.
 
-The new M3 services are exposed through `controlPlane`, but `globalThis.veyra` still contains compatibility mutation helpers that directly call `VeyraStore` even when a canonical command equivalent already exists.
+Implement the host bridge for current machine actions:
 
-Examples currently include browser helpers such as timeline/keyframe mutations that call Store methods directly. `queryEntities` / `resolveSemantic` also bypass the control-plane wrapper for source-code compatibility, even though the control plane already exposes them.
+```text
+setInput(machineRef, inputRef, value)
+fire(machineRef, inputRef)
+```
 
-M3 explicitly requires the browser AI surface to be a thin adapter over the same canonical services and requires direct seams to be visible rather than hidden.
+### Requirements
+
+- machine and input are resolved by stable IDs, never display names;
+- use one persistent runtime instance per active machine/document context rather than constructing an unrelated runtime for every pointer event;
+- `setInput` validates input type/value through the runtime's existing contract;
+- `fire` follows trigger semantics exactly once per intended event;
+- runtime mutations do not create authored Store history entries;
+- deleting/replacing a machine invalidates stale runtime instances deterministically;
+- unsupported/missing runtime targets return structured diagnostics rather than being silently ignored;
+- manifest/host availability must stop claiming `unsupported` once the bridge is actually available;
+- direct timeline `play`/`stop`/`seek` interaction behavior must remain working.
+
+---
+
+## Task 3 — Define deterministic pointer and `click` lifecycle semantics
+
+Complete the current pointer event model and add explicit `click` behavior.
+
+At minimum support the current interaction lifecycle for:
+
+```text
+pointerenter
+pointerleave
+pointermove
+pointerdown
+pointerup
+click
+```
 
 ### Required behavior
 
-- Route compatibility browser mutation helpers through `controlPlane.dispatchCommand()` whenever an equivalent command-table action exists.
-- Preserve their public return shapes where reasonable so compatibility is not needlessly broken.
-- Route canonical read/query/resolve browser methods through the control plane, or replace brittle source-regex compatibility tests with behavior/identity tests that prove both surfaces use the same underlying implementation.
-- Expand `VEYRA_UI_MUTATION_PARITY_AUDIT` (or rename/generalize it if appropriate) to include **browser/globalThis mutation seams**, not only human UI seams.
-- Any remaining direct Store mutation with no command equivalent must be explicitly listed with reason and follow-up category.
-- Do not hide direct mutation paths behind comments while manifest metadata claims full convergence.
+Define and test, rather than leaving browser accident as the contract:
 
-### Mandatory tests
+- evaluated hit target selection and draw-order precedence;
+- enter/leave changes when the top eligible target changes;
+- down/up dispatch ordering;
+- `click` only when the down/up lifecycle qualifies under the documented Veyra rule;
+- pointer movement between down and up;
+- overlapping targets;
+- hidden/non-interactive/pass-through participation;
+- ancestor visibility/interaction participation;
+- interaction participation independent of opacity;
+- pointer runtime must not interfere with active editor drawing/vertex/rig gestures.
 
-1. browser compatibility `createTimeline`/equivalent command-backed helper reaches the same canonical dispatcher and provenance path;
-2. browser keyframe add/remove/move helpers with command equivalents use the canonical dispatcher;
-3. browser canonical query/resolver results equal direct control-plane results without duplicating resolver logic;
-4. a mechanical browser mutation audit identifies every remaining direct Store mutation helper;
-5. no command-backed browser mutation helper bypasses the canonical dispatcher;
-6. existing public compatibility tests remain behaviorally valid.
+If an explicit current `pointerEvents`/interaction-participation property is needed, add it through the full feature completeness path for the affected current entity kind: model, property address/capability, command path, manifest, UI where appropriate, serialization, tests, and name independence.
+
+---
+
+## Task 4 — Exact evaluated hit testing for current geometry
+
+Replace approximate bounds-only interaction hits for the current supported geometry where exact behavior is required.
+
+Cover at least:
+
+- rectangle;
+- ellipse;
+- polygon;
+- star;
+- editable/custom path fills;
+- current strokes where the renderer treats them as interactive geometry.
+
+### Path/geometry requirements
+
+- operate on evaluated geometry/world transforms;
+- deterministic Bézier/path flattening or equivalent exact-enough mathematical test with a documented tolerance;
+- implicit closure for filled open paths must match rendered fill semantics;
+- stroke-width participation must match current transformed stroke behavior, including non-scaling behavior if the current renderer supports it;
+- transformed/rotated/scaled shapes must hit in the correct world position;
+- near-boundary tests must be deterministic;
+- no broad bounding-box fallback may report a hit outside the rendered current polygon/star/path merely because the point lies inside its bounds;
+- group/container behavior must follow child/evaluated geometry rather than inventing filled group rectangles.
+
+Clipping, Layout and Component-aware hit testing are explicitly deferred until those feature families exist, but the API should remain extensible for them.
+
+---
+
+## Task 5 — Integrate pointer → listener → runtime → evaluated render
+
+Wire the interaction transport so resolved intents are consumed by the correct host subsystem.
+
+Required current routing:
+
+```text
+listener play/stop/seek -> timeline playback bridge
+listener setInput/fire  -> persistent machine runtime bridge
+```
+
+Then ensure machine runtime output can affect the evaluated/rendered scene through the existing machine/timeline evaluation path.
+
+### Requirements
+
+- one event must not be executed twice because both resolver and transport observe it;
+- runtime step timing is deterministic in tests;
+- transition conditions react to the updated machine input/trigger;
+- state changes select/evaluate the expected timeline;
+- crossfade/current existing transition behavior remains valid;
+- render invalidation occurs when runtime output changes;
+- authored document serialization is unchanged by runtime-only interaction;
+- stopping/resetting/replacing runtime context does not leave stale evaluated overrides.
+
+---
+
+## Task 6 — Canonical control-plane and machine-readable exposure
+
+Bring interaction authoring/inspection under the M3 contracts.
+
+At minimum:
+
+- listener CRUD commands are in the canonical command table;
+- manifest listener capabilities/action schemas are generated from real current support;
+- dependency graph reports listener targets and runtime uses;
+- `read()` can inspect current listener entities through stable refs;
+- `previewCommand()` can preview listener authored changes with zero side effects;
+- `verifyChange()` can assert listener existence/reference topology through existing entity/dependency assertions, extending the assertion vocabulary only if genuinely needed;
+- browser compatibility mutation helpers, if added, route through the canonical dispatcher;
+- runtime-only interaction APIs are explicitly marked runtime-only rather than persistent commands.
+
+Do not add an AI-only listener editing surface.
+
+---
+
+## Task 7 — Minimal human editor listener authoring parity
+
+Current listeners must not be code/AI-only authored objects.
+
+Provide a bounded editor UI for the current listener model that can at least:
+
+- inspect listeners attached to the selected supported target;
+- create a supported pointer listener;
+- choose the supported event;
+- configure the supported current action and its typed target/value fields;
+- update it;
+- remove it;
+- show precise validation when a referenced machine/input/timeline is incompatible or missing.
+
+The UI may be utilitarian; correctness and shared command/model semantics matter more than visual polish in this milestone.
+
+Where continuous or selection-only UI operations cannot sensibly use a command descriptor, keep the existing audited Store transaction/read ports rather than inventing a second mutation system.
+
+---
+
+## Task 8 — End-to-end and adversarial interaction suite
+
+Add dedicated tests covering at least:
+
+1. listener add/update/remove through Store + command + control-plane preview/dispatch + undo/redo;
+2. listener refs survive rename/reorder/serialize-load unchanged;
+3. invalid/dangling listener targets/actions fail before commit;
+4. pointer hit outside polygon/star/path geometry but inside its bounding box does **not** hit;
+5. path fill implicit closure behaves consistently with renderer semantics;
+6. stroke near-boundary hit tests are deterministic under transforms;
+7. opacity change alone does not remove interaction participation;
+8. hidden/non-interactive/pass-through rules behave exactly as documented;
+9. pointer enter/leave/down/up/click lifecycle is deterministic;
+10. overlapping targets use documented evaluated draw-order precedence;
+11. listener `setInput` changes the intended machine runtime input by stable ref;
+12. listener `fire` triggers exactly the intended trigger lifecycle;
+13. pointer -> listener -> machine transition -> evaluated timeline property produces the expected visible/evaluated value;
+14. the same full loop still works after all relevant human names are randomized/misleading;
+15. runtime interaction does not change serialized authored document/history;
+16. authoring tool gestures do not accidentally dispatch runtime listeners;
+17. timeline listener `play`/`stop`/`seek` regressions remain green;
+18. all M0–M3 tests remain green.
+
+Where practical, add a golden interaction fixture that contains overlapping shapes, a custom path, a listener, a machine, inputs, transitions and timelines so the whole loop is exercised against one realistic graph.
+
+---
+
+## Explicit non-goals
+
+Do not implement in M4:
+
+- headless Node API / CLI transport;
+- MCP server;
+- path topology authoring commands such as `addVertex` / `removeVertex` unless strictly required to repair existing hit-test correctness;
+- multi-artboards / Components;
+- View Models / Data Binding / Property Groups / converters / lists;
+- full layered state-machine parity or visual graph editor;
+- full future Rive listener sources/actions, data-bound listener parameters, accessibility semantics or general event system;
+- clipping/layout/component-aware hit testing before those systems exist;
+- Text;
+- scripting/WGSL;
+- collaboration/runtime SDK/export work.
+
+Follow-up ideas stay in `suggestions`.
 
 ---
 
 ## Acceptance criteria
 
-M3 is VERIFIED only when:
+M4 is complete only when:
 
-- all original M3 architecture/tests remain green;
-- repeated identical implicit-ID create descriptors remain valid after prior successful creates and do not collide;
-- preview and dispatch still predict/use identical IDs for the same current snapshot;
-- canonical mutating commands preserve supplied provenance consistently;
-- command-backed browser mutation compatibility helpers use the canonical dispatcher;
-- remaining direct UI/browser Store seams are machine-readable and honest;
-- dependency/ownership/read/preview/plan/verify behavior remains unchanged except for the required fixes;
-- all M0/M1/M2 tests remain green;
+- current listener CRUD is fully persistent, validated, undoable and available through Store/command/control-plane/manifest/UI;
+- machine listener `setInput` and `fire` intents execute against the correct persistent runtime by stable refs;
+- timeline listener actions remain functional;
+- deterministic `click` and pointer lifecycle semantics are implemented;
+- current polygon/star/path/fill/stroke interaction hits use evaluated geometry rather than broad bounds guesses;
+- relevant Bézier/path/transform/boundary regressions are covered;
+- interaction participation is not implicitly coupled to opacity;
+- pointer -> listener -> runtime/state transition -> evaluated frame/render works end to end;
+- runtime-only interaction does not mutate authored document/history;
+- dependency/manifest/control-plane surfaces truthfully describe listener/runtime support;
+- all targeting remains name-independent;
+- all existing tests remain green;
 - `npm test` passes;
 - `npm run check` passes;
 - latest GitHub Actions Tests run passes.
@@ -182,18 +305,22 @@ M3 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits: 5c4f916f85763bfe553004fbd9eab240be41c0d1 — Fix M3 control-plane convergence blockers [m3-corrected]
-- Changed files: src/veyra/controlPlane.js, src/veyra/store.js, src/veyra/commands.js, src/veyra/serviceRegistry.js, src/veyra/manifest.js, src/index.js, veyra.js, tests/veyra-resolver.test.mjs, tests/veyra-control-plane-corrections.test.mjs, milestone.md
-- Tests added/changed: dedicated M3 correction suite for repeated implicit creates, snapshot preview/dispatch alignment, failed-command seed stability, undo/redo generation behavior, provenance preservation/mechanical audit, browser canonical-dispatch mapping/direct-seam audit; M2 browser resolver test strengthened from brittle direct-wrapper regex to control-plane behavioral parity + thin-adapter check
-- npm test: PASS in correction workflow gate
-- npm run check: PASS in correction workflow gate
-- Repeated-create deterministic-id proof: implicit ids seed from a deterministic stable-id generation snapshot; successful creates alter the snapshot, failed attempts do not, explicit ids remain authoritative
-- Preview/dispatch id-alignment proof: preview and standalone dispatch prepare from the same current snapshot + canonical salt; repeated create after mutation gets a new id; undo reuses an absent undone id deterministically and redo advances because the id exists again
-- Command provenance audit proof: node add/remove/removeSelection now forward descriptors; Store records metadata; every undoable VEYRA_COMMAND_TABLE action is mechanically exercised with a marker and module initialization fails if provenance is not forwarded
-- Browser canonical-dispatch proof: command-backed globalThis.veyra compatibility helpers route through dispatchCompatibilityCommand -> controlPlane.dispatchCommand; query/resolve are thin control-plane adapters
-- Remaining direct mutation seams: setMeshVertexWeights has no current command equivalent and is explicitly audited; playback/machine runtime helpers are marked runtime-only; human continuous gestures and document-shell seams remain explicitly audited
-- Dependency/ownership regression proof: original M3 suite remains unchanged and green
-- Name-independence proof: original M2/M3 name-randomization/reorder suites remain green
-- Suggestions added to `suggestions`: none
-- Known limitations: bulk mesh-vertex weight replacement still lacks a command-table action and remains an explicit audited direct Store seam; runtime-only playback/machine state remains outside persistent Store history by design
+- Implementation commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Listener CRUD/control-plane proof:
+- Listener validation/lifecycle proof:
+- Machine runtime bridge proof:
+- Pointer/click lifecycle proof:
+- Exact evaluated hit-test proof:
+- Bézier/stroke/transform proof:
+- Pointer -> listener -> machine -> evaluated render proof:
+- Runtime non-mutation proof:
+- Manifest/dependency/control-plane proof:
+- Human UI listener authoring proof:
+- Name-independence proof:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
