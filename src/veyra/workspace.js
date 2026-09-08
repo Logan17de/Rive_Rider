@@ -6,6 +6,7 @@ import { createSvgViewBoxScreenTransform } from './viewport.js';
 export const VEYRA_ZOOM_MIN = 0.1;
 export const VEYRA_ZOOM_MAX = 8;
 export const VEYRA_PAN_DRAG_THRESHOLD_PX = 3;
+export const VEYRA_ARTBOARD_RESIZE_TOLERANCE_PX = 7;
 export const VEYRA_MIN_NODE_SCALE = 0.01;
 export const VEYRA_UI_THEMES = Object.freeze([
   'neutral-dark',
@@ -121,6 +122,43 @@ export function shouldSuppressCanvasContextMenu(gesture) {
   return gesture?.kind === 'right' && Boolean(gesture.moved);
 }
 
+export function classifyArtboardResizeZone(point, rect, tolerance = VEYRA_ARTBOARD_RESIZE_TOLERANCE_PX) {
+  if (!point || !rect) return null;
+  const left = finite(rect.left);
+  const top = finite(rect.top);
+  const width = Math.max(0, finite(rect.width, finite(rect.right) - left));
+  const height = Math.max(0, finite(rect.height, finite(rect.bottom) - top));
+  const right = Number.isFinite(Number(rect.right)) ? Number(rect.right) : left + width;
+  const bottom = Number.isFinite(Number(rect.bottom)) ? Number(rect.bottom) : top + height;
+  const x = finite(point.x, NaN);
+  const y = finite(point.y, NaN);
+  const t = clamp(tolerance, 1, 24);
+  if (![x, y, left, top, right, bottom].every(Number.isFinite)) return null;
+  if (x < left - t || x > right + t || y < top - t || y > bottom + t) return null;
+
+  const nearLeft = Math.abs(x - left) <= t;
+  const nearRight = Math.abs(x - right) <= t;
+  const nearTop = Math.abs(y - top) <= t;
+  const nearBottom = Math.abs(y - bottom) <= t;
+  if (nearTop && nearLeft) return 'top-left';
+  if (nearTop && nearRight) return 'top-right';
+  if (nearBottom && nearLeft) return 'bottom-left';
+  if (nearBottom && nearRight) return 'bottom-right';
+  if (nearLeft && y >= top && y <= bottom) return 'left';
+  if (nearRight && y >= top && y <= bottom) return 'right';
+  if (nearTop && x >= left && x <= right) return 'top';
+  if (nearBottom && x >= left && x <= right) return 'bottom';
+  return null;
+}
+
+export function artboardResizeCursor(direction) {
+  if (direction === 'left' || direction === 'right') return 'ew-resize';
+  if (direction === 'top' || direction === 'bottom') return 'ns-resize';
+  if (direction === 'top-left' || direction === 'bottom-right') return 'nwse-resize';
+  if (direction === 'top-right' || direction === 'bottom-left') return 'nesw-resize';
+  return '';
+}
+
 function screenMapping(artboard, viewport, screenSize) {
   return createSvgViewBoxScreenTransform(artboard, {
     width: finite(screenSize?.width, artboard?.width),
@@ -150,41 +188,44 @@ export function zoomViewportAtScreen(viewport, nextZoom, screenPoint, artboard, 
     y: finite(screenPoint?.y),
   });
   const zoom = clampZoom(nextZoom);
-  const nextBase = screenMapping(artboard, {
+  const screenWidth = Math.max(1, finite(screenSize?.width, artboard.width));
+  const screenHeight = Math.max(1, finite(screenSize?.height, artboard.height));
+  return {
     ...viewport,
     zoom,
-    centerX: artboard.width / 2,
-    centerY: artboard.height / 2,
-  }, screenSize);
-  if (!nextBase) return { ...viewport, zoom };
-  const viewBoxWidth = artboard.width / zoom;
-  const viewBoxHeight = artboard.height / zoom;
-  const centerX = worldPoint.x - (finite(screenPoint?.x) - nextBase.offsetX) / nextBase.scale + viewBoxWidth / 2;
-  const centerY = worldPoint.y - (finite(screenPoint?.y) - nextBase.offsetY) / nextBase.scale + viewBoxHeight / 2;
-  return { ...viewport, zoom, centerX, centerY };
+    centerX: worldPoint.x - (finite(screenPoint?.x) - screenWidth / 2) / zoom,
+    centerY: worldPoint.y - (finite(screenPoint?.y) - screenHeight / 2) / zoom,
+  };
 }
 
-export function fitArtboardViewport(artboard) {
+export function fitArtboardViewport(artboard, screenSize = {}, options = {}) {
+  const width = Math.max(1, finite(artboard?.width, 1));
+  const height = Math.max(1, finite(artboard?.height, 1));
+  const screenWidth = Math.max(1, finite(screenSize?.width, width));
+  const screenHeight = Math.max(1, finite(screenSize?.height, height));
+  const padding = clamp(options.padding ?? 0, 0, Math.min(screenWidth, screenHeight) * 0.4);
   return {
-    zoom: 1,
-    centerX: finite(artboard?.width) / 2,
-    centerY: finite(artboard?.height) / 2,
+    zoom: clampZoom(Math.min(
+      Math.max(1, screenWidth - padding * 2) / width,
+      Math.max(1, screenHeight - padding * 2) / height,
+    )),
+    centerX: width / 2,
+    centerY: height / 2,
   };
 }
 
 export function fitBoundsViewport(bounds, artboard, screenSize, options = {}) {
-  if (!bounds) return fitArtboardViewport(artboard);
+  if (!bounds) return fitArtboardViewport(artboard, screenSize, options);
   const screenWidth = Math.max(1, finite(screenSize?.width, artboard.width));
   const screenHeight = Math.max(1, finite(screenSize?.height, artboard.height));
   const padding = clamp(options.padding ?? 48, 0, Math.min(screenWidth, screenHeight) * 0.4);
   const boundsWidth = Math.max(1, Math.abs(finite(bounds.maxX) - finite(bounds.minX)));
   const boundsHeight = Math.max(1, Math.abs(finite(bounds.maxY) - finite(bounds.minY)));
-  const baseScale = Math.min(screenWidth / Math.max(1, artboard.width), screenHeight / Math.max(1, artboard.height));
   const availableWidth = Math.max(1, screenWidth - padding * 2);
   const availableHeight = Math.max(1, screenHeight - padding * 2);
   const zoom = clampZoom(Math.min(
-    availableWidth / (boundsWidth * baseScale),
-    availableHeight / (boundsHeight * baseScale),
+    availableWidth / boundsWidth,
+    availableHeight / boundsHeight,
   ));
   return {
     zoom,

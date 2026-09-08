@@ -51,6 +51,7 @@ export { createSvgViewBox, createSvgViewBoxScreenTransform, VEYRA_SVG_PRESERVE_A
 // M5 workspace helpers are deterministic editor-state primitives: they never
 // author document content, so browser navigation and tests share one contract.
 export {
+  VEYRA_ARTBOARD_RESIZE_TOLERANCE_PX,
   VEYRA_MIN_NODE_SCALE,
   VEYRA_PAN_DRAG_THRESHOLD_PX,
   VEYRA_UI_THEMES,
@@ -58,7 +59,9 @@ export {
   VEYRA_WORKSPACE_PANEL_LIMITS,
   VEYRA_ZOOM_MAX,
   VEYRA_ZOOM_MIN,
+  artboardResizeCursor,
   clampZoom,
+  classifyArtboardResizeZone,
   evaluatedRefBounds,
   fitArtboardViewport,
   fitBoundsViewport,

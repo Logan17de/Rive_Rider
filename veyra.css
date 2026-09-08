@@ -336,24 +336,8 @@ button svg,
 
 #veyraCanvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; user-select: none; }
 
-.artboardHandle { position: absolute; pointer-events: auto; background: transparent; }
-.artboardHandle[data-mode='pan'] { cursor: move; }
-.artboardHandle[data-mode='pan'][data-side='top'] { left: -2px; top: -2px; width: calc(100% + 4px); height: 8px; }
-.artboardHandle[data-mode='pan'][data-side='left'] { left: -2px; top: 8px; width: 8px; height: calc(100% - 16px); }
-.artboardHandle[data-mode='resize-x'] { right: -5px; top: 12%; width: 10px; height: 76%; cursor: ew-resize; }
-.artboardHandle[data-mode='resize-y'] { bottom: -5px; left: 12%; width: 76%; height: 10px; cursor: ns-resize; }
-.artboardHandle[data-mode='resize'] {
-  right: -9px;
-  bottom: -9px;
-  width: 18px;
-  height: 18px;
-  cursor: nwse-resize;
-  background: var(--control);
-  border: 2px solid #0a070e;
-  border-radius: 5px;
-  box-shadow: 0 3px 10px rgb(0 0 0 / 55%);
-}
-.artboardHandle[data-mode='resize']:hover { background: var(--control-deep); }
+/* Artboard resize zones are classified in screen space by JS; no permanent edge/corner handle DOM. */
+.stageViewport.isArtboardResizing { user-select: none; }
 .artboardBackground { cursor: default; }
 .workspaceCatcher { fill: transparent; pointer-events: all; }
 .stagePanel[data-tool='pan'] .stageViewport,

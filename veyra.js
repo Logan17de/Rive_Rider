@@ -58,6 +58,8 @@ import { createInteractionDispatcher } from './src/veyra/interactionTransport.js
 import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
 import {
   VEYRA_WORKSPACE_LAYOUT_DEFAULTS,
+  artboardResizeCursor,
+  classifyArtboardResizeZone,
   evaluatedRefBounds,
   fitArtboardViewport,
   fitBoundsViewport,
@@ -323,7 +325,10 @@ function applyWorkspaceLayout(persist = true) {
   timelineToggle.setAttribute('aria-expanded', String(!workspaceLayout.bottomCollapsed));
   timelineToggle.title = workspaceLayout.bottomCollapsed ? 'Expand timeline' : 'Collapse timeline';
   if (persist) localStorage.setItem(UI_LAYOUT_KEY, JSON.stringify(workspaceLayout));
-  requestAnimationFrame(() => syncArtboardFrame());
+  requestAnimationFrame(() => {
+    renderer.syncViewport();
+    syncArtboardFrame();
+  });
   return { ...workspaceLayout };
 }
 
@@ -2393,8 +2398,16 @@ function applyViewportState(next, status = null) {
   return applied;
 }
 
+function editorScreenSize() {
+  const rect = stageViewport.getBoundingClientRect();
+  return {
+    width: Math.max(1, stageViewport.clientWidth || rect.width || 1),
+    height: Math.max(1, stageViewport.clientHeight || rect.height || 1),
+  };
+}
+
 function fitCanvas() {
-  return applyViewportState(fitArtboardViewport(store.document.artboard), 'Artboard fitted');
+  return applyViewportState(fitArtboardViewport(store.document.artboard, editorScreenSize(), { padding: 32 }), 'Artboard fitted');
 }
 
 function focusEditorReference(ref, { select = true, padding = 54 } = {}) {
@@ -2406,11 +2419,7 @@ function focusEditorReference(ref, { select = true, padding = 54 } = {}) {
     return false;
   }
   if (select) store.select(ref);
-  const rect = stageViewport.getBoundingClientRect();
-  const next = fitBoundsViewport(bounds, store.document.artboard, {
-    width: stageViewport.clientWidth || rect.width,
-    height: stageViewport.clientHeight || rect.height,
-  }, { padding });
+  const next = fitBoundsViewport(bounds, store.document.artboard, editorScreenSize(), { padding });
   applyViewportState(next, `Focused ${ref.kind}`);
   return true;
 }
@@ -2426,7 +2435,7 @@ function fitSelection() {
 $('zoomOut').onclick = () => setZoom(zoom / 1.2);
 $('zoomIn').onclick = () => setZoom(zoom * 1.2);
 $('zoomFit').onclick = fitCanvas;
-$('zoom100').onclick = () => applyViewportState({ ...renderer.getViewport(), zoom: 1 }, 'Canvas 100%');
+$('zoom100').onclick = () => applyViewportState({ ...renderer.getViewport(), zoom: 1 }, 'Canvas 100% · 1 CSS px per world unit');
 $('fitSelection').onclick = fitSelection;
 $('focusSelection').onclick = () => store.selectedRef ? focusEditorReference(store.selectedRef) : showToast('Select an object to focus', true);
 
@@ -2448,10 +2457,97 @@ stageViewport.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 let panGesture = null;
+let activeArtboardResize = null;
 let spacePanHeld = false;
 let spacePanUsed = false;
 let suppressNextCanvasContextMenu = false;
+
+function artboardResizeDirectionAt(clientX, clientY) {
+  const rect = artboardFrame.getBoundingClientRect();
+  return classifyArtboardResizeZone({ x: clientX, y: clientY }, rect);
+}
+
+function beginArtboardResize(event, direction) {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const startViewport = renderer.getViewport();
+  const startArtboard = { width: store.document.artboard.width, height: store.document.artboard.height };
+  const matrix = canvas.getScreenCTM();
+  const screenScaleX = matrix ? Math.hypot(matrix.a, matrix.b) : renderer.zoom;
+  const screenScaleY = matrix ? Math.hypot(matrix.c, matrix.d) : renderer.zoom;
+  const gesture = createArtboardResizeGesture({
+    store,
+    direction,
+    start: { x: event.clientX, y: event.clientY },
+    startArtboard,
+    scaleX: 1 / Math.max(1e-9, screenScaleX),
+    scaleY: 1 / Math.max(1e-9, screenScaleY),
+    onMove: (state) => {
+      renderer.setViewport({
+        ...startViewport,
+        centerX: startViewport.centerX + state.anchorShiftX,
+        centerY: startViewport.centerY + state.anchorShiftY,
+      });
+      syncArtboardFrame();
+      setStatus(`Artboard ${state.width} × ${state.height}`);
+    },
+  });
+  stageViewport.setPointerCapture?.(event.pointerId);
+  stageViewport.classList.add('isArtboardResizing');
+  stageViewport.style.cursor = artboardResizeCursor(direction);
+
+  const cleanup = () => {
+    stageViewport.removeEventListener('pointermove', onMove);
+    stageViewport.removeEventListener('pointerup', onCommit);
+    stageViewport.removeEventListener('pointercancel', onCancel);
+    stageViewport.removeEventListener('lostpointercapture', onCancel);
+    stageViewport.classList.remove('isArtboardResizing');
+    stageViewport.style.cursor = '';
+    activeArtboardResize = null;
+  };
+  const finish = (commitGesture, nextEvent) => {
+    cleanup();
+    try { stageViewport.releasePointerCapture?.(event.pointerId); } catch {}
+    const result = commitGesture ? gesture.end() : gesture.cancel();
+    if (!commitGesture) {
+      renderer.setViewport(startViewport);
+      evaluateCurrentFrame();
+      syncArtboardFrame();
+      setStatus('Artboard resize cancelled');
+    } else if (result.error) {
+      renderer.setViewport(startViewport);
+      renderAll('validation-error');
+    } else if (result.committed) {
+      syncArtboardFrame();
+      setStatus(`Artboard ${result.width} × ${result.height}`);
+    }
+    return result;
+  };
+  const onMove = (nextEvent) => {
+    if (nextEvent.pointerId !== event.pointerId) return;
+    gesture.move(nextEvent);
+  };
+  const onCommit = (nextEvent) => {
+    if (nextEvent.pointerId !== event.pointerId) return;
+    finish(true, nextEvent);
+  };
+  const onCancel = (nextEvent) => {
+    if (nextEvent.pointerId != null && nextEvent.pointerId !== event.pointerId) return;
+    finish(false, nextEvent);
+  };
+  activeArtboardResize = { pointerId: event.pointerId, direction, cancel: () => finish(false, event), gesture };
+  stageViewport.addEventListener('pointermove', onMove);
+  stageViewport.addEventListener('pointerup', onCommit);
+  stageViewport.addEventListener('pointercancel', onCancel);
+  stageViewport.addEventListener('lostpointercapture', onCancel);
+}
+
 stageViewport.addEventListener('pointerdown', (event) => {
+  const resizeDirection = event.button === 0 ? artboardResizeDirectionAt(event.clientX, event.clientY) : null;
+  if (resizeDirection) {
+    beginArtboardResize(event, resizeDirection);
+    return;
+  }
   const kind = navigationPanKind(event, { tool: currentTool, spaceHeld: spacePanHeld });
   if (!kind) return;
   if (kind === 'right') suppressNextCanvasContextMenu = false;
@@ -2471,7 +2567,10 @@ stageViewport.addEventListener('pointerdown', (event) => {
 }, true);
 
 stageViewport.addEventListener('pointermove', (event) => {
-  if (!panGesture || event.pointerId !== panGesture.pointerId) return;
+  if (!panGesture || event.pointerId !== panGesture.pointerId) {
+    if (!activeArtboardResize) stageViewport.style.cursor = artboardResizeCursor(artboardResizeDirectionAt(event.clientX, event.clientY));
+    return;
+  }
   if (!panGesture.moved) {
     panGesture.moved = panGestureMoved(
       { x: panGesture.startX, y: panGesture.startY },
@@ -2509,7 +2608,7 @@ stageViewport.addEventListener('contextmenu', (event) => {
   suppressNextCanvasContextMenu = false;
 });
 
-new ResizeObserver(() => syncArtboardFrame()).observe(stageViewport);
+new ResizeObserver(() => { renderer.syncViewport(); syncArtboardFrame(); }).observe(stageViewport);
 
 function wireWorkspaceSplitter(element, panel) {
   if (!element) return;
@@ -2585,58 +2684,9 @@ canvas.addEventListener('pointermove', previewPointerHandlers.onPointerMove, tru
 canvas.addEventListener('pointerup', previewPointerHandlers.onPointerUp, true);
 canvas.addEventListener('pointerdown', previewPointerHandlers.onPointerDown, true);
 
-// Artboard handles: the top/left border strips pan the canvas (drag the
-// artboard), while the right/bottom strips and corner resize the artboard.
-artboardFrame.addEventListener('pointerdown', (event) => {
-  const handle = event.target instanceof Element ? event.target.closest('.artboardHandle') : null;
-  if (!handle || event.button !== 0) return;
-  const mode = handle.dataset.mode;
-  event.preventDefault();
-  event.stopPropagation();
-  const start = { x: event.clientX, y: event.clientY };
-  const startArtboard = { width: store.document.artboard.width, height: store.document.artboard.height };
-  const matrix = canvas.getScreenCTM();
-  const scaleX = matrix ? 1 / matrix.a : 1;
-  const scaleY = matrix ? 1 / matrix.d : 1;
-  let moved = false;
-  const resizeGesture = mode === 'pan' ? null : createArtboardResizeGesture({
-    store,
-    start,
-    startArtboard,
-    mode,
-    scaleX,
-    scaleY,
-    onMove: ({ width, height }) => setStatus(`Artboard ${width} × ${height}`),
-  });
-  handle.setPointerCapture?.(event.pointerId);
-  const onMove = (nextEvent) => {
-    const result = resizeGesture?.move(nextEvent);
-    if (result?.moved) moved = true;
-    if (mode === 'pan') {
-      if (!moved && Math.hypot(nextEvent.clientX - start.x, nextEvent.clientY - start.y) < 2) return;
-      moved = true;
-      const dx = (nextEvent.clientX - start.x) * scaleX;
-      const dy = (nextEvent.clientY - start.y) * scaleY;
-      renderer.panBy(-dx, -dy);
-      syncArtboardFrame();
-    }
-  };
-  const onEnd = (nextEvent) => {
-    artboardFrame.removeEventListener('pointermove', onMove);
-    artboardFrame.removeEventListener('pointerup', onEnd);
-    artboardFrame.removeEventListener('pointercancel', onEnd);
-    handle.releasePointerCapture?.(nextEvent.pointerId);
-    if (resizeGesture?.active) {
-      const result = resizeGesture.end();
-      if (result.error) renderAll('validation-error');
-    } else if (mode === 'pan' && moved) {
-      setStatus('Canvas panned');
-    }
-  };
-  artboardFrame.addEventListener('pointermove', onMove);
-  artboardFrame.addEventListener('pointerup', onEnd);
-  artboardFrame.addEventListener('pointercancel', onEnd);
-});
+// Artboard resizing is classified in final CSS pixels by the stage capture
+// path above. There are no permanent DOM edge/corner handles: every edge and
+// corner gets the same screen-space tolerance at every zoom.
 
 const toggleInspectorButton = $('toggleInspector');
 const toggleHierarchyButton = $('toggleHierarchyPanel');
@@ -2705,6 +2755,10 @@ window.addEventListener('keydown', (event) => {
       store.removeSelection();
     }
   } else if (!editing && event.key === 'Escape') {
+    if (activeArtboardResize) {
+      activeArtboardResize.cancel();
+      return;
+    }
     if (renderer.cancelActiveGesture()) {
       setStatus('Authoring gesture cancelled');
       return;

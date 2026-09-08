@@ -144,7 +144,7 @@ assert.ok(VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX < VEYRA_HIT_TEST_TOLERANCE_PX, 
   const center = localToScreen(ellipse, artboard, viewport, { x: 0, y: 0 });
   const boundary = localToScreen(ellipse, artboard, viewport, { x: 25, y: 0 });
   const radius = boundary.x - center.x;
-  assert.ok(radius >= 799.9, 'fixture creates an ~800px rendered ellipse radius');
+  assert.ok(radius >= 199.9, 'zoom=8 means an exact ~200 CSS-pixel rendered ellipse radius');
   assert.deepEqual(hitTestPoint({ x: center.x + radius - 0.1, y: center.y }, document, viewport), { kind: 'node', id: 'huge-ellipse' }, 'large/high-zoom ellipse accepts a point 0.1px inside its true SVG boundary');
   assert.equal(hitTestPoint({ x: center.x + radius + 0.1, y: center.y }, document, viewport), null, 'large/high-zoom ellipse rejects a point 0.1px outside its true SVG boundary');
 }

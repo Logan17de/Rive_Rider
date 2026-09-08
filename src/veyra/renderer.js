@@ -71,12 +71,13 @@ export class VeyraRenderer {
   setZoom(value, anchor = null) {
     const nextZoom = Math.min(8, Math.max(0.1, Number(value) || 1));
     if (this.scene && anchor && this.viewCenter) {
-      const oldWidth = this.scene.artboard.width / this.zoom;
-      const oldHeight = this.scene.artboard.height / this.zoom;
+      const screen = this.getScreenSize();
+      const oldWidth = screen.width / this.zoom;
+      const oldHeight = screen.height / this.zoom;
       const relativeX = (anchor.x - (this.viewCenter.x - oldWidth / 2)) / oldWidth;
       const relativeY = (anchor.y - (this.viewCenter.y - oldHeight / 2)) / oldHeight;
-      const nextWidth = this.scene.artboard.width / nextZoom;
-      const nextHeight = this.scene.artboard.height / nextZoom;
+      const nextWidth = screen.width / nextZoom;
+      const nextHeight = screen.height / nextZoom;
       this.viewCenter = {
         x: anchor.x - (relativeX - 0.5) * nextWidth,
         y: anchor.y - (relativeY - 0.5) * nextHeight,
@@ -114,6 +115,19 @@ export class VeyraRenderer {
     };
   }
 
+  getScreenSize() {
+    const rect = this.svg.getBoundingClientRect?.();
+    return {
+      width: Math.max(1, Number(this.svg.clientWidth || rect?.width || this.scene?.artboard.width || 1)),
+      height: Math.max(1, Number(this.svg.clientHeight || rect?.height || this.scene?.artboard.height || 1)),
+    };
+  }
+
+  syncViewport() {
+    this.#applyViewBox();
+    return { ...this.getViewport(), ...this.getScreenSize() };
+  }
+
   setViewport(viewport = {}) {
     if (!this.scene) return this.getViewport();
     const zoom = Math.min(8, Math.max(0.1, Number(viewport.zoom ?? this.zoom) || 1));
@@ -149,7 +163,10 @@ export class VeyraRenderer {
     if (!this.scene) return;
     const { width, height } = this.scene.artboard;
     if (!this.viewCenter) this.viewCenter = { x: width / 2, y: height / 2 };
+    const screen = this.getScreenSize();
     const viewBox = createSvgViewBox(this.scene.artboard, {
+      width: screen.width,
+      height: screen.height,
       zoom: this.zoom,
       centerX: this.viewCenter.x,
       centerY: this.viewCenter.y,
