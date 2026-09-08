@@ -14,16 +14,16 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 | --- | ---: | --- |
 | AI-native identity / semantics / control architecture | **~92–94%** | Stable typed identity, universal semantics, name-independent resolution, canonical control plane, dependency/ownership graph, preview/dispatch/verify and machine-readable interaction surfaces are verified for the pre-M6 feature graph. |
 | Core editor / engine foundation | **~87–90%** | M0–M5 foundations are independently verified, including stable workspace/camera mechanics and persistent artboard frame origin. |
-| Modern Rive editor/runtime feature parity | **~44–48%** | M6 adds substantial multi-artboard/Component code, but it is not counted until the Component runtime/evaluation corrections below pass. |
+| Modern Rive editor/runtime feature parity | **~44–48%** | M6 adds substantial multi-artboard/Component code, but it is not counted until the Component runtime/evaluation corrections below pass independent verification. |
 | Full Veyra target: Rive parity + every feature AI-readable/controlable | **~42–45%** | Architecture remains ahead of raw Rive feature breadth. |
-| Remaining full-target work | **~55–58%** | M6 corrections plus Data Binding/View Models, full layered state machines/listeners/events, paint/effects, text/media, layout, advanced rigging/animation, scripting/WGSL, runtimes/SDKs/export, collaboration and MCP/agent productization. |
+| Remaining full-target work | **~55–58%** | M6 verification plus Data Binding/View Models, full layered state machines/listeners/events, paint/effects, text/media, layout, advanced rigging/animation, scripting/WGSL, runtimes/SDKs/export, collaboration and MCP/agent productization. |
 
 ### Roadmap position
 
 - `plan.md` **M0 — AI Identity & Control Foundation:** **VERIFIED**.
 - `plan.md` **M1 — Close current interaction loop:** **VERIFIED**.
 - Interstitial **M5 — Workspace UX Stabilization:** **VERIFIED**.
-- **Current milestone M6 maps to `plan.md` M2 — Multi-artboard, Components and project graph: CORRECTIONS REQUIRED.**
+- **Current milestone M6 maps to `plan.md` M2 — Multi-artboard, Components and project graph: CORRECTIONS IMPLEMENTED, AWAITING VERIFICATION.**
 
 ### Progress maintenance rule
 
@@ -34,11 +34,11 @@ Every future milestone verification or milestone advance must update this **Prog
 # MILESTONE M6 — Multi-Artboard, Components & Project Graph — CORRECTION PASS
 
 **Roadmap mapping:** `plan.md` M2 — Multi-artboard, Components and project graph  
-**Status:** `CORRECTIONS REQUIRED`
+**Status:** `AWAITING VERIFICATION`
 
 ## Independent verification summary
 
-The implementation at `90c373586c0c0d74eaa6185fb12bae32fc606518` is substantial and most of M6 is real:
+The implementation at `90c373586c0c0d74eaa6185fb12bae32fc606518` established most of M6:
 
 - versioned multi-artboard migration and explicit artboard ownership exist;
 - artboard/component/componentInstance/componentOverride refs are first-class;
@@ -49,13 +49,13 @@ The implementation at `90c373586c0c0d74eaa6185fb12bae32fc606518` is substantial 
 - dependency/resolver/semantic/manifest surfaces include the new project entities;
 - component deletion/source deletion fail closed with live dependents;
 - cycle detection and bounded nesting are present;
-- the standard Tests run on final handoff head `8de2957b4ed020c9e2bf2a5b6af9f0b4479f84a1` is green: **40/40 syntax checks and 33/33 suites**.
+- the standard Tests run on handoff head `8de2957b4ed020c9e2bf2a5b6af9f0b4479f84a1` was green at **40/40 syntax checks and 33/33 suites**.
 
-However, three Component-runtime/evaluation contracts required by M6 are not complete. Do not advance to the next roadmap family until these are fixed in production code and adversarial tests.
+Independent verification then identified the three Component-runtime/evaluation blockers below. The focused correction implementation at `25d95e0d8cd7bdd691a586eaed84f3dc4177e9eb` addresses all three in production code and adds a dedicated adversarial suite. This milestone remains **AWAITING VERIFICATION** until those corrections are independently accepted.
 
 ---
 
-## Blocker 1 — authored remap/mix runtime contract is metadata-only
+## Blocker 1 — authored remap/mix runtime contract was metadata-only
 
 `createComponentInstance()` persists and validates:
 
@@ -67,42 +67,38 @@ runtime.remap.timeline
 runtime.remap.stateMachine
 ```
 
-but `ComponentRuntimeRegistry` does not consume the authored timeline/stateMachine/remap configuration when evaluating an instance. Runtime behavior currently depends only on explicit imperative calls such as `setTimelineTime(instanceId, timelineId, ...)` and `machineRuntime(instanceId, machineId)`.
+The previous `ComponentRuntimeRegistry` did not consume the authored timeline/stateMachine/remap configuration when evaluating an instance. Runtime behavior depended only on explicit imperative calls such as `setTimelineTime(instanceId, timelineId, ...)` and `machineRuntime(instanceId, machineId)`.
 
-That means a persisted `runtime.remap` can appear valid in the model/dependency graph while having no effect on evaluation.
+### Correction implemented
 
-`projectGraphCapabilities()` also exposes fit/alignment/nesting/clipping/override targets but does not state the supported runtime selection/remap/mix modes required by the M6 contract.
+The Component runtime now has one explicit deterministic mapping contract:
 
-### Required correction
+- `runtime.timeline` selects a timeline runtime slot and is evaluated at deterministic time `0` before any imperative clock update;
+- `runtime.stateMachine` selects a machine runtime slot and evaluates from its authored initial state;
+- `runtime.remap.timeline` and `runtime.remap.stateMachine` change the source controller actually evaluated while the selected controller ID remains the instance-local runtime slot;
+- remap without the matching selected runtime controller is rejected;
+- selected and remapped refs must remain on the Component source artboard;
+- `runtime.mix` remains bounded to `[0,1]`: numeric values interpolate linearly from authored to runtime values; discrete values use authored below `0.5` and runtime at or above `0.5`;
+- per-instance timeline clocks and machine runtimes remain isolated;
+- runtime evaluation returns controller→effective-source mappings for deterministic inspection;
+- `projectGraphCapabilities()` / manifest authoring metadata expose the exact selection/remap/mix contract.
 
-Define one deterministic, machine-readable M6 runtime mapping contract and implement it end-to-end.
+### Adversarial proof added
 
-At minimum:
+`tests/veyra-m6-component-corrections.test.mjs` proves:
 
-- authored runtime timeline/state-machine refs must have documented meaning;
-- authored remap refs must actually affect which source timeline/machine the instance runtime evaluates, or the fields must be removed/rejected and the capability explicitly state remap is unsupported;
-- do **not** keep accepted authored fields that silently do nothing;
-- mix semantics must be explicit for supported value types and deterministic at 0, intermediate values, and 1;
-- source refs must remain source-artboard scoped and fail closed when invalid;
-- manifest/project capabilities must expose the exact supported runtime selection/remap/mix modes;
-- ownership/dependency output must agree with actual runtime behavior, not merely stored metadata;
-- any authored runtime/remap mutation must remain previewable/verifiable through the canonical control plane.
-
-### Mandatory tests
-
-Prove at least:
-
-1. persisted runtime selection changes evaluated instance playback after save/load;
-2. persisted remap either changes the actual source controller used or is rejected as unsupported;
-3. two source timelines/machines with different results make remap behavior observable;
-4. instance A remap/runtime selection cannot affect instance B;
-5. cross-artboard or missing remap refs fail without document/history/revision mutation;
-6. mix `0`, an intermediate value, and `1` are deterministic and match the declared capability;
-7. manifest capabilities exactly describe the implemented modes.
+1. persisted timeline selection changes evaluated output after serialize/parse without imperative setup;
+2. persisted timeline remap changes the actual source timeline used;
+3. persisted state-machine remap changes the actual source machine used;
+4. two instances remapped to the same source timeline retain observably independent clocks/output;
+5. cross-artboard and missing remap refs fail through the canonical control plane without document/revision/history mutation;
+6. remap without selection fails validation;
+7. mix `0`, `0.25`, and `1` produce the declared deterministic results;
+8. manifest capabilities report the implemented mapping and mix behavior.
 
 ---
 
-## Blocker 2 — nested Component hierarchy can double-apply the outer transform
+## Blocker 2 — nested Component hierarchy could double-apply the outer transform
 
 M6 advertises:
 
@@ -111,94 +107,71 @@ nestedComponents: true
 maxComponentDepth: 16
 ```
 
-and cycle/depth validation exists.
+The previous nested-evaluation merge prefixed nested identities and multiplied the outer Component wrapper into both nested `localMatrix` and `worldMatrix` values, which could apply the outer transform twice when the renderer recomposed the hierarchy.
 
-But the nested-evaluation merge currently prefixes nested identities and applies the outer Component wrapper to both `nested.localMatrix` and `nested.worldMatrix` for every nested descendant.
+### Correction implemented
 
-For a nested Component whose evaluated source contains a parent → child node hierarchy, the child already has a local matrix relative to its nested parent. Applying the outer wrapper again to that child local matrix makes renderer hierarchy composition apply the outer transform more than once.
+Component expansion now maps the complete evaluated node subtree through one transform-space rule:
 
-The current M6 suite tests cycle rejection, but it does not positively render a legal nested Component with a multi-node hierarchy.
+- the outer instance/source wrapper is applied once to evaluated world space;
+- a descendant whose source parent is also re-scoped preserves its source-relative `localMatrix`;
+- source parent refs are rewritten to the matching instance-scoped evaluated parent ID;
+- a subtree root attached to an authored host parent derives its local matrix from `inverse(parentWorld) * mappedWorld`;
+- final `worldMatrix` therefore remains equal to deterministic `parent.worldMatrix * child.localMatrix`;
+- nested provenance retains the inner source/component/instance context and adds the outer instance context without turning evaluated identities persistent;
+- renderer and hit testing consume the same corrected evaluated matrices.
 
-### Required correction
+### Adversarial proof added
 
-Preserve proper transform spaces when re-scoping nested evaluated descendants:
+The correction suite includes a legal two-level nested Component with outer instance, inner instance, source parent and source child transforms and proves:
 
-- apply the outer instance/source mapping exactly once to the nested subtree root/context;
-- descendant `localMatrix` values must remain relative to their newly re-scoped evaluated parent;
-- `worldMatrix` must equal deterministic parent-world × local composition;
-- parent refs must map to the correct outer-scoped evaluated IDs;
-- nested source/component/instance provenance must remain intact;
-- renderer and hit testing must see the same final geometry;
-- no nested evaluated identity may become authored persistent storage.
-
-### Mandatory tests
-
-Create at least a two-level Component nesting fixture with:
-
-- outer instance transform;
-- inner instance transform;
-- source parent node transform;
-- source child node transform.
-
-Prove:
-
-1. expected child world transform analytically;
+1. the child world transform analytically;
 2. `parent.worldMatrix * child.localMatrix == child.worldMatrix`;
-3. renderer output matches that transform;
-4. hit testing finds the child at the rendered location;
-5. save/load does not create authored evaluated descendants;
-6. two nested instances remain independent;
-7. cycle/depth failures remain deterministic.
+3. the child local matrix is not polluted by the outer wrapper;
+4. SVG output uses that corrected local transform;
+5. hit testing resolves the child at the rendered world location;
+6. two outer instances remain independently scoped;
+7. save/load never creates authored `componentEval:` descendants;
+8. cycle rejection remains deterministic.
 
 ---
 
-## Blocker 3 — Component instances currently expand nodes only, not rigged source content
+## Blocker 3 — Component instances expanded nodes only, not rigged source content
 
-`evaluateDocument()` builds normal evaluated nodes + rig data for an artboard, but `evaluateComponentInstances()` returns only evaluated Component **nodes**. The host scene then appends only `componentEvaluatedNodes` to `scene.nodes`.
+The previous Component expansion returned only evaluated nodes, so the host scene silently lost source bones, weighted meshes, controls and constraints.
 
-A Component source artboard containing bones, weighted meshes, controls or constraints therefore does not instantiate that evaluated rig/mesh content into the host Component instance. A simple rectangle Component works; a rigged character Component does not represent the full source artboard.
+### Correction implemented
 
-This conflicts with M6's reusable Component/source-content contract and with the milestone's explicit artboard ownership of nodes, bones, meshes, controls and constraints.
+`evaluateComponentContent()` now expands the current supported Component source content as one evaluated bundle:
 
-### Required correction
+- nodes;
+- evaluated bones;
+- weighted meshes with deformed vertices;
+- controls;
+- constraints.
 
-Extend Component evaluation to carry the supported source-artboard evaluated content required to render/inspect a rigged Component.
+The host evaluator merges those arrays into the normal evaluated scene, so existing renderer paths consume Component mesh output without a renderer-only parallel implementation.
 
-At minimum for the current Veyra feature set:
+Instance-expanded rig identities are non-persistent and instance-scoped while retaining their persistent source refs. Bone/control/constraint references are re-scoped consistently; mesh deformed vertices and rig world-space output receive the same instance transform/fit/alignment mapping used by Component geometry. Source authored rig data is never cloned into instance storage.
 
-- evaluated Component nodes;
-- evaluated weighted meshes/deformed vertices;
-- bones needed by those meshes/rig output;
-- controls/constraint evaluated context where required for inspection/ownership/runtime correctness.
+### Adversarial proof added
 
-Requirements:
+The correction suite uses a source Component containing a current Veyra bone, weighted quad mesh, position control, constraint and bone animation. It proves:
 
-- source persistent refs remain source refs;
-- instance-evaluated rig/mesh identities are explicitly non-persistent and instance-scoped, analogous to evaluated node descendants;
-- instance transform/fit/alignment maps rigged geometry consistently with node geometry;
-- source authored rig/mesh data is never cloned into authored instance storage;
-- per-instance runtime/overrides affect only that instance;
-- renderer consumes the evaluated instance mesh output;
-- dependency/ownership/summary surfaces can explain source vs Component vs instance context;
-- if any current rig subfamily is deliberately unsupported inside Components, expose that limitation explicitly and fail validation rather than silently dropping it.
-
-### Mandatory tests
-
-Use a source Component containing a real current Veyra rig fixture (bone + weighted mesh, and control/constraint where applicable) and prove:
-
-1. the host instance renders the source mesh;
-2. source and instance evaluated mesh/bone identities are distinguishable;
-3. instance transform/fit changes instance rig output without changing source;
-4. two instances produce independent evaluated rig output;
-5. source animation/state-machine runtime can deform/move one instance without leaking to another;
-6. save/load contains no evaluated rig clones;
-7. unsupported rig features, if any, fail loudly and appear in capabilities.
+1. two host instances each receive evaluated mesh/bone/control/constraint output;
+2. their evaluated IDs are distinct and source refs remain distinguishable;
+3. renderer SVG includes the instance-evaluated mesh;
+4. the instance transform maps rig output consistently;
+5. the constraint points at the correct instance-scoped evaluated bone;
+6. runtime animation on instance A deforms its rig output without leaking to instance B;
+7. the source evaluated rig remains unchanged;
+8. save/load retains only the single authored source rig and no `componentEval:` rig clones.
 
 ---
 
 ## Preserve the M6 work that already passed review
 
-Do not regress:
+The correction pass preserves:
 
 - deterministic legacy single-artboard → v5 migration;
 - M5 non-zero frame origin;
@@ -220,7 +193,7 @@ Do not regress:
 
 M6 is VERIFIED only when:
 
-- the three blockers above are fixed in production implementation;
+- the three blockers above are independently confirmed fixed in production implementation;
 - runtime/remap/mix capability claims exactly match behavior;
 - legal nested Component hierarchies render with correct transform composition;
 - rigged current-feature Components evaluate/render instead of silently losing source rig content;
@@ -234,18 +207,18 @@ M6 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction commits:
-- Changed files:
-- Tests added/changed:
-- npm test:
-- npm run check:
-- Runtime/remap/mix proof:
-- Nested Component transform proof:
-- Rigged Component evaluation/render proof:
-- Existing M6 regression proof:
-- Manifest/capability proof:
-- Persistence/history proof:
-- Progress snapshot update: keep verified-only percentages unchanged until independent acceptance
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Correction commits: e24ad0a6799631c0edbe988fedf685070c5d9b70 (staged focused patch), 75e5af5ec7b3afdbdfa39d89e205325a854b1660 / d92e21e5880e6686f10ab535df0726457ce16c89 / 994d5fdda7cd44adc638b381ddd8234b699b0311 (gated adversarial-fixture iterations), 25d95e0d8cd7bdd691a586eaed84f3dc4177e9eb (clean correction implementation)
+- Changed files: src/veyra/components.js; src/veyra/evaluation.js; src/veyra/projectGraph.js; src/index.js; tests/veyra-m6-component-corrections.test.mjs; milestone.md
+- Tests added/changed: added tests/veyra-m6-component-corrections.test.mjs with persisted timeline/state-machine selection/remap/mix, atomic invalid-remap, legal nested hierarchy render/hit-test/persistence, and current-feature rigged Component instancing/runtime isolation coverage
+- npm test: PASS — 34 of 34 suites in the clean correction integration gate
+- npm run check: PASS — 40 of 40 source files in the clean correction integration gate
+- Runtime/remap/mix proof: authored runtime.timeline/stateMachine now create deterministic default runtime evaluation; authored remap changes the effective source controller; selected controller IDs remain per-instance runtime slots; remap is source-artboard validated and requires a matching selected controller; mix semantics are explicit/tested at 0, 0.25 and 1; two remapped instances demonstrate different runtime clocks and outputs
+- Nested Component transform proof: outer wrapper is applied once to world space; mapped descendants retain source-relative local matrices; parent refs are re-scoped; the adversarial nested child satisfies parent.world * child.local == child.world, matches SVG output and M4 hit testing, and never persists evaluated descendants
+- Rigged Component evaluation/render proof: Component evaluation now returns nodes + bones + weighted/deformed meshes + controls + constraints; host evaluation merges all supported arrays; evaluated refs are instance-scoped/non-persistent with source provenance; a two-instance weighted-rig fixture proves renderer output and instance-local animation deformation without source/sibling mutation
+- Existing M6 regression proof: original tests/veyra-m6-project-graph.test.mjs and every pre-existing M0–M5 suite pass in the same 34/34 gate
+- Manifest/capability proof: projectGraphCapabilities()/manifest now declare selected-controller default behavior, controller→source remap semantics, exact mix semantics/range, runtime isolation, and the current Component-evaluated content set
+- Persistence/history proof: serialize/parse tests show no evaluated node/rig clones enter authored storage; invalid missing/cross-artboard remaps fail through the canonical control plane with document, revision and command history unchanged
+- Progress snapshot update: verified-only percentages intentionally unchanged until independent acceptance
+- Suggestions added to `suggestions`: none
+- Known limitations: this correction covers the current M6/current-Veyra Component content families only; clipping remains none-only and later Rive feature families (Data Binding/View Models, full Layout/Text/effects, expanded state-machine/listener families, SDK/export ecosystem, etc.) remain outside M6
 ```
