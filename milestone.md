@@ -305,11 +305,11 @@ M4 is complete only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits: workflow-gated M4 interaction-loop implementation; final SHA recorded after CI commit
+- Implementation commits: b593291a707df7259515f167902755f11ace2e55 — Implement M4 current interaction loop [m4-applied]
 - Changed files: model/store/commands/controlPlane/capabilities/manifest/serviceRegistry/index, hitTest/listenersRuntime/interactionTransport/interactionHost/shellBridge, veyra.js, listener + M4 tests, milestone.md
 - Tests added/changed: dedicated M4 end-to-end/adversarial interaction suite; listener registry expectation strengthened to typed machine refs + click
-- npm test: PASS in workflow gate
-- npm run check: PASS in workflow gate
+- npm test: PASS — 28/28 suites in workflow gate
+- npm run check: PASS — 36/36 source files in workflow gate
 - Listener CRUD/control-plane proof: add/update/remove listener Store methods + JSON command actions + deterministic preview IDs + undo/redo/provenance tests
 - Listener validation/lifecycle proof: normalization rejects dangling/mixed/type-incompatible refs; delete cascades are deterministic; click is down/up-same-stable-target
 - Machine runtime bridge proof: one persistent MachineRuntime per machine id/document getter; structured missing-target diagnostics; setInput/fire step exactly once per event without authored writes
