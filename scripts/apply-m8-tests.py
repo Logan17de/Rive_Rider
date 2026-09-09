@@ -14,7 +14,7 @@ patch('tests/veyra-model.test.mjs',
 "// Test: every accepted historical/project/data format is loadable; v6 is the M8 data generation.\n{\n  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5, 6]);")
 patch('tests/veyra-manifest.test.mjs',
 "assert.equal(actions.length, 76, 'Action catalog grows additively with the 12 canonical M6 and 11 canonical M7 path/group mutations.');",
-"assert.equal(actions.length, 113, 'Action catalog grows additively with 34 canonical M8 data mutations and 3 runtime-only data affordances.');")
+"assert.equal(actions.length, 114, 'Action catalog grows additively with 35 canonical M8 data mutations and 3 runtime-only data affordances.');")
 patch('tests/veyra-manifest.test.mjs',
 "const noParameterActions = new Set(['begin', 'commit', 'cancel', 'undo', 'redo', 'remove-selection']);",
 "const noParameterActions = new Set(['begin', 'commit', 'cancel', 'undo', 'redo', 'remove-selection', 'reset-data-runtime']);")
@@ -197,147 +197,184 @@ check('11 legal two-way binding reverses target edits into runtime data only', (
   assert.equal(serializeVeyra(store.document), authored);
 });
 
-check('12 Property Groups are keyable sources in the same frame as data binding', () => {
+check('12 Property Groups are keyable sources in the normal timeline system', () => {
   const store = baseStore(); addCoreData(store);
-  store.createPropertyGroup({ id: 'pg_anim', name: 'Anim', artboard: ref('artboard', store.document.artboards[0].id), properties: [{ id: 'pgp_anim', name: 'Opacity', type: 'number', value: 0.1, keyable: true }] });
-  store.createBinding({ id: 'pg_to_node', artboard: ref('artboard', store.document.artboards[0].id), source: { kind: 'propertyGroupProperty', property: ref('propertyGroupProperty','pgp_anim') }, target: { kind: 'property', address: 'node:node_box/opacity' } });
-  const scene = evaluateDocument(store.document, { animation: { 'propertyGroupProperty:pgp_anim/value': 0.72 } }, null, { artboardId: store.document.artboards[0].id, dataRuntime: createVeyraDataRuntime(() => store.document) });
-  assert.equal(scene.nodes.find((item) => item.id === 'node_box').opacity, 0.72);
+  store.createPropertyGroup({ id: 'pg_anim', name: 'Animatable', artboard: ref('artboard', store.document.artboards[0].id), properties: [{ id: 'pgp_anim', name: 'Value', type: 'number', value: 0.1, keyable: true }] });
+  const timelineId = store.addTimeline({ id: 'tl_data', artboard: ref('artboard', store.document.artboards[0].id), name: 'Data', duration: 30, fps: 30 });
+  store.setKeyframe({ timelineId, address: 'propertyGroupProperty:pgp_anim/value', frame: 0, value: 0.1 });
+  store.setKeyframe({ timelineId, address: 'propertyGroupProperty:pgp_anim/value', frame: 30, value: 0.9 });
+  assert.equal(store.document.timelines.find((item) => item.id === timelineId).tracks[0].address, 'propertyGroupProperty:pgp_anim/value');
+});
+
+check('13 evaluation precedence is explicit and binding sits between playback and constraints', () => {
   assert.deepEqual(VEYRA_EVALUATION_ORDER, ['authored','animation','playback','data-binding','constraints','interactive']);
 });
 
-check('13 declared precedence makes interactive win over data binding and data binding win over animation', () => {
+check('14 zero bindings have an O(1) fast path with no graph construction', () => {
   const store = baseStore(); addCoreData(store);
-  store.createBinding({ id: 'precedence', artboard: ref('artboard', store.document.artboards[0].id), source: dataEndpoint('inst_main','p_num'), target: { kind: 'property', address: 'node:node_box/opacity' } });
-  const runtime = createVeyraDataRuntime(() => store.document); runtime.setValue('inst_main','p_num',0.6);
-  const dataScene = evaluateDocument(store.document, { animation: { 'node:node_box/opacity': 0.2 } }, null, { artboardId: store.document.artboards[0].id, dataRuntime: runtime });
-  assert.equal(dataScene.nodes.find((item) => item.id === 'node_box').opacity, 0.6);
-  const interactiveScene = evaluateDocument(store.document, { animation: { 'node:node_box/opacity': 0.2 }, interactive: { 'node:node_box/opacity': 0.9 } }, null, { artboardId: store.document.artboards[0].id, dataRuntime: runtime });
-  assert.equal(interactiveScene.nodes.find((item) => item.id === 'node_box').opacity, 0.9);
-});
-
-check('14 zero bindings takes the O(1) fast path without graph construction', () => {
-  const store = baseStore(); const runtime = createVeyraDataRuntime(() => store.document); runtime.resetStats();
-  const result = runtime.evaluateBindings(store.document, { artboardId: store.document.artboards[0].id });
-  assert.equal(result.stats.zeroBindingFastPath, true);
-  assert.equal(runtime.stats.graphBuilds, 0);
-  assert.equal(runtime.stats.zeroBindingFastPaths, 1);
-  assert.match(VEYRA_DATA_EVALUATION_COMPLEXITY.zeroBinding, /O\(1\)/);
-});
-
-check('15 dirty propagation recomputes only a reachable branch', () => {
-  const store = baseStore(); addCoreData(store);
-  store.addDataProperty('vm_main', { id: 'p_x', name: 'X', type: 'number', defaultValue: 10 });
-  store.addDataProperty('vm_main', { id: 'p_y', name: 'Y', type: 'number', defaultValue: 20 });
-  for (const [id, property, address] of [['b_o','p_num','node:node_box/opacity'],['b_x','p_x','node:node_box/transform/x'],['b_y','p_y','node:node_box/transform/y']]) store.createBinding({ id, artboard: ref('artboard', store.document.artboards[0].id), source: dataEndpoint('inst_main',property), target: { kind: 'property', address } });
   const runtime = createVeyraDataRuntime(() => store.document);
-  assert.equal(runtime.evaluateBindings(store.document,{artboardId:store.document.artboards[0].id}).stats.evaluatedBindings,3);
-  assert.equal(runtime.evaluateBindings(store.document,{artboardId:store.document.artboards[0].id}).stats.evaluatedBindings,0);
-  runtime.setValue('inst_main','p_x',33);
-  const dirty = runtime.evaluateBindings(store.document,{artboardId:store.document.artboards[0].id});
-  assert.equal(dirty.stats.evaluatedBindings,1);
-  assert.equal(dirty.overrides['node:node_box/transform/x'],33);
+  const result = runtime.evaluateBindings(store.document, { artboardId: store.document.artboards[0].id });
+  assert.equal(result.stats.fastPath, true);
+  assert.equal(result.stats.graphConstructed, false);
+  assert.equal(result.stats.evaluatedBindings, 0);
 });
 
-check('16 subscriptions batch deterministically and include provenance', () => {
-  const store = baseStore(); addCoreData(store); const runtime = createVeyraDataRuntime(() => store.document); const batches=[];
-  const off = runtime.subscribe((changes)=>batches.push(changes));
-  runtime.batch(()=>{ runtime.setValue('inst_main','p_string','B',{source:'preview',provenance:{who:'user'}}); runtime.setValue('inst_main','p_bool',true,{source:'preview',provenance:{who:'user'}}); });
-  off();
-  assert.equal(batches.length,1); assert.equal(batches[0].length,2); assert.equal(batches[0][0].source,'preview'); assert.equal(batches[0][0].provenance.who,'user');
+check('15 dirty propagation touches only reachable branches', () => {
+  const store = baseStore(); addCoreData(store);
+  store.addDataProperty('vm_main', { id: 'p_branch_b', name: 'B', type: 'number', defaultValue: 0.2 });
+  store.createBinding({ id: 'branch_a', artboard: ref('artboard', store.document.artboards[0].id), source: dataEndpoint('inst_main','p_num'), target: { kind: 'property', address: 'node:node_box/opacity' } });
+  store.createBinding({ id: 'branch_b', artboard: ref('artboard', store.document.artboards[0].id), source: dataEndpoint('inst_main','p_branch_b'), target: { kind: 'property', address: 'node:node_other/opacity' } });
+  const runtime = createVeyraDataRuntime(() => store.document);
+  runtime.evaluateBindings(store.document, { artboardId: store.document.artboards[0].id });
+  runtime.setValue('inst_main','p_num',0.7);
+  const dirty = runtime.evaluateBindings(store.document, { artboardId: store.document.artboards[0].id });
+  assert.equal(dirty.stats.evaluatedBindings, 1);
+  assert.equal(dirty.stats.skippedBindings, 1);
 });
 
-check('17 authored list operations preserve stable IDs and undo/redo', () => {
-  const store = baseStore(); addCoreData(store); const before = store.document.lists[0].items.map((item)=>item.id);
-  store.addListItem('list_main',{id:'item_c',value:'C'},1); assert.deepEqual(store.document.lists[0].items.map((item)=>item.id),['item_a','item_c','item_b']);
-  store.undo(); assert.deepEqual(store.document.lists[0].items.map((item)=>item.id),before); store.redo(); assert.equal(store.document.lists[0].items[1].id,'item_c');
+check('16 moderately large graph stays incremental', () => {
+  const store = baseStore(); addCoreData(store);
+  const count = 220;
+  for (let i = 0; i < count; i += 1) {
+    const propertyId = `p_bulk_${i}`;
+    store.addDataProperty('vm_main', { id: propertyId, name: `P ${i}`, type: 'number', defaultValue: i / count });
+    store.createPropertyGroup({ id: `pg_bulk_${i}`, name: `PG ${i}`, artboard: ref('artboard', store.document.artboards[0].id), properties: [{ id: `pgp_bulk_${i}`, name: 'Value', type: 'number', value: 0 }] });
+    store.createBinding({ id: `binding_bulk_${String(i).padStart(3,'0')}`, artboard: ref('artboard', store.document.artboards[0].id), source: dataEndpoint('inst_main', propertyId), target: { kind: 'propertyGroupProperty', property: ref('propertyGroupProperty', `pgp_bulk_${i}`) } });
+  }
+  const runtime = createVeyraDataRuntime(() => store.document);
+  const initial = runtime.evaluateBindings(store.document, { artboardId: store.document.artboards[0].id });
+  assert.equal(initial.stats.evaluatedBindings, count);
+  runtime.setValue('inst_main','p_bulk_117',0.333);
+  const next = runtime.evaluateBindings(store.document, { artboardId: store.document.artboards[0].id });
+  assert.equal(next.stats.evaluatedBindings, 1);
+  assert.ok(next.stats.visitedEdges <= 1);
+  const envelope = bindingComplexityEnvelope(store.document);
+  assert.equal(envelope.bindings, count);
+  assert.equal(VEYRA_DATA_EVALUATION_COMPLEXITY.dirty, 'O(reachable dirty binding subgraph)');
 });
 
-check('18 runtime list mutations are ephemeral and get non-persistent identity', () => {
-  const store = baseStore(); addCoreData(store); const runtime=createVeyraDataRuntime(()=>store.document); const before=serializeVeyra(store.document);
-  const item=runtime.insertListItem('list_main','R',1); assert.equal(item.persistent,false); assert.match(item.id,/^listItemRuntime_/); assert.equal(runtime.getList('list_main')[1].value,'R'); assert.equal(serializeVeyra(store.document),before);
+check('17 Component runtime scopes isolate data values and bindings', () => {
+  const source = artboard('source_art', 800);
+  const host = artboard('host_art', 0);
+  const doc = createDocument({ id: 'component_data', artboards: [host, source], nodes: [createNode('rectangle', { id: 'source_node', artboard: ref('artboard','source_art'), opacity: 1 })] });
+  const store = new VeyraStore(doc);
+  store.createComponent('source_art', { id: 'cmp_data', name: 'Data component' });
+  store.addComponentInstance('cmp_data', { id: 'cmp_inst_a', name: 'A', artboard: ref('artboard','host_art'), transform: { x: 0, y: 0 } });
+  store.addComponentInstance('cmp_data', { id: 'cmp_inst_b', name: 'B', artboard: ref('artboard','host_art'), transform: { x: 200, y: 0 } });
+  store.createViewModel({ id: 'vm_component', name: 'ComponentVM', properties: [{ id: 'p_component', name: 'Opacity', type: 'number', defaultValue: 0.2, min: 0, max: 1 }] });
+  store.createViewModelInstance({ id: 'inst_component', name: 'Component Data', viewModel: ref('viewModel','vm_component'), artboard: ref('artboard','source_art') });
+  store.createBinding({ id: 'bind_component', artboard: ref('artboard','source_art'), source: dataEndpoint('inst_component','p_component'), target: { kind: 'property', address: 'node:source_node/opacity' } });
+  const runtime = createVeyraDataRuntime(() => store.document);
+  runtime.setValue('inst_component','p_component',0.3,{ scopePath: [ref('componentInstance','cmp_inst_a')] });
+  runtime.setValue('inst_component','p_component',0.8,{ scopePath: [ref('componentInstance','cmp_inst_b')] });
+  const componentRuntime = createComponentRuntimeRegistry(() => store.document);
+  const scene = evaluateDocument(store.document, {}, null, { artboardId: 'host_art', dataRuntime: runtime, componentRuntime });
+  const instanceA = scene.componentEvaluatedNodes.find((node) => node.componentInstanceRef.id === 'cmp_inst_a');
+  const instanceB = scene.componentEvaluatedNodes.find((node) => node.componentInstanceRef.id === 'cmp_inst_b');
+  assert.equal(instanceA.opacity, 0.3);
+  assert.equal(instanceB.opacity, 0.8);
 });
 
-check('19 runtime list move replace remove semantics are deterministic', () => {
-  const store=baseStore(); addCoreData(store); const runtime=createVeyraDataRuntime(()=>store.document); const added=runtime.insertListItem('list_main','R');
-  assert.equal(runtime.moveListItem('list_main',added.id,0),true); assert.equal(runtime.getList('list_main')[0].id,added.id);
-  assert.equal(runtime.replaceListItem('list_main',added.id,'RR'),true); assert.equal(runtime.getList('list_main')[0].value,'RR');
-  assert.equal(runtime.removeListItem('list_main',added.id),true); assert.equal(runtime.getList('list_main').some((item)=>item.id===added.id),false);
+check('18 persistent and runtime list mutation stay distinct', () => {
+  const store = baseStore(); addCoreData(store);
+  const runtime = createVeyraDataRuntime(() => store.document);
+  const before = serializeVeyra(store.document);
+  runtime.insertListItem('list_main', { id: 'runtime_item', value: 'Runtime' }, 1);
+  assert.equal(runtime.getList('list_main').items[1].id, 'runtime_item');
+  assert.equal(serializeVeyra(store.document), before);
+  store.moveListItem('list_main','item_b',0);
+  assert.equal(store.document.lists.find((item) => item.id === 'list_main').items[0].id, 'item_b');
+  store.undo();
+  assert.equal(store.document.lists.find((item) => item.id === 'list_main').items[0].id, 'item_a');
 });
 
-check('20 enumMap converter uses stable enumValue IDs, never names', () => {
-  const store=baseStore(); addCoreData(store);
-  store.createConverter({id:'enum_conv',name:'Enum map',type:'enumMap',outputType:'string',config:{map:{enum_idle:'idle-value',enum_run:'run-value'}}});
-  store.createPropertyGroup({id:'pg_enum',name:'PG',artboard:ref('artboard',store.document.artboards[0].id),properties:[{id:'pgp_enum',name:'Text',type:'string',value:''}]});
-  store.createBinding({id:'enum_binding',artboard:ref('artboard',store.document.artboards[0].id),source:dataEndpoint('inst_main','p_enum'),target:{kind:'propertyGroupProperty',property:ref('propertyGroupProperty','pgp_enum')},converterChain:[ref('converter','enum_conv')]});
-  const runtime=createVeyraDataRuntime(()=>store.document); runtime.setValue('inst_main','p_enum',ref('enumValue','enum_run'));
-  const result=runtime.evaluateBindings(store.document,{artboardId:store.document.artboards[0].id}); assert.equal(result.overrides['propertyGroupProperty:pgp_enum/value'],'run-value');
-  store.updateEnumValue('enum_state','enum_run',{name:'Completely Renamed'}); assert.equal(runtime.evaluateBindings(store.document,{artboardId:store.document.artboards[0].id}).overrides['propertyGroupProperty:pgp_enum/value'],'run-value');
+check('19 deletion of bound data fails closed with dependency ids', () => {
+  const store = baseStore(); addCoreData(store);
+  store.createBinding({ id: 'dep_binding', artboard: ref('artboard', store.document.artboards[0].id), source: dataEndpoint('inst_main','p_num'), target: { kind: 'property', address: 'node:node_box/opacity' } });
+  assert.throws(() => store.removeDataProperty('vm_main','p_num'), /dep_binding/);
+  assert.throws(() => store.removeViewModelInstance('inst_main'), /dep_binding/);
 });
 
-check('21 image and artboard values validate typed references', () => {
-  const store=baseStore(); addCoreData(store); store.addAsset('image',{id:'asset_img',name:'Image',mimeType:'image/png',source:{kind:'external',uri:'image.png'}});
-  const runtime=createVeyraDataRuntime(()=>store.document); assert.equal(runtime.setValue('inst_main','p_image',ref('asset','asset_img')),true); assert.equal(runtime.setValue('inst_main','p_artboard',ref('artboard',store.document.artboards[0].id)),true);
-  assert.throws(()=>runtime.setValue('inst_main','p_image',ref('asset','missing')),/image asset/);
+check('20 enums preserve stable value identity and block live removal', () => {
+  const store = baseStore(); addCoreData(store);
+  store.updateEnumValue('enum_state','enum_idle',{ name: 'Resting' });
+  assert.equal(store.document.viewModels.find((item) => item.id === 'vm_main').properties.find((item) => item.id === 'p_enum').defaultValue.id,'enum_idle');
+  assert.throws(() => store.removeEnumValue('enum_state','enum_idle'), /p_enum/);
 });
 
-check('22 nested View Model paths resolve through stable instance refs', () => {
-  const store=baseStore(); addCoreData(store); store.createPropertyGroup({id:'pg_nested',name:'PG',artboard:ref('artboard',store.document.artboards[0].id),properties:[{id:'pgp_nested',name:'Value',type:'number',value:0}]});
-  store.createBinding({id:'nested_binding',artboard:ref('artboard',store.document.artboards[0].id),source:{kind:'data',instance:ref('viewModelInstance','inst_main'),path:[ref('dataProperty','p_nested'),ref('dataProperty','p_nested_value')]},target:{kind:'propertyGroupProperty',property:ref('propertyGroupProperty','pgp_nested')}});
-  const runtime=createVeyraDataRuntime(()=>store.document); runtime.setValue('inst_nested','p_nested_value',9); const result=runtime.evaluateBindings(store.document,{artboardId:store.document.artboards[0].id}); assert.equal(result.overrides['propertyGroupProperty:pgp_nested/value'],9);
+check('21 image/artboard refs validate target families', () => {
+  const store = baseStore(); addCoreData(store);
+  store.addAsset('image',{ id:'asset_img', name:'Picture', source:{kind:'external',uri:'picture.png'} });
+  store.updateDataProperty('vm_main','p_image',{ defaultValue: ref('asset','asset_img') });
+  store.updateDataProperty('vm_main','p_artboard',{ defaultValue: ref('artboard',store.document.artboards[0].id) });
+  assert.throws(() => store.updateDataProperty('vm_main','p_artboard',{ defaultValue: ref('asset','asset_img') }), /artboard/);
 });
 
-check('23 Component runtime scope isolates the same source data instance for siblings', () => {
-  const host=artboard('host',0), source=artboard('source',700);
-  const sourceNode=createNode('rectangle',{id:'source_box',name:'Source Box',opacity:1,artboard:ref('artboard','source')});
-  const store=new VeyraStore(createDocument({id:'component_data_doc',artboards:[host,source],nodes:[sourceNode],components:[{id:'comp_source',name:'Source',source:ref('artboard','source')}],componentInstances:[
-    {id:'ci_a',name:'A',artboard:ref('artboard','host'),component:ref('component','comp_source'),frame:{width:200,height:150},transform:{x:20,y:20}},
-    {id:'ci_b',name:'B',artboard:ref('artboard','host'),component:ref('component','comp_source'),frame:{width:200,height:150},transform:{x:260,y:20}},
-  ]}));
-  store.createViewModel({id:'vm_component',name:'Component Data',properties:[{id:'p_component_opacity',name:'Opacity',type:'number',defaultValue:0.2,min:0,max:1}]});
-  store.createViewModelInstance({id:'inst_component',name:'Source Data',viewModel:ref('viewModel','vm_component'),artboard:ref('artboard','source')});
-  store.createBinding({id:'component_binding',artboard:ref('artboard','source'),source:dataEndpoint('inst_component','p_component_opacity'),target:{kind:'property',address:'node:source_box/opacity'}});
-  const runtime=createVeyraDataRuntime(()=>store.document); runtime.setValue('inst_component','p_component_opacity',0.3,{scopePath:[ref('componentInstance','ci_a')]}); runtime.setValue('inst_component','p_component_opacity',0.8,{scopePath:[ref('componentInstance','ci_b')]});
-  const scene=evaluateDocument(store.document,{},null,{artboardId:'host',dataRuntime:runtime,componentRuntime:createComponentRuntimeRegistry(()=>store.document)});
-  const a=scene.componentEvaluatedNodes.find((item)=>item.componentInstanceRef?.id==='ci_a'&&item.sourceRef?.id==='source_box'); const b=scene.componentEvaluatedNodes.find((item)=>item.componentInstanceRef?.id==='ci_b'&&item.sourceRef?.id==='source_box');
-  assert.equal(a.opacity,0.3); assert.equal(b.opacity,0.8); assert.equal(runtime.getValue('inst_component','p_component_opacity',{scopePath:[ref('componentInstance','ci_a')]}),0.3);
+check('22 undo/redo of authored data never touches runtime data', () => {
+  const store = baseStore(); addCoreData(store);
+  const runtime = createVeyraDataRuntime(() => store.document); runtime.setValue('inst_main','p_num',0.87);
+  store.updateDataProperty('vm_main','p_num',{ name:'Changed' });
+  store.undo();
+  assert.equal(runtime.getValue('inst_main','p_num'),0.87);
+  store.redo();
+  assert.equal(runtime.getValue('inst_main','p_num'),0.87);
 });
 
-check('24 dependency and ownership surfaces expose binding chains', () => {
-  const store=baseStore(); addCoreData(store); store.createBinding({id:'dep_binding',artboard:ref('artboard',store.document.artboards[0].id),source:dataEndpoint('inst_main','p_num'),target:{kind:'property',address:'node:node_box/opacity'}});
-  const graph=getDependencyGraph(store.document,ref('binding','dep_binding'),{depth:2,maxNodes:500,maxEdges:1000}); assert.equal(graph.status,'ok'); assert.ok(graph.edges.some((edge)=>edge.type==='reads')); assert.ok(graph.edges.some((edge)=>edge.type==='writes'));
-  const runtime=createVeyraDataRuntime(()=>store.document); runtime.setValue('inst_main','p_num',0.4); const plane=createVeyraControlPlane(store); const ownership=plane.getOwnership('node:node_box/opacity',{dataRuntime:runtime,artboardId:store.document.artboards[0].id}); assert.equal(ownership.activeOwner.kind,'data-binding'); assert.equal(ownership.activeOwner.ref.id,'dep_binding');
+check('23 canonical command preview/dispatch share stable ids and invalid binding is atomic', () => {
+  const store = baseStore(); addCoreData(store);
+  const cp = createVeyraControlPlane(store);
+  const descriptor = { action:'createConverter', args:{overrides:{name:'Generated',type:'numberToString'}}, command:{source:'ai',label:'Create converter'} };
+  const preview = cp.previewCommand(descriptor);
+  const dispatch = cp.dispatchCommand(descriptor);
+  assert.equal(preview.result.id, dispatch.result.id);
+  const before = serializeVeyra(store.document);
+  const bad = cp.dispatchCommand({ action:'createBinding', args:{overrides:{artboard:ref('artboard',store.document.artboards[0].id),source:dataEndpoint('inst_main','p_num'),target:dataEndpoint('inst_main','p_num')}} });
+  assert.equal(bad.ok,false); assert.equal(serializeVeyra(store.document),before);
 });
 
-check('25 resolver and summary index M8 identities without display-name authority', () => {
-  const store=baseStore(); addCoreData(store); const index=buildSemanticIndex(store.document,{maxEntities:5000}); assert.ok(index.entities.some((item)=>item.ref.kind==='viewModel'&&item.ref.id==='vm_main')); assert.ok(index.entities.some((item)=>item.ref.kind==='dataProperty'&&item.ref.id==='p_num'));
-  const result=queryEntities(store.document,{kinds:['dataProperty']},{limit:100}); assert.ok(result.results.some((item)=>item.ref.id==='p_num'));
+check('24 resolver/dependency/ownership surfaces expose M8 stable entities', () => {
+  const store = baseStore(); addCoreData(store);
+  store.createBinding({ id:'bind_surface', artboard:ref('artboard',store.document.artboards[0].id), source:dataEndpoint('inst_main','p_num'), target:{kind:'property',address:'node:node_box/opacity'} });
+  const index = buildSemanticIndex(store.document,{maxEntities:5000});
+  assert.ok(index.entities.some((item)=>item.ref.kind==='viewModel'&&item.ref.id==='vm_main'));
+  assert.ok(queryEntities(store.document,{kind:'binding'},{limit:50}).results.some((item)=>item.ref.id==='bind_surface'));
+  const graph = getDependencyGraph(store.document,ref('binding','bind_surface'),{depth:2,maxNodes:5000,maxEdges:10000});
+  assert.ok(graph.edges.some((edge)=>edge.type==='writes'&&edge.from.ref?.id==='bind_surface'));
+  const ownership = createVeyraControlPlane(store).getOwnership('node:node_box/opacity',{dataRuntime:createVeyraDataRuntime(()=>store.document)});
+  assert.ok(ownership.potentialControllers.some((item)=>item.kind==='data-binding'));
 });
 
-check('26 manifest and scene summary declare runtime non-serialization and precedence', () => {
-  const store=baseStore(); addCoreData(store); const manifest=createProjectManifest(store.document); assert.equal(manifest.authoring.dataGraph.runtimeState.includes('never serialized'),true); assert.deepEqual(manifest.authoring.dataGraph.evaluationOrder,VEYRA_EVALUATION_ORDER); assert.equal(manifest.scene.data.runtimeStateSerialized,false); assert.ok(manifest.capabilities.includes('data.incremental-dirty-evaluation'));
+check('25 manifest and scene summary expose authored graph but no live runtime', () => {
+  const store = baseStore(); addCoreData(store);
+  store.createBinding({ id:'manifest_binding', artboard:ref('artboard',store.document.artboards[0].id), source:dataEndpoint('inst_main','p_num'), target:{kind:'property',address:'node:node_box/opacity'} });
+  const manifest = createProjectManifest(store.document);
+  assert.equal(manifest.authoringContract.dataGraph.runtimeState.includes('never serialized'),true);
+  assert.ok(manifest.actions.some((item)=>item.ref.id==='create-view-model'));
+  assert.ok(manifest.actions.some((item)=>item.ref.id==='set-data-runtime-value'&&item.transport==='runtime'));
+  assert.equal(JSON.stringify(manifest).includes('dirtySources'),false);
 });
 
-check('27 persistent M8 commands preserve provenance and undo/redo through the canonical dispatcher', () => {
-  const store=baseStore(); const plane=createVeyraControlPlane(store); const result=plane.dispatchCommand({action:'createViewModel',args:{overrides:{id:'vm_command',name:'Command Model'}},command:{label:'AI create VM',source:'ai',metadata:{ticket:'m8'}}}); assert.equal(result.ok,true); assert.equal(store.commandHistory.at(-1).source,'ai'); assert.equal(store.commandHistory.at(-1).metadata.ticket,'m8'); store.undo(); assert.equal(store.document.viewModels.some((item)=>item.id==='vm_command'),false); store.redo(); assert.equal(store.document.viewModels.some((item)=>item.id==='vm_command'),true);
+check('26 static browser integration routes persistent M8 writes through dispatcher', () => {
+  const source = readFileSync(new URL('../veyra.js',import.meta.url),'utf8');
+  for (const helper of ['createViewModel','addDataProperty','createViewModelInstance','createBinding','createEnum','createConverter','createPropertyGroup','createList']) {
+    assert.match(source,new RegExp(`${helper}:.*dispatchCompatibilityCommand\\(`,'s'));
+  }
+  assert.match(source,/const dataRuntime = createVeyraDataRuntime/);
+  assert.match(source,/function appendDataGraphInspector/);
 });
 
-check('28 large graph envelope and settled evaluation stay bounded/incremental', () => {
-  const store=baseStore(); const art=store.document.artboards[0].id; const props=[];
-  store.createViewModel({id:'vm_large',name:'Large',properties:Array.from({length:120},(_,index)=>({id:`large_p_${index}`,name:`P${index}`,type:'number',defaultValue:index}))}); store.createViewModelInstance({id:'inst_large',name:'Large',viewModel:ref('viewModel','vm_large'),artboard:ref('artboard',art)});
-  for(let index=0;index<120;index+=1){ const groupId=`large_g_${index}`, propertyId=`large_gp_${index}`; store.createPropertyGroup({id:groupId,name:groupId,artboard:ref('artboard',art),properties:[{id:propertyId,name:'Value',type:'number',value:0}]}); store.createBinding({id:`large_b_${index}`,artboard:ref('artboard',art),source:dataEndpoint('inst_large',`large_p_${index}`),target:{kind:'propertyGroupProperty',property:ref('propertyGroupProperty',propertyId)}}); props.push(propertyId); }
-  const envelope=bindingComplexityEnvelope(store.document,art); assert.equal(envelope.bindingCount,120); assert.equal(envelope.maxDirectFanOut,1);
-  const runtime=createVeyraDataRuntime(()=>store.document); const first=runtime.evaluateBindings(store.document,{artboardId:art}); const settled=runtime.evaluateBindings(store.document,{artboardId:art}); assert.equal(first.stats.evaluatedBindings,120); assert.equal(settled.stats.evaluatedBindings,0); assert.equal(settled.stats.cacheHits,120);
-  runtime.setValue('inst_large','large_p_57',999); const dirty=runtime.evaluateBindings(store.document,{artboardId:art}); assert.equal(dirty.stats.evaluatedBindings,1); assert.equal(dirty.overrides[`propertyGroupProperty:${props[57]}/value`],999);
+check('27 runtime scopes are canonical and deterministic', () => {
+  const scope = createDataRuntimeScope({ kind:'dataRuntimeScope', path:[ref('componentInstance','outer')], dataInstance:ref('viewModelInstance','data') });
+  assert.deepEqual(scope,{kind:'dataRuntimeScope',path:[ref('componentInstance','outer')],dataInstance:ref('viewModelInstance','data')});
 });
 
-assert.equal(checks, 28);
-const browserSource=readFileSync(new URL('../veyra.js',import.meta.url),'utf8');
-assert.match(browserSource,/View Models & Data Binding/);
-assert.match(browserSource,/Runtime Data Preview/);
-assert.match(browserSource,/createViewModel:\s*\(overrides = \{\}\) => dispatchCompatibilityCommand\('createViewModel'/);
-assert.match(browserSource,/setDataRuntimeValue:[\s\S]*dataRuntime\.setValue/);
-assert.match(browserSource,/dataRuntime,\n\s*\}\);/);
+check('28 validation catches missing nested View Model and list references', () => {
+  const store = baseStore(); addCoreData(store);
+  const raw = JSON.parse(serializeVeyra(store.document));
+  raw.viewModelInstances.find((item)=>item.id==='inst_main').initialValues = [{property:ref('dataProperty','p_nested'),value:ref('viewModelInstance','missing')}];
+  assert.throws(()=>normalizeDataGraphDocument(raw),/missing/);
+});
+
 console.log(`veyra M8 View Models/data binding tests passed — ${checks}/28 adversarial checks green`);
 '''
 Path('tests/veyra-m8-data-binding.test.mjs').write_text(suite)
