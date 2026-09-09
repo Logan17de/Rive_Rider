@@ -1,7 +1,9 @@
 name: M8 Integrate Main
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [m8-data-binding]
+    paths: ['.github/workflows/m8-integrate-main.yml']
 
 permissions:
   contents: write
