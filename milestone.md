@@ -1,246 +1,188 @@
 # Veyra — Current Milestone
 
-`plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This file is the **only active implementation milestone**.
+`plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This is the **only active implementation milestone**.
 
-Complete only the tasks below. Follow-up ideas belong in `suggestions`. Do not start M9. When implementation is complete, set `AWAITING VERIFICATION`, supply reproducible evidence, commit, and stop. Implementers do not mark their own work VERIFIED.
+Complete only the tasks below. Follow-up ideas belong in `suggestions`. Do not start M9. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed for M8-C3 implementation handoff; independent acceptance pending
+## Progress snapshot — refreshed after independent M8-C3 verification
 
-These are carry-forward approximate planning estimates from the last accepted milestone, not measured vendor-parity percentages or a line-count metric. Unaccepted M8 work receives no new verified-completion credit.
+These are carry-forward approximate planning estimates, not measured vendor-parity scores, line-count metrics or test-pass percentages. The C3 corrections have demonstrated progress, but M8 has not passed its complete acceptance gate, so no new overall verified-completion increment is claimed.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation. Remaining M8 runtime identity, graph aliasing and observation defects are not counted as complete. |
-| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; passing C2 cases do not constitute acceptance of the whole data runtime. |
-| Modern Rive editor/runtime parity | **~53–57%** | M8 is implemented substantially but remains outside the accepted increment. |
+| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation. C3 identity/observation/public-port fixes pass; resolved data identity and active-controller context still block M8. |
+| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; all earlier suites remain green. M8 is not accepted as a complete capability. |
+| Modern Rive editor/runtime parity | **~53–57%** | No new feature-family completion credit until M8 acceptance. |
 | Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No new interchange capability accepted. |
 | Full Veyra superset target | **~46–49%** | Rive-class capability + Lottie/dotLottie interoperability + AI-native semantics, subject to quality/modularity gates. |
-| Remaining full-target work | **~51–54%** | Unchanged until M8 is independently accepted. |
+| Remaining full-target work | **~51–54%** | Unchanged pending M8 acceptance. |
 
 ### Roadmap position
 
-- Implementation M0–M7: previously VERIFIED, with their documented limitations preserved.
+- Implementation M0–M7: previously VERIFIED, with documented limitations preserved.
 - `plan.md` M3 / implementation M8: **CORRECTIONS REQUIRED**.
-- Current implementation work: **M8-C3 — AWAITING VERIFICATION**, below.
+- C3's ten previously reproduced failures: **FIXES CONFIRMED**; do not undo these fixes.
+- Current implementation work: **M8-C4**, below.
 - M9 / layered state machines: **NOT STARTED; blocked on M8 acceptance**.
 
-Every verification/correction/advance must refresh this snapshot. Do not translate test counts into completion percentages.
+Every verification/correction/advance must refresh this snapshot. Do not turn selected probe counts into completion percentages.
 
-## Independent verification evidence
+## Independent M8-C3 evidence
 
-- Production baseline: `216deb8c972cf476c3c9c0de90d640e47520568f`.
-- Standard `Tests` #173, run `34325474833`: **SUCCESS on that exact baseline**.
-- Independently reran the unchanged production tree on review commit `93558a3c364a7f34e913b0771f826dc3a4c76985`, Actions run `34344021696`, job `102441231159`.
-- A `git diff --exit-code` gate proved production sources, package files, existing tests and scripts were unchanged from the baseline.
-- **45/45 syntax checks and 39/39 existing suites passed again**, including original M8 28 checks, C1 28 checks and C2 13 checks.
-- Additional targeted verifier probes: **2 positive controls passed; 10 regression assertions failed; no fixture/setup errors**. The same results were reproduced locally from the archived source.
-- Positive controls: warm nested numeric invalidation refreshes once then sleeps; Property Group two-way interaction preserves authored serialization/revision/history while changing runtime output.
-- Scope of this review: executed Node runtime/control-plane probes plus one static host-adapter declaration check. It is not real-browser visual acceptance.
+- Production baseline: `d36f0ac2841fa6320f4335f617847d123dd394ca`.
+- Standard repository Tests #176, run `34349387154`: **SUCCESS on that exact baseline**.
+- Independent review commit: `92b91621aa81c095a591bc5abc9bbd20cc4c175e`.
+- Independent Actions run `34351233655`, job `102464741882`: unchanged-production guard and baseline gates PASS; additional composition probes FAIL.
+- **48/48 syntax checks, 41/41 existing suites, C3 12/12 reproduced-contract checks and 17/17 composition checks passed independently**, both locally and in GitHub Actions. Original M8/C1/C2 28/28/13 remain green.
+- Additional selected probes: **2 positive controls pass, 7 assertions fail across three blocker families, zero setup/execution errors in the final probe run**. This is not an overall application pass ratio.
+- Positive controls confirm warm nested numeric updates and non-consuming live ownership observation.
+- No production code or existing tests were modified by this verification. Temporary verifier workflow was removed from the review branch and never entered main.
+- Scope: executed Node runtime/control-plane/host-adapter verification, **not real-browser visual/usability acceptance**.
 
-Reproduction source: [verification/m8-c2-review.mjs](https://github.com/Logan17de/Rive_Rider/blob/93558a3c364a7f34e913b0771f826dc3a4c76985/verification/m8-c2-review.mjs).
+[Executed M8-C3 review](https://github.com/Logan17de/Rive_Rider/blob/805f3b30be4ca189605b183535d4aecd04485f6d/verification/M8-C3-review.md)
 
-Executed report: [M8-C2 independent review](https://github.com/Logan17de/Rive_Rider/blob/83711f201dd85a797301b0f9de669f0cf5222209/verification/M8-C2-review.md).
+[Reproduction source](https://github.com/Logan17de/Rive_Rider/blob/92b91621aa81c095a591bc5abc9bbd20cc4c175e/verification/m8-c3-review.mjs)
 
-The review branch is evidence only, not another implementation milestone. Its temporary workflow was removed and never entered `main`. Do not cherry-pick that workflow. Convert the demonstrated behaviors into permanent regression tests. The host-port test should prove that the advertised operation is callable, not impose a particular spelling.
+The review branch contains evidence, not a second implementation milestone. Convert the demonstrated behavior into permanent regressions; do not cherry-pick the temporary workflow.
 
 ---
 
-# MILESTONE M8-C3 — Runtime Contract Closure
+# MILESTONE M8-C4 — Resolved Binding Graph & Evaluated Context
 
-**Topic:** Events, Lists, Canonical Identity, AI/Browser Parity & Incremental Work  
+**Topic:** Nested Data Aliases, Type Definitions, Scoped Observation & Controller Ownership  
 **Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding  
 **M8 verdict:** `CORRECTIONS REQUIRED`  
-**Implementation status:** `AWAITING VERIFICATION`
+**Implementation status:** `READY`
 
 ## Goal
 
-Close the executed failures below while preserving the successful M8-C1/C2 work. Verify combinations of existing features, not just each isolated happy path. No new Rive feature family is being added in this correction pass.
+Make the already-supported M8 features compose correctly. Fix the three executed blocker families below without adding a new feature family, removing supported types, restricting valid IDs, or starting M9.
 
-## Instructions for all implementing agents
+## Instructions for implementing agents
 
-1. Read this file, `QUALITY.md`, the executed review, and relevant existing tests before changing code.
-2. Preserve one evaluator, one data graph, and the canonical Store/control-plane authored mutation boundary. No browser-only fixes or second runtime.
-3. Add a failing regression for each demonstrated behavior before its production fix. Validate fixtures; do not count setup failures as product failures or weaken expectations to match current defects.
-4. Keep IDs opaque and typed. Do not ban punctuation, rename user objects, or replace IDs to hide identity bugs. Human names remain advisory.
-5. Preserve C2 ephemeral Property Group writes, warm nested-number behavior, authored-generation invalidation, runtime override precedence, and all earlier regression suites.
-6. Runtime ports stay runtime-only. Intentional persistence uses a canonical authored command with validation/provenance/one undo transaction.
-7. Keep diagnostics, metadata and executable APIs aligned. A method name in a manifest is not proof that an agent can call it.
-8. Measure actual graph/index/traversal work separately from converter/output recomputation. Do not fake a lightweight result by counting only one narrow operation.
-9. Keep permanent tests in normal discovery. Remove staging scripts/workflows from promoted code; never change standard CI to hide failing tests.
-10. Stop at AWAITING VERIFICATION with exact commit/run evidence. No M9 or new completion credit.
+1. Read this file, the executed review, `QUALITY.md`, `docs/M8-C3-runtime-contract.md`, and affected tests before editing.
+2. Preserve one evaluator, one data graph, stable typed/opaque identities, canonical authored transactions and scoped ephemeral runtime values.
+3. Add failing regressions for each demonstrated behavior before the production fix. Do not count fixture errors as product failures, hard-code sample IDs/order, or weaken assertions to accept the defect.
+4. Keep successful C3 structured runtime keys, Property Group aliases, trigger fan-out, observation forks, typed live lists, callable runtime ports and retained indexes.
+5. Resolve graph/ownership meaning from IDs, paths, current scope and evaluated context, never human names. Retain authored root paths for future retargeting rather than permanently flattening them to today's terminal instance.
+6. Preserve explicit event advancement. Read/ownership/scene inspection must not consume live events, advance clocks, mutate live caches/counters, or emit mutation notifications.
+7. Intentional persistence goes through canonical validation/provenance/revision/history and one undo transaction. Invalid authoring must reject before commit with structured evidence.
+8. Keep performance counters honest; no per-runtime-write full-project scan or unconditional per-frame graph rebuild to hide dependency errors.
+9. Run all previous suites and new composition cases on the same final tree. Keep permanent tests in normal discovery and remove temporary transport/workflow artifacts before promotion.
+10. Stop at `AWAITING VERIFICATION` with final SHA and standard Tests evidence. M9 and progress increases remain verifier-owned.
 
----
+## Blocker family A — Resolved nested data aliases disagree
 
-## Task 1 — Collision-free runtime identity
-
-- [x] Replace delimiter-only scope/value/list/Property Group/cache keys with a collision-free structural encoding or equivalent nested maps.
-
-### Executed failures
-
-These distinct accepted runtime paths currently produce the same key:
+These two paths reach the same actual runtime property:
 
 ```text
-[{kind: componentInstance, id: "outer/componentInstance:inner"}]
-[{kind: componentInstance, id: "outer"}, {kind: componentInstance, id: "inner"}]
+root.nested -> instance child
+root.nested.child_value
+child.child_value
 ```
 
-Writing 0.66 in one makes the other read 0.66 instead of its initial 0.25.
+C3's syntactic key includes the root/path tuple, so the graph still treats them as different effective endpoints.
 
-Likewise, `(instance "a|b", property "c")` overwrites `(instance "a", property "b|c")`; both are valid authored instance/property pairs.
+Executed failures:
 
-### Required behavior and tests
+- `z_writer: root.num -> child.child_value` plus `a_reader: root.nested.child_value -> box.opacity`: expected cold 0.25, then 0.66 after a runtime write; actual 0.2 both times.
+- Priority-10 nested-target binding and priority-0 direct-target binding to that same child field: actual lower-priority 0.75 with zero conflicts; expected 0.25 and one conflict.
+- A self-cycle from the nested form to the direct form is accepted and changes authored state instead of rejecting.
 
-- Preserve complete typed path structure and each opaque ID; a short hash alone is not a collision-proof identity contract.
-- Reset/prune/delete must match structural scope ownership, not ambiguous string prefixes.
-- Cover `/`, `:`, `|`, `%`, quotes, Unicode and equal literal IDs across kinds.
-- Test with valid authored Component graphs as well as direct runtime API scopes.
-- Assert A updates only A; B defaults/runtime values remain unchanged; resetting A leaves B unchanged.
-- Keep runtime/evaluated scope identities out of authored serialization.
+### Task 1 — One effective endpoint graph for resolved aliases
 
-## Task 2 — Canonical endpoint identity before graph operations
+- [ ] Retain the stable authored root/path while resolving effective data endpoints in the relevant runtime scope.
+- [ ] Use the resolved relationship consistently for topological order, virtual/derived values, conflicts, cycles, dependency propagation and ownership.
+- [ ] Preserve the existing higher-priority/stable-ID tie-break policy across direct/nested aliases; dependency ordering must not depend on the chosen binding ID sorting before its writer.
+- [ ] Reject demonstrable authored self/multi-hop cycles before document/revision/history mutation with stable endpoint/binding evidence.
+- [ ] Preserve valid direct, nested and Property Group alias forms and existing file compatibility; do not ban nested targets to make the test pass.
 
-- [x] Normalize equivalent endpoint forms before cycle detection, conflict selection, dirty propagation, caching, dependencies and ownership.
+### Task 2 — Retargeting, warm caches and scope isolation
 
-### Executed failures
+- [ ] Re-resolve affected effective edges when a nested instance reference changes, including runtime-scoped references and supported derived reference changes.
+- [ ] Remove stale dependency registrations and invalidate only affected reachable branches.
+- [ ] Define bounded deterministic handling for cycles/conflicts introduced by runtime retargeting; do not hang or silently choose a winner outside the documented policy.
+- [ ] Test cold/warm chains with both binding-ID orders, aliases as source and target, same/different scopes, rename/reorder, reference retargeting, self/multi-hop cycles and unrelated cache hits.
+- [ ] Exercise real repeated/nested Component instances as well as direct runtime fixtures.
 
-Both forms address the same property but are treated as different graph nodes:
+## Blocker family B — Broad type labels admit incompatible definitions
+
+A property typed to enum e1 can currently bind to a Property Group typed to enum e2 simply because both report `enum`. Dispatch succeeds and changes authored state; evaluating the saved binding throws because e1v does not belong to e2. Preview currently throws a raw exception rather than returning its structured failure contract.
+
+A View Model property typed to vm_child can likewise bind to a Property Group typed to different_model, then fail during scene evaluation.
+
+### Task 3 — Full type-descriptor compatibility and failure boundaries
+
+- [ ] Validate referenced enum and View Model definition identity, not only the broad labels `enum`/`viewModel`.
+- [ ] Apply the same compatibility discipline to nested list descriptors and converter input/output contracts where those definitions flow through the existing binding pipeline.
+- [ ] Preserve valid same-definition bindings and supported explicit conversions; do not delete M8 property types or silently coerce incompatible references.
+- [ ] Make invalid normalization, preview and dispatch fail before authored mutation with stable source/target/type evidence; preview returns structured errors instead of leaking evaluation exceptions.
+- [ ] Prove both executed enum/model mismatches reject with unchanged serialization/revision/history, then positively evaluate valid counterparts.
+- [ ] Test the same contracts after authored schema/config changes with a warm runtime and explicit runtime overrides. Runtime-only incompatible values need bounded deterministic diagnostics rather than silently corrupting authored state or the next frame.
+
+## Blocker family C — Scoped reads omit Component animation context
+
+The executed fixture animates a source Property Group from 0.2 to 0.8, binds it to box.opacity, and instantiates the source twice. Instance A's timeline is at one second; B's is at zero.
 
 ```text
-{kind: "propertyGroupProperty", property: {kind: "propertyGroupProperty", id: "p"}}
-{kind: "property", address: "propertyGroupProperty:p/value"}
+Full canonical host scene: A = 0.8, B = 0.2
+Scoped host.read:          A = 0.2, B = 0.2
+Scoped host scene for A:       0.2
 ```
 
-A priority-0 binding then overwrites a priority-10 binding: output 0.75 instead of 0.25, wrong owner, zero reported conflicts. A self-cycle expressed through the two forms is accepted and changes the document.
+Selecting the terminal source artboard is not equivalent to evaluating that Component instance with its actual controller/override state. The non-consuming boundary is fixed; this defect is incorrect context.
 
-### Required behavior and tests
+There is a related ownership failure even when the correct timeline context is explicitly supplied: visible output is 0.8, but the recommended operation edits the authored Property Group value that the timeline overwrites. The chain contains no controlling timeline.
 
-- One canonical internal identity for one actual endpoint; retain deterministic compatibility for accepted serialized forms.
-- Reuse the canonical property-address parser/encoding rather than maintaining a parallel string interpretation.
-- Enforce higher-priority then stable-ID tie-breaking across aliases and declaration reorder.
-- Direct and multi-hop cycles through aliases must reject atomically with stable dependency evidence.
-- Chain propagation through equivalent forms must use the latest derived value rather than a stale authored value.
-- Include percent-encoding/opaque-ID cases and prove document/revision/history stay unchanged on rejection.
+### Task 4 — Scoped observation uses the actual evaluated Component context
 
-## Task 3 — Event advancement vs non-mutating observation
+- [ ] Construct scoped read/ownership/scene context through the canonical Component evaluation semantics, including the selected instance path and applicable timeline/state-machine/remap/mix/authored override state.
+- [ ] Match the full host scene for the same instance and corresponding property. Define source-local vs wrapper/world property semantics explicitly where relevant; the scalar opacity fixture must agree without ambiguity.
+- [ ] Do not reset live controllers or silently substitute source defaults, the first artboard, or a sibling's runtime.
+- [ ] Preserve non-mutating forks and repeated observation; snapshot live values, queues, controller times, buckets, counters, notifications and authored history before/after reads.
+- [ ] Test A/B at different times, repeated nested instances, live binding input changes, remap/mix and supported instance overrides; compare actual full-scene descendants with public scoped read-back.
 
-- [x] Fix nested-trigger consumption/settling and make live read/ownership inspection observational.
+### Task 5 — Ownership reaches the effective controller, including animation
 
-### Executed failures
+- [ ] Continue the winning binding chain into the active controller of its source; `Timeline -> Property Group -> Binding -> visual` must not stop at the overwritten authored Property Group value.
+- [ ] Include stable timeline/track or other applicable controller refs and truthful precedence/context evidence.
+- [ ] Recommend a realizable edit that can affect the visible result: the active authored controller/keyframe or an explicitly described runtime override with its precedence. Do not claim an overwritten authored intermediate is the effective edit target.
+- [ ] Execute the recommended operation through its advertised public/canonical transport and compare evaluated read-back, not just metadata/regex presence.
+- [ ] Preserve existing data -> converter -> Property Group chains, conflict-winner ownership, readonly-source handling, name independence and runtime/authored separation.
 
-After warming a nested trigger binding and firing twice:
+### Task 6 — Regression, lightweight and release gates
 
-```text
-Expected outputs: true, true, false; two pulses consumed; empty queue
-Actual outputs:   true, true, true;  one pulse consumed; one still queued
-```
+- [ ] Convert all seven executed regression assertions into permanent tests, retaining both positive controls and all 41 existing suites.
+- [ ] Add combinations described above, not only a count-to-requirement mapping.
+- [ ] Retain C3's 220-binding, two-artboard, two-scope fixture: settled revisits perform zero graph/catalog/signature rebuilds; account separately for output application. Record the cost of new alias-resolution/observation work truthfully.
+- [ ] Keep syntax checks and the unchanged standard `.github/workflows/test.yml` green on the exact final clean main SHA.
+- [ ] Record a reproducible handoff with actual values, test names, final SHA/run, compatibility decisions and limitations. Do not claim real-browser visual QA from Node tests.
 
-C2 invalidates nested paths on fire, but the consumption/settle path still invalidates only the terminal direct endpoint key.
+## Acceptance
 
-Separately, `getOwnership(..., {dataRuntime: liveRuntime})` consumes a pending trigger: pending changes from true to false just because the caller reads ownership.
+M8 is eligible for independent verification when the three blocker families are fixed on one production tree, all previous C3 fixes remain green, supported endpoint/type combinations behave consistently, public scoped reads match the canonical scene, effective ownership recommendations are executable, and the exact-final-head standard Tests gate passes.
 
-### Required behavior and tests
+This milestone does not add layered state machines, Layout, assets/effects, scripting, interchange, MCP, a new UI framework or a runtime-language rewrite. No new vendor-parity completion credit is claimed before independent acceptance.
 
-- The same resolved dependency identity must govern fire, pulse consumption and false/inactive settling, including direct and nested aliases.
-- Each explicit fire is delivered according to the documented per-advance contract; fan-out must not consume it once per binding or inspecting observer.
-- Read/query/ownership/current-scene inspection must not advance clocks, consume triggers, change live values, or emit mutation notifications.
-- Do not fix observation by silently substituting a fresh default runtime: reads must still report current live values and scope.
-- Separate explicit advancement from snapshot/peek evaluation using the same evaluator semantics.
-- Test warm nested queues, one/two/multiple fires, fan-out, unrelated cached branches, repeated reads between advances, and two isolated Component paths.
-- After the queue drains, the target settles inactive and unchanged evaluations cache again.
-
-## Task 4 — Typed scoped runtime lists and converter dependencies
-
-- [x] Make list-consuming converters use the actual scoped runtime list, propagate its dependencies, and validate all runtime list mutations.
-
-### Executed failures
-
-Replacing runtime item A from 0.2 to 0.6 changes `getList()`, but the bound `numberToListIndex` output remains 0.2. Forcing the numeric source to change and recompute still returns 0.2 because the converter reads authored `document.lists`.
-
-Inserting `"not-a-number"` into a declared number list succeeds and changes the list.
-
-### Required behavior and tests
-
-- Resolve converter list references through the same scoped data runtime, not a separate list model or authored-only shortcut.
-- Register converter configuration dependencies (including list refs) and invalidate their actual dependent bindings on insert/remove/move/replace.
-- Validate item type, enum/model/asset/artboard references, constraints and index policy before runtime mutation; failures preserve list/value/queue/notification state.
-- Keep surviving item identity stable, handle empty/out-of-range cases explicitly, and preserve source defaults.
-- Test live item 0.6 -> bound output 0.6 immediately and after forced recomputation; sibling scope stays 0.2.
-- Test wrong-type insert and replacement failure, list reordering, nested View Model/list items, reset and authored-initial-list changes under the documented runtime-precedence policy.
-- Notifications must preserve the complete runtime scope and useful old/new/change evidence.
-
-## Task 5 — Executable public runtime/AI parity
-
-- [x] Align ownership recommendations, public adapters and registry metadata, then exercise them against live state.
-
-### Executed failure and existing implementation
-
-Ownership recommends runtime port `setTwoWayTarget`. The browser adapter does not expose that name. It **does** expose `setTwoWayBindingTarget`, which calls the runtime class method. Fix this metadata/transport mismatch rather than claiming the reverse-write implementation is absent.
-
-### Required behavior and tests
-
-- Either advertise the real public helper or provide an explicit callable mapping/alias. Do not require a particular method spelling.
-- Discover a recommended operation, invoke it through the public surface, and read back the correct scoped visible result. A source regex/catalog entry alone is insufficient acceptance evidence.
-- Preserve JSON-safe stable-ref arguments and runtime-vs-authored classification.
-- Test nested-source recommendations with a realizable terminal/path write, not an uncallable root-plus-path description.
-- Live browser read/ownership must use or explicitly request the actual host runtime, active artboard/Component scope and current evaluation context; do not silently report defaults as live output.
-- Preserve Task 3 non-consuming observation while reading live state.
-- Include full controlling-chain evidence for data -> converter/Property Group -> target and winner-only ownership. Do not recommend an overwritten intermediate authored property as the effective edit target.
-- Keep intentional authored source reads distinct and available.
-
-## Task 6 — Retained indexes and honest incremental-work gates
-
-- [x] Retain independent artboard binding indexes and bound actual invalidation work.
-
-### Executed failure
-
-Warm artboard A and B, then revisit A and B unchanged. `graphBuilds` increases by **2**, not 0. `#index()` clears every cached index when installing one, so alternating artboards continually rebuilds graphs.
-
-### Required behavior and tests
-
-- Cache indexes per document/artboard/relevant generation with explicit invalidation; do not evict all sibling indexes on every lookup.
-- Retain independent scope output caches without sharing mutable runtime values.
-- Use dependency indexes for terminal/nested/list changes instead of scanning and recompiling the entire project for each runtime write.
-- Avoid repeatedly serializing the full authored data graph merely to check an unchanged frame where an explicit generation/revision contract can do so.
-- Measure index builds, bindings examined, dependency edges visited, converter evaluations and output application separately. Output application/rendering may have its own legitimate cost; zero converter evaluations is not zero total work.
-- Keep the 220-binding fixture and add multi-artboard/repeated-Component fixtures. A settled A/B revisit adds zero graph builds; one input change wakes only its relevant dependency branches, then caches again.
-- Preserve the zero-binding fast path, DOM-free engine and no new heavy dependency.
-
----
-
-## Acceptance and implementer handoff
-
-M8 can be VERIFIED only after the demonstrated behaviors above pass against the **same final production tree**, with all previous M0–M8-C2 regressions intact.
-
-Required evidence:
-
-- permanent regressions mapped to all ten verifier failures, plus positive controls and composition cases specified in each task;
-- actual public-adapter execution for runtime/AI parity and explicit distinction from real-browser visual QA;
-- unchanged serialization/revision/history for runtime operations, reads, previews and rejected commands;
-- meaningful index/traversal counters for lightweight behavior;
-- `npm run check` and `npm test` passing;
-- standard `.github/workflows/test.yml` SUCCESS on the exact final clean `main` HEAD;
-- no staging scripts/temporary workflows in promoted code;
-- refreshed progress notes, with percentages unchanged until independent acceptance.
-
-Do not silently discard established M8 feature types or reject previously supported valid IDs/endpoints to make this pass. Unsupported operations need an explicit capability contract and compatibility decision.
+## Handoff
 
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits: fb616e2d19ed05a983f25b325d79b1dbb986c39f
-- Final clean main SHA: the final merge commit must be reported with the standard Tests head_sha/run evidence; this handoff does not self-certify a not-yet-created merge SHA.
-- Ten verifier failures -> permanent test mapping: docs/M8-C3-runtime-contract.md maps report cases #3-#12 one-for-one to tests/veyra-m8-c3-runtime-contracts.test.mjs; both C2 positive controls remain. The composition suite adds 17 further checks (29 new C3 checks total).
-- Structured scope/tuple identity proof: exact JSON typed tuples preserve every opaque ID and ordered scope path; reset/subtree ownership is structural. Punctuation/Unicode/cross-kind fixtures and valid nested Component graphs are covered.
-- Endpoint alias/conflict/cycle proof: shared propertyAddress parser canonicalizes PG address/ref aliases before graph operations; priority/stable-ID ties, percent encodings, reordered declarations, direct/multi-hop cycles, atomic rejection and derived propagation are tested.
-- Nested trigger + non-consuming read proof: terminal dependency routing is shared by fire and consume/settle; fan-out consumes once per artboard/scope advance. Read/ownership/scene inspection use a fork of current live data/Component/machine state through the same evaluator, with no live event/cache/stat/notification mutation.
-- Scoped typed list + converter propagation proof: converters read scoped lists and register list dependencies; insert/remove/move/replace preserve surviving IDs, validate type/reference/range/index before mutation, retain scoped notifications and copy-on-write/reset precedence.
-- Public host operation discovery/invoke/read-back proof: the real runtimeHost module used by veyra.js is executed in Node. Tests discover manifest/ownership operations, invoke JSON-safe arguments and read live scoped values; nested writes resolve terminal refs, chain recommendations trace controlling sources, and readonly sources do not advertise writes. This is not real-browser visual/usability acceptance.
-- Retained index/actual work-counter proof: independent per-artboard indexes and scope outputs; explicit authored snapshot/epoch invalidation. The 220-binding/two-board/two-scope revisit performs zero graph/catalog/signature builds and zero converter/path evaluations while reporting 440 output applications. One scoped write examines zero bindings and visits one dependency edge, then one binding recomputes and 109 cache.
-- Preserved C1/C2 positive controls and earlier regressions: original M8 28, C1 28, C2 13 checks and all earlier suites pass. Only two legacy exact-key expectations changed to structural encoding; previous behavioral assertions remain.
-- npm run check: PASS — 48/48 source files in local and staging gates.
-- npm test: PASS — 41/41 suites in local and staging gates; C3 reproduced contracts 12/12 and composition checks 17/17.
-- Exact-head standard Tests run ID/result: REQUIRED after the final clean main merge. Standard .github/workflows/test.yml is unchanged; its completed run must match the reported final main SHA before handoff is called ready.
-- Persistence/migration and performance impact: no authored version increment; accepted endpoint aliases canonicalize deterministically. Runtime values/scopes/lists/queues never serialize or enter history. Mutable external hosts must call invalidateAuthoredDocument after in-place edits. Observation copies current runtime state and has real copy cost; zero recomputation is not zero total work.
-- Cleanup evidence: all .veyra-staging/m8-c3 payloads/helpers and m8-c3-stage.yml removed before the clean branch commit; standard test workflow and normal scripts unchanged.
-- Suggestions / explicit limitations: no M9 or new completion credit; no real-browser visual QA claimed. Converter-bearing two-way bindings still require an inverse contract. Empty list-index conversion remains null; finite indexes clamp. Detailed decisions and regression mapping are in docs/M8-C3-runtime-contract.md.
+- Implementation commits:
+- Final clean main SHA / standard Tests run:
+- Seven independent regression assertions -> permanent tests:
+- Resolved direct/nested endpoint ordering/conflict/cycle proof:
+- Dynamic retargeting/warm-cache/scope proof:
+- Enum/View Model/list/converter compatibility proof:
+- Invalid preview/dispatch non-mutation and diagnostics:
+- Full-scene vs scoped Component read/ownership proof:
+- Animated Property Group effective-controller edit/read-back:
+- Event/clock/cache/history observation non-mutation:
+- C3 must-preserve regression proof:
+- Actual performance/size/compatibility impact:
+- npm run check:
+- npm test:
+- Temporary artifact cleanup:
+- Suggestions and known limitations:
 ```
