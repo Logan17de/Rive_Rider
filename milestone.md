@@ -12,37 +12,31 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 | Area | Current verified estimate | Notes |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~94–96%** | Stable typed identity, universal semantics, name-independent resolver, one control plane, ownership/dependency graph, project/component refs and nested runtime scopes are verified for the current feature graph. |
-| Core editor / engine foundation | **~90–92%** | M0–M6 foundations are verified, including stable camera/client anchoring, exact current interaction loop, multi-artboards, Components, rigged instance evaluation and isolated nested runtime scopes. |
-| Modern Rive editor/runtime feature parity | **~50–54%** | Components/multi-artboards and current rig/runtime integration are now counted. Large remaining families include View Models/Data Binding, layered state machines, layout, text/assets/effects, richer animation authoring, scripting/WGSL and production runtimes. |
-| Lottie / dotLottie / Creator ecosystem parity | **~25–30%** | Current native vector/timeline/state/component foundations overlap with Lottie authoring, but formal Lottie/dotLottie import/export, masks/mattes, Motion Tokens, broad compatibility and package/runtime work remain substantial. |
-| Full Veyra superset target | **~43–47%** | Target now explicitly means Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while staying modular/lightweight. |
-| Remaining full-target work | **~53–57%** | Current vector-authoring UX, then Data Binding/View Models, full state-machine/animation parity, layout/text/effects/assets, interchange, scripting/plugins, runtimes/SDKs, collaboration, accessibility, compatibility certification and AI/MCP productization. |
+| AI-native identity / semantics / control architecture | **~94–96%** | Stable typed identity, universal semantics, name-independent resolution, canonical control plane, dependency/ownership graph, Components and current editor command surfaces are verified. |
+| Core editor / engine foundation | **~93–95%** | M0–M7 foundations are verified, including robust workspace/camera behavior, Components, interaction loop, persistent Pen paths, stable vertex editing, multi-selection/marquee and canonical grouping. |
+| Modern Rive editor/runtime feature parity | **~53–57%** | Current vectors/rigging/timelines/interactions/Components and core authoring UX are substantial. Major remaining families include View Models/Data Binding, layered state machines, layout, text/assets/effects, richer animation tooling, scripting/WGSL and production runtimes. |
+| Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | Native path authoring, Bezier editing, hierarchy, timelines and current interaction foundations overlap strongly, but formal interchange, masks/mattes, Motion Tokens, packaging and compatibility work remain substantial. |
+| Full Veyra superset target | **~46–49%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
+| Remaining full-target work | **~51–54%** | Data Binding/View Models, layered state machines, layout/text/effects/assets, richer animation authoring, interchange, scripting/plugins, runtimes/SDKs, collaboration/accessibility and AI/MCP productization. |
 
 ### Roadmap position
 
 - `plan.md` M0 — AI Identity & Control Foundation: **VERIFIED**.
-- `plan.md` M1 — Close current interaction loop: **VERIFIED**.
+- `plan.md` M1 — Current interaction loop: **VERIFIED**.
 - Interstitial M5 — Workspace UX Stabilization: **VERIFIED**.
 - `plan.md` M2 / implementation M6 — Multi-Artboard, Components & Project Graph: **VERIFIED**.
-- **Current milestone M7 — Vector Authoring, Multi-Selection & Grouping UX: AWAITING VERIFICATION.**
-- After M7, resume `plan.md` M3 — View Models / Data Binding / Property Groups / Enums / Converters / Lists.
+- Interstitial implementation M7 — Vector Authoring, Multi-Selection & Grouping UX: **VERIFIED**.
+- **Current implementation M8 maps to `plan.md` M3 — View Models & Data Binding: READY.**
 
-### M6 verification record
+### M7 verification gate
 
-M6 was independently accepted on `main` implementation/handoff head `8532775e05cdca6247fede9846189d2b491579f8`.
+M7 was independently accepted on `main` head `31cbbc7549ef0cf0a9bc03cfd0d9eff9e58e8a80`.
 
-Verified:
-
-- persisted Component timeline/state-machine selection/remap/mix behavior;
-- legal nested Component transform composition;
-- rigged Component nodes/bones/meshes/controls/constraints in host evaluation;
-- client-space graph anchoring across panel resize/collapse;
-- authored stroke scaling with zoom while editor overlays remain screen-space UI;
-- full typed nested Component runtime-scope isolation;
-- runtime scopes/evaluated identities remain ephemeral;
-- existing M0–M6 contracts remain green;
-- standard GitHub `Tests` on the exact handoff head: **40/40 syntax checks, 35/35 suites**.
+- GitHub standard `Tests` run #167: **SUCCESS** on the exact head.
+- `npm run check`: **41/41** source files.
+- `npm test`: **36/36** suites.
+- Dedicated M7 suite: **22 adversarial checks green**.
+- Same-parent/contiguous grouping remains an intentional fail-closed limitation rather than silently changing stacking/local animation coordinate domains; broader safe grouping belongs in `suggestions`.
 
 ### Progress maintenance rule
 
@@ -50,272 +44,403 @@ Every future milestone verification or advance must refresh this Progress snapsh
 
 ---
 
-# MILESTONE M7 — Vector Authoring, Multi-Selection & Grouping UX
+# MILESTONE M8 — View Models, Data Binding & Runtime Data Graph
 
-**Status:** `AWAITING VERIFICATION`
+**Roadmap mapping:** `plan.md` M3 — View Models & Data Binding  
+**Status:** `READY`
 
 ## Goal
 
-Make Veyra feel like a real daily-use vector animation editor for drawing and manipulating artwork, while keeping every operation stable-ID based, undoable, AI-addressable, deterministic and lightweight.
+Build Veyra's modern runtime-data backbone so interactive artwork is no longer centered on legacy state-machine inputs or display-name lookup.
 
-After M7, users must be able to:
+After M8, authored runtime data must flow through one stable typed graph:
 
 ```text
-see exact stage coordinates
-→ draw a persistent path naturally
-→ create/edit Bezier curves
-→ add/remove/edit vertices
-→ multi-select artwork
-→ marquee select
-→ Ctrl/Cmd+G group
-→ Ctrl/Cmd+Shift+G ungroup
-→ preserve world transforms and draw order
+View Model definition
+        ↓
+View Model instance / nested values / lists
+        ↓
+converter chain / Property Group
+        ↓
+Binding
+        ↓
+canonical property address
+        ↓
+evaluated scene
 ```
 
-The implementation must preserve all M0–M6 contracts and `QUALITY.md`.
+And Veyra/AI must be able to answer:
+
+```text
+What runtime data controls this visual property?
+What is the current value?
+Where did it come from?
+Is the binding one-way or two-way?
+What converter/property-group path is involved?
+What else depends on this value?
+```
+
+without relying on human names.
+
+M8 must preserve all M0–M7 contracts and `QUALITY.md`.
 
 ---
 
-## Mandatory rules
+## Mandatory architecture rules
 
-1. **Never discard a valid user drawing silently.** A valid Pen draft must finalize deterministically when the user finishes or changes tools.
-2. **Persistent geometry uses stable typed identity.** Path vertices are not addressed only by array index.
-3. **Human UI and AI use the same canonical commands.** Do not add UI-only group/path mutations.
-4. **Selection is editor state.** Multi-selection/marquee state is not serialized into `.veyra` unless a future explicit collaboration/presence contract says otherwise.
-5. **Grouping must preserve appearance.** Child world transforms, draw order, artboard ownership and semantic identity survive group/ungroup.
-6. **No name dependence.** Group/path operations use refs, not display-name lookup.
-7. **No runtime tax for editor-only UX.** Coordinate HUD, marquee visuals, editing handles and shortcut UI remain editor-only.
-8. **No second geometry model.** Renderer, hit testing, path editor and export consume the canonical path representation.
-9. **Zoom/UI correctness remains a release gate.** Test 10%–800% zoom and nested transforms.
-10. `npm run check`, `npm test`, and final-head GitHub `Tests` must pass.
+1. **Stable typed identity everywhere.** New persistent entities use immutable IDs and typed refs; names are advisory display/API conveniences only.
+2. **One data graph.** Do not build separate editor-only, Component-only, state-machine-only or AI-only binding systems.
+3. **Authored and evaluated values stay distinct.** Runtime/binding output does not overwrite authored source values merely because it is visible.
+4. **Binding ownership is machine-readable.** Dependency/ownership APIs must expose the full controlling chain.
+5. **Cycles fail deterministically.** Never loop, hang, or silently choose an arbitrary winner.
+6. **Validation boundary remains canonical.** UI and AI mutations use Store/command/control-plane validation and history.
+7. **No name-dependent paths internally.** Nested View Model/property/list paths resolve by stable refs/IDs; display paths may be derived for humans.
+8. **Legacy machine inputs remain compatible, not the future data backbone.** Do not remove them in M8.
+9. **No hidden runtime tax.** Projects without Data Binding must not continuously evaluate an unused binding graph.
+10. **No heavy framework dependency for the core engine.** Keep the data engine DOM-free and suitable for the future compiled runtime.
+11. **Deterministic order.** Same authored document + same runtime inputs = same evaluated data and scene.
+12. `npm run check`, `npm test`, and exact-head GitHub `Tests` must pass.
 
 ---
 
-## Task 1 — Stage coordinates and position readout
+## Task 1 — Universal data entity identity
 
-Add a clear coordinate surface for the active artboard.
+Add persistent typed identity/reference support for the M8 families, at minimum:
+
+```text
+viewModel
+viewModelInstance
+dataProperty
+enum
+enumValue
+binding
+converter
+propertyGroup
+propertyGroupProperty
+list
+listItem
+```
+
+If a different normalized sub-object layout is cleaner, preserve equivalent first-class addressability.
 
 ### Requirements
 
-- Pointer movement over the stage shows canonical world `X / Y`.
-- Coordinates use the exact same client↔world transform used by renderer/hit testing.
-- Selected object Inspector clearly exposes authored transform X/Y.
-- For evaluated/derived values, label authored vs evaluated instead of overwriting authored numbers.
-- Multi-selection shows selection bounds/center as derived editor information; it must not invent a shared authored X/Y property.
-- Coordinate readout remains correct after pan, zoom, panel resize/collapse, artboard origin changes and HiDPI/browser resize.
+- immutable stable IDs;
+- generic lookup/ref validation;
+- duplicate-ID rejection per kind;
+- deterministic legacy/default migration where needed;
+- document summary/manifest/index integration;
+- universal semantic registry can annotate every persistent M8 entity;
+- deleting/duplicating owners has explicit cascade/copy behavior;
+- human `name` is marked advisory.
 
 ---
 
-## Task 2 — Rive-style Pen / Draw Path lifecycle
+## Task 2 — View Model definitions
 
-The current draft-path behavior is not acceptable because changing tools/Escape can erase valid work.
-
-### Required behavior
-
-- Click places a straight vertex.
-- Click + drag creates a vertex with Bezier handles immediately.
-- A valid draft with **2+ vertices** must be committed/finalized when:
-  - the user presses `Esc`;
-  - the user switches to another tool;
-  - the user explicitly chooses Done/Finish;
-  - the user closes the path by targeting the first vertex.
-- A one-point incomplete draft may cancel on `Esc`.
-- Closing the path sets canonical `geometry.closed` rather than faking a duplicate endpoint.
-- Final path creation is one authored, undoable canonical command/transaction.
-- Draft overlays remain editor-only and are never serialized.
-- Tool switching must never race with commit and produce duplicate/half-created paths.
-
----
-
-## Task 3 — Edit Vertices mode and Bezier handles
-
-### Entry/exit
-
-- `Enter` on a selected editable path enters Edit Vertices mode.
-- `Esc` / visible **Done Editing** exits vertex editing when no Pen draft is active.
-- Selection and mode transitions are deterministic and keyboard accessible.
-
-### Vertex editing
-
-- Drag a vertex to move it.
-- Drag incoming/outgoing handles to reshape the curve.
-- Zero-length handles must have a discoverable way to become smooth/curved from the canvas; do not leave an invisible ungrabbable capability gap.
-- Support explicit handle modes compatible with Rive-style concepts:
-  - straight/corner;
-  - mirrored;
-  - asymmetric/aligned;
-  - detached/free.
-- Ctrl/Cmd+click vertex toggles the documented straight/smooth behavior where applicable.
-- Ctrl/Cmd+click handle removes that handle.
-- Alt/Option+click or equivalent detaches a handle pair.
-- Handle mode and geometry survive save/load and undo/redo.
-
-### Corner radius
-
-- Straight vertices expose deterministic corner radius where supported.
-- Radius is editable in Inspector and with a direct stage affordance.
-- Define how rounded corners compile to explicit curve geometry for rendering/export without destroying the authored editable intent unnecessarily.
-
----
-
-## Task 4 — Canonical path topology commands
-
-Add stable command-registry operations for at least:
+Implement authored View Model definitions with properties covering modern parity types:
 
 ```text
-addVertex
-removeVertex
-moveVertex
-moveBezierHandle
-setVertexHandleMode
-setVertexCornerRadius
-openPath
-closePath
-reversePath
+number
+boolean
+trigger
+string
+enum
+color
+viewModel        // nested model
+list
+image
+artboard
 ```
+
+### Property contract
+
+Each property must expose:
+
+- stable property ID;
+- type;
+- default/authored value or typed source contract;
+- constraints/enum/model/list item type where relevant;
+- bindability/readability/writability metadata;
+- semantic annotations;
+- deterministic validation.
+
+Do not use the property display name as identity.
+
+---
+
+## Task 3 — View Model instances and runtime values
+
+Add View Model instances with instance-local values and nested model/list state.
+
+### Requirements
+
+- stable authored instance identity;
+- explicit relation to its View Model definition;
+- nested model values resolve through stable property/instance refs;
+- Component instances can have isolated View Model context without leaking values to sibling Component instances;
+- triggers have explicit edge/fire semantics rather than being ordinary persistent booleans;
+- runtime mutation APIs can set/get/fire values without writing evaluated-only state back into authored defaults unless explicitly requested;
+- reset semantics are deterministic;
+- ephemeral runtime instance state is not accidentally serialized.
+
+If an authored instance intentionally stores initial values, distinguish those from live runtime values.
+
+---
+
+## Task 4 — Canonical binding model
+
+Add first-class `binding` entities connecting a stable data source to a supported Veyra property address/target.
+
+At minimum support:
+
+- data → visual/property one-way binding;
+- two-way binding only where the target/source capability explicitly allows it;
+- nested View Model properties;
+- Component-instance-local binding context;
+- optional converter chain;
+- optional Property Group source/target.
+
+### Binding requirements
+
+- binding source/target use typed refs/property addresses, not names;
+- enabled/disabled state;
+- deterministic direction/mode;
+- validation before commit;
+- clear diagnostics for missing source/target/type mismatch;
+- binding deletion never destroys unrelated data;
+- no direct mutation of derived evaluated output.
+
+---
+
+## Task 5 — Data evaluator and ownership precedence
+
+Integrate Data Binding into the canonical evaluator with an explicit documented stage/priority.
+
+The exact final order must be mechanically defined and tested. It should extend the current authored/animation/constraint/interactive discipline rather than creating a second evaluator.
+
+For every bound address, expose:
+
+```text
+authored value
+runtime data value
+converted value
+final evaluated value
+active owner
+owner stack
+binding ref
+source data ref
+converter/property-group refs
+conflicts/diagnostics
+```
+
+### Hard requirements
+
+- no hidden writes to authored source during read/evaluation;
+- cycles detected before or during bounded graph evaluation;
+- deterministic conflict ordering;
+- binding ownership appears in `getOwnership()` and dependency graph;
+- `read(..., { evaluated: true })` can explain the data owner/evidence.
+
+---
+
+## Task 6 — Observability and change propagation
+
+Provide a DOM-free runtime change-notification contract.
+
+### Requirements
+
+- changing one data value marks only relevant binding/dependency branches dirty where practical;
+- listeners/subscribers receive stable data refs + old/new value + source/provenance;
+- no full-document rebuild is required merely to notify a value change;
+- multiple changes can be batched deterministically;
+- trigger firing has bounded one-shot semantics;
+- settled graphs do no continuous work.
+
+This is a `QUALITY.md` release gate because Data Binding will become a hot runtime path.
+
+---
+
+## Task 7 — Property Groups
+
+Implement artboard-local Property Groups as first-class keyable/data-bindable entities.
+
+They must support a clear graph such as:
+
+```text
+Timeline → Property Group → View Model
+View Model → Property Group → visual property
+```
+
+where the selected direction is explicit.
+
+### Requirements
+
+- stable group/property IDs;
+- supported typed property values;
+- property-address/keyframe integration where meaningful;
+- deterministic ownership and conflict reporting;
+- no hidden View Model ↔ View Model cycles;
+- Component instance isolation;
+- manifest/query/semantics support.
+
+---
+
+## Task 8 — Enums and converters
+
+### Enums
+
+Support user/system enum definitions with stable enum + enum-value IDs.
+
+Renaming/reordering enum values must not change identity or break bindings.
+
+### Converters
+
+Implement a first-class converter pipeline sufficient for current roadmap needs, with deterministic typed input/output metadata.
+
+At minimum establish extensible built-ins for relevant conversions such as:
+
+- number ↔ boolean;
+- number/string formatting where safe;
+- enum mapping;
+- color mapping/interpolation where defined;
+- conditional/select mapping;
+- number → list selection/index behavior required by Task 9.
 
 Requirements:
 
-- command parameters use stable node/pathVertex refs where possible;
-- adding/removing vertices gives deterministic persistent IDs;
-- removing/reordering a vertex does not re-identify surviving vertices;
-- animation/property-address references either remap safely or fail closed with dependency evidence;
-- preview/dispatch/verify/history/provenance parity follows the existing control-plane contract;
-- browser/global adapter remains thin over the same commands.
+- converter chains are ordered stable refs;
+- type-check chain composition;
+- invalid chain fails closed with named evidence;
+- converter result is evaluated, not silently persisted;
+- reserve an explicit future script-converter hook without implementing arbitrary scripts in M8.
 
 ---
 
-## Task 5 — Multi-selection foundation
+## Task 9 — Lists and list item instances
 
-Upgrade editor selection from a single selected entity to a deterministic ordered set of stable typed refs while preserving a primary selection for Inspector compatibility.
+Implement View Model lists without introducing a parallel scene model.
 
-### Required behavior
+### Requirements
 
-- Shift+click toggles membership.
-- Clicking empty stage clears selection unless modifier behavior says otherwise.
-- Hierarchy selection and canvas selection converge on the same selection model.
-- Selection order is deterministic and never based on display names.
-- Locked/hidden entities obey explicit selection policy.
-- Selecting nested/grouped content supports a deliberate deep-selection gesture without breaking ordinary parent selection.
-- Existing single-selection APIs remain compatible or migrate explicitly.
+- stable list identity;
+- item values/instances with stable runtime identity appropriate to their persistence model;
+- insert/remove/move/replace operations;
+- index/current-item read surface;
+- deterministic number-to-list/index converter semantics;
+- nested View Model list items;
+- Component/artboard list-rendering contract sufficient for later Layout/UI work, without building the full Layout milestone now;
+- list mutation emits bounded dependency notifications;
+- sibling Component instances do not share mutable list runtime state accidentally.
 
-Selection state stays editor-only.
-
----
-
-## Task 6 — Marquee / box selection
-
-- Drag on empty stage in Select mode creates a screen-space marquee.
-- Convert marquee bounds through the canonical viewport transform.
-- Select entities using evaluated geometry/bounds, not hierarchy row coordinates.
-- Define contain-vs-intersect behavior and modifier semantics explicitly.
-- Work at 10%–800% zoom, rotated/nested transforms and non-zero artboard origins.
-- Marquee visuals remain editor-only.
+Full responsive list layout is a later Layout milestone; M8 defines the data/runtime contract.
 
 ---
 
-## Task 7 — Group / ungroup
+## Task 10 — UI authoring surface
 
-### Shortcuts
+Add a usable bounded human UI for the M8 model rather than shipping model-only capability.
 
-- Windows/Linux: `Ctrl+G` group.
-- macOS: `Cmd+G` group.
-- `Ctrl/Cmd+Shift+G` ungroup.
+At minimum users must be able to:
 
-### Grouping contract
+- create/delete/rename View Models;
+- create/delete typed properties;
+- create instances and edit initial/runtime-preview values;
+- create/remove bindings for supported selected properties;
+- inspect binding source/target/direction;
+- create enums and edit values;
+- create/edit converter chains;
+- create/edit Property Groups;
+- inspect list contents and perform basic list mutations;
+- see validation/cycle/type errors clearly.
 
-Grouping the selected entities must:
-
-- create a real persistent group node with a fresh stable ID;
-- preserve every selected child's rendered world transform;
-- preserve relative draw order;
-- preserve artboard ownership;
-- reject incompatible cross-artboard selections fail-closed;
-- preserve semantics, animation bindings, rig/dependency references and stable child IDs;
-- select the new group after success;
-- be one undoable transaction.
-
-### Ungrouping contract
-
-Ungroup must:
-
-- reparent children to the group's parent;
-- preserve each child's rendered world transform;
-- preserve deterministic draw order at the removal position;
-- leave child IDs unchanged;
-- cleanly remove the group and its semantic/dependency records according to canonical deletion rules;
-- be one undoable transaction.
-
-Nested groups and rotated/non-uniformly-scaled parents require adversarial tests.
+Human UI must use the same canonical commands as AI.
 
 ---
 
-## Task 8 — Semantic shortcut command layer
+## Task 11 — Canonical commands and AI/read surface
 
-Do not implement new keyboard behavior as scattered raw key checks only.
+Add JSON-safe command actions for persistent M8 CRUD and appropriate explicit runtime ports for ephemeral runtime value changes.
 
-Introduce/extend semantic editor command IDs for this milestone, e.g.:
+The exact catalog may differ, but must mechanically cover the capabilities above, e.g.:
 
 ```text
-editor.path.pen
-editor.path.finish
-editor.path.editVertices
-editor.selection.group
-editor.selection.ungroup
-editor.selection.selectAll
-editor.view.cleanPreview
+createViewModel
+removeViewModel
+addDataProperty
+updateDataProperty
+removeDataProperty
+createViewModelInstance
+updateViewModelInstance
+removeViewModelInstance
+createBinding
+updateBinding
+removeBinding
+createEnum
+updateEnum
+removeEnum
+createConverter
+updateConverter
+removeConverter
+createPropertyGroup
+updatePropertyGroup
+removePropertyGroup
 ```
 
-Keyboard bindings are adapters over those semantic commands.
+Runtime-only value mutation/fire/list operations must be explicitly classified so they do not masquerade as authored history when they are ephemeral.
 
-This should make later Veyra/Rive/Lottie/Custom keymap profiles possible without changing document logic.
+Expose through canonical services:
 
----
+```text
+getManifest
+queryEntities
+resolveSemantic
+read
+getDependencyGraph
+getOwnership
+previewCommand
+dispatchCommand
+dispatchPlan
+verifyChange
+```
 
-## Task 9 — Clean artwork / overlay control
-
-M6 added a low-zoom rig-overlay policy. M7 should make inspection intentional rather than implicit only.
-
-At minimum add a deterministic editor-only control for hiding/showing relevant editor overlays (selection/rig/handles as appropriate) or a clean Preview mode.
-
-Requirements:
-
-- final artwork never changes;
-- export never includes editor overlays;
-- interaction-test mode and editing mode remain distinct;
-- overlay visibility is workspace state, not authored animation data.
-
----
-
-## Task 10 — AI/read/manifest parity
-
-AI must be able to discover and perform everything added here without using screen coordinates or names.
-
-Expose/query:
-
-- selected stable refs and primary selection through an editor-state read surface where appropriate;
-- group hierarchy and ownership;
-- path vertices, handle modes, corner radius and closed/open state;
-- canonical topology/group commands and schemas;
-- dependency warnings before destructive topology/group operations.
-
-Do not serialize ephemeral selection/marquee/hover state into the project manifest as authored data; expose it only through explicit editor-state surfaces.
+No separate AI binding model.
 
 ---
 
-## Task 11 — Lightweight and quality gates
+## Task 12 — Components + Data Binding integration
 
-This milestone must preserve `QUALITY.md`.
+Prove Data Binding works through the M6 Component graph.
 
-Specific M7 rules:
+Mandatory semantics:
 
-- coordinate HUD, marquee, editing handles and shortcut UI are editor-only;
-- do not add a heavy runtime dependency to implement editor geometry UX;
-- grouping should reuse existing nodes/geometry instead of cloning artwork;
-- Pen/edit operations invalidate only affected path geometry/tessellation caches where such caches exist;
-- no full-document rebuild should be introduced into pointermove hot paths without evidence and bounded behavior;
-- save files must not contain temporary draft/marquee/selection data;
-- rendering/export semantics remain identical for the same authored path.
+- Component source may define View Model/binding contracts;
+- two instances can use different View Model runtime values;
+- nested Component runtime/data scope uses the full evaluated instance path when necessary;
+- instance A data updates do not alter instance B;
+- source defaults remain unchanged;
+- overrides and bindings have explicit precedence/ownership evidence;
+- deleting/duplicating Components updates dependency graph safely;
+- names can be duplicated/randomized without changing data routing.
+
+Do not invent a second Component-only binding format.
+
+---
+
+## Task 13 — Lightweight/performance contract
+
+M8 must preserve `QUALITY.md` and prepare Data Binding for a minimal runtime.
+
+### Required engineering behavior
+
+- projects with zero bindings pay effectively zero binding-evaluation work;
+- graph/index structures are cacheable and invalidated explicitly;
+- runtime value changes evaluate dirty dependents rather than scanning every entity where practical;
+- no DOM dependency in View Model/binding/converter/list engine;
+- editor panels/debug surfaces remain outside future minimal playback bundles;
+- serialization contains only authored data/defaults, not transient subscription queues or dirty flags;
+- no new external heavyweight runtime dependency without explicit justification/size measurement;
+- deterministic microbench fixture for a representative large binding graph should exist before M8 is accepted, even if formal package-size gates wait for the compiled runtime milestone.
 
 ---
 
@@ -323,61 +448,70 @@ Specific M7 rules:
 
 Prove at least:
 
-1. pointer X/Y readout matches client↔world mapping after pan/zoom/panel changes;
-2. Pen `Esc` commits a 2+ vertex path;
-3. switching tools commits a valid Pen draft once and only once;
-4. one-point draft cancellation leaves history/document clean;
-5. click-drag creates usable Bezier handles;
-6. zero-handle straight vertex can become curved from canvas UX;
-7. handle modes survive save/load/undo/redo;
-8. add/remove vertex preserves surviving vertex IDs;
-9. open/close/reverse path are deterministic and undoable;
-10. Shift+click multi-selection works with duplicate/misleading names;
-11. marquee works under non-zero artboard origin, zoom and nested transforms;
-12. Ctrl/Cmd+G preserves each child's world matrix and draw order;
-13. Ctrl/Cmd+Shift+G restores children without visual movement;
-14. group/ungroup under rotated + non-uniformly-scaled parent preserves geometry within tolerance;
-15. cross-artboard grouping fails without document/revision/history mutation;
-16. dependency-bound path topology changes fail closed or remap explicitly;
-17. clean-preview/overlay state never changes serialization/history;
-18. browser/UI mutation paths match canonical command catalog;
-19. name randomization/duplicates do not alter command targets;
-20. 10%–800% zoom does not change authored geometry semantics.
+1. every M8 persistent entity receives stable typed identity;
+2. random/duplicate/empty display names do not alter binding resolution;
+3. all required View Model property types normalize/save/load deterministically;
+4. nested View Model properties resolve by IDs after rename/reorder;
+5. one-way binding updates evaluated visual output without rewriting authored target;
+6. legal two-way binding propagates only through declared writable capability;
+7. incompatible two-way binding fails without document/history mutation;
+8. binding type mismatch fails with machine-readable evidence;
+9. direct cycle and multi-hop cycle are detected deterministically;
+10. multiple bindings contending for one target follow explicit deterministic conflict policy;
+11. `getOwnership()` returns full binding/data/converter chain;
+12. dependency graph includes data→binding→target and reverse dependents;
+13. trigger fires once per explicit event and does not become a sticky boolean;
+14. runtime reset restores deterministic initial state;
+15. two sibling Component instances have independent View Model runtime values;
+16. two repeated nested Component instances do not leak nested data scope;
+17. Property Group timeline/data direction is explicit and cycle-safe;
+18. enum rename/reorder preserves enum-value identity and bound behavior;
+19. converter chains are deterministic and reject incompatible composition;
+20. list insert/remove/move preserves defined item identity semantics;
+21. list mutation invalidates only relevant dependents in the runtime test harness;
+22. query/manifest/semantics expose M8 entities without name dependence;
+23. UI persistent mutations exactly match the canonical command catalog;
+24. preview/failure/read/query do not mutate authored document/revision/history;
+25. save/load contains no dirty flags, subscriptions, trigger queues or ephemeral Component/data runtime scope;
+26. M0–M7 suites remain green;
+27. representative large binding graph microbench remains within an explicit recorded budget/complexity envelope;
+28. exact final `main` head passes standard GitHub `Tests`.
 
 ---
 
 ## Explicit non-goals
 
-Do not expand M7 into:
+Do not expand M8 into:
 
-- View Models/Data Binding/Property Groups/Enums/Converters/Lists;
-- full Graph Editor/easing/value curves;
-- Shape Builder/boolean geometry;
-- masks/mattes/blend-mode expansion;
-- text/layout systems;
-- scripting/WGSL;
+- full layered/visual state-machine editor;
+- responsive Layout implementation;
+- full text/image/audio authoring;
+- masks/mattes/blend/effects expansion;
+- full animation Graph Editor;
+- scripting/WGSL or script converters;
 - Lottie/dotLottie import/export;
 - Rust/WASM runtime rewrite;
+- collaboration/CRDT;
 - MCP/headless CLI.
 
-Those remain roadmap work after this bounded editor-authoring milestone.
+These remain later roadmap milestones.
 
 ---
 
-## M7 acceptance
+## M8 acceptance
 
-M7 is VERIFIED only when:
+M8 is VERIFIED only when:
 
-- valid Pen drawings no longer disappear on Escape/tool switch;
-- Rive-style vertex/Bezier editing is usable from the stage;
-- topology mutations have stable canonical commands;
-- multi-selection + marquee are real editor primitives;
-- Ctrl/Cmd+G and ungroup preserve world transforms/draw order;
-- stage coordinates are canonical and accurate;
-- editor overlays can be inspected/hidden without affecting authored output;
-- UI/AI command parity and name-independence hold;
-- `QUALITY.md` gates are preserved;
-- M0–M6 tests remain green;
+- View Models + instances + required property types have stable typed identity;
+- one-way/two-way binding semantics are deterministic and cycle-safe;
+- Property Groups, enums, converters and lists have bounded usable contracts;
+- binding ownership/dependency chains are machine-readable;
+- Components have isolated data contexts;
+- human UI and AI use the same persistent command surface;
+- transient runtime data never pollutes authored serialization/history;
+- Data Binding adds no continuous work to projects that do not use it;
+- `QUALITY.md` gates remain intact;
+- all M0–M7 regressions stay green;
 - `npm run check` passes;
 - `npm test` passes;
 - latest standard GitHub `Tests` passes on the exact final `main` head.
@@ -387,25 +521,28 @@ M7 is VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits: 3e22fe2cbbf5bd72dfb07161805e0c6c8a6008af (main M7 implementation) + 6959a0e6cc158b9468c5fcf1a37f1becc6072957 (final path-safety/canonical-hit correction).
-- Changed files: src/veyra/editorAuthoring.js; src/veyra/model.js; src/veyra/capabilities.js; src/veyra/geometry.js; src/veyra/hitTest.js; src/veyra/store.js; src/veyra/commands.js; src/veyra/controlPlane.js; src/veyra/serviceRegistry.js; src/veyra/renderer.js; src/index.js; veyra.js; veyra.html; veyra.css; tests/veyra-m7-authoring.test.mjs; tests/veyra-manifest.test.mjs; tests/veyra-renderer-interaction.test.mjs.
-- Tests added/changed: tests/veyra-m7-authoring.test.mjs now carries 22 adversarial checks (the 20 mandatory M7 gates plus non-contiguous sibling draw-order failure and canonical rounded-path render/export/hit-test parity); manifest action-count expectation migrated for the additive 11 M7 persistent commands; legacy renderer path interaction fixture migrated from vertex indexes to stable pathVertex IDs.
-- npm test: PASS — 36/36 suites on the final M7 correction runner; all M0–M6 suites remained green.
-- npm run check: PASS — 41/41 source files on the final M7 correction runner.
-- Coordinate/readout proof: stage pointer readout uses renderer.clientPoint(), the same client↔world CTM/viewBox mapping used by rendering/hit testing; authored local Transform X/Y remain editable while evaluated world X/Y and multi-selection bounds are labeled read-only derived editor data; adversarial mapping checks cover 10%/100%/800%, changed viewport sizes/centers and non-zero artboard origins.
-- Pen lifecycle proof: click places a straight draft vertex; click-drag emits mirrored Bezier handles immediately; a 2+ vertex draft finalizes once through the canonical add command on Esc, tool switch, visible Done/Finish, or first-vertex close; close authors geometry.closed with no duplicate endpoint; a one-point draft clears without document/revision/history mutation.
-- Vertex/Bezier editing proof: Enter/Edit Vertices and Done/Esc mode transitions are semantic editor commands; vertex/handle drags target stable pathVertex IDs; Ctrl/Cmd-click toggles straight↔smooth, Ctrl/Cmd-click handle removes that handle, Alt/Option supports handle detachment/straight→curve creation; straight/mirrored/aligned/detached modes persist; corner radius is inspector/stage editable and compiles to explicit derived quadratic path segments. Renderer/export and hit testing now consume the same pathSegments() compiler.
-- Topology/stable-ID proof: canonical command actions addVertex/removeVertex/moveVertex/moveBezierHandle/setVertexHandleMode/setVertexCornerRadius/openPath/closePath/reversePath use stable node/pathVertex identity; implicit new vertex IDs are deterministic under the existing preview/dispatch snapshot generator; removing a dependency-bound vertex fails closed with evidence; reversePath preserves vertex IDs and remaps matching inX↔outX/inY↔outY timeline/Component-override property addresses.
-- Multi-selection/marquee proof: EditorSelectionState is an ordered stable-ref set with a primary selection and remains editor-only; Shift toggles membership from hierarchy/canvas; ordinary grouped selection targets the parent while deliberate deep selection is supported; marquee converts screen drag endpoints through renderer.clientPoint(), uses evaluated geometry/bounds, supports intersect vs Ctrl/Cmd contain and Shift additive behavior, and is tested with nested transforms/non-zero artboard origin.
-- Group/ungroup transform + draw-order proof: groupNodes/ungroupNode are one canonical undoable Store commands; grouping creates a fresh deterministic stable group ID, keeps child IDs/semantics/dependencies/artboard ownership, preserves world matrices and relative draw order, and selects the result; ungroup folds the group's matrix into children and restores them at the group removal position. Rotated + non-uniform parent cases are tested. Cross-artboard, cross-parent and non-contiguous sibling selections fail before mutation so appearance/coordinate domains/stacking cannot silently change.
-- Shortcut command-layer proof: editor.path.pen, editor.path.finish, editor.path.editVertices, editor.selection.group, editor.selection.ungroup, editor.selection.selectAll and editor.view.cleanPreview are semantic editor command IDs; keyboard/button bindings are adapters over that dispatcher rather than document mutations hidden in raw key handlers.
-- Overlay/clean-preview proof: selection/vertex/rig/guide overlay visibility is renderer/editor workspace state only; clean Preview changes no authored serialization/history and export remains derived solely from authored/evaluated artwork.
-- UI/AI/manifest parity proof: the command catalog grows additively to 76 actions with 11 M7 persistent path/group mutations; browser persistent helpers route through dispatchCompatibilityCommand/controlPlane; global getEditorState exposes selected stable refs, primary selection, tool, pointer readout, clean-preview state, draft count and overlay state without serializing them; resolver/property-address surfaces already expose pathVertex ownership and canonical node geometry properties.
-- Lightweight/performance impact: no external/heavy runtime dependency was added; selection, marquee, coordinate HUD, handles, Pen draft and shortcut state stay editor-only; grouping reparents existing nodes instead of cloning artwork; pointer drags use the existing bounded Store transaction/live-geometry seam; canonical derived pathSegments() is shared by render/export/hit-test rather than introducing another geometry model.
-- Persistence/history proof: handleMode/cornerRadius/open/closed/topology survive normalize/save/load; path/group authored operations are one undoable command each; rejected topology/group operations preserve serialization/revision/history; selection, marquee, hover, clean-preview and Pen draft never enter .veyra serialization.
-- Name-independence proof: duplicate/randomized display-name adversarial checks still target stable refs/addresses correctly; no M7 persistent command resolves by display name.
-- Existing M0–M6 regression proof: final M7 correction runner reported 36/36 suites PASS, including M4 interaction/hit tests, M5 camera/artboard/workspace, and all M6 project-graph/Component/runtime-scope suites.
-- Progress snapshot update: verified-only percentages intentionally remain AI 94–96%, core 90–92%, Rive parity 50–54%, Lottie/dotLottie 25–30%, full Veyra 43–47%, remaining 53–57% until independent acceptance.
-- Suggestions added to `suggestions`: none.
-- Known limitations: M7 grouping deliberately accepts only a same-artboard, same-parent, contiguous sibling range. Broader arbitrary-parent/interleaved grouping is fail-closed because preserving only the picture would otherwise alter local animation/property coordinate domains or stacking relative to unselected siblings. Any future expansion needs explicit binding/reparent remap semantics and is outside this milestone.
+- Implementation commits:
+- Changed files:
+- Tests added/changed:
+- npm test:
+- npm run check:
+- Identity/migration proof:
+- View Model/property-type proof:
+- Runtime instance/isolation proof:
+- Binding/evaluator proof:
+- Ownership/dependency proof:
+- Cycle/conflict proof:
+- Property Group proof:
+- Enum/converter proof:
+- List proof:
+- Component data-isolation proof:
+- UI/command/manifest parity proof:
+- Name-independence proof:
+- Persistence/history proof:
+- Lightweight/performance impact:
+- Existing M0–M7 regression proof:
+- GitHub Tests final-head proof:
+- Progress snapshot update: keep verified-only percentages unchanged until independent acceptance
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
