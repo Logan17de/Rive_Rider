@@ -51,5 +51,8 @@ patch('tests/veyra-m8-data-binding.test.mjs',
 patch('tests/veyra-m8-data-binding.test.mjs',
 "  assert.ok(queryEntities(store.document,{kind:'binding'},{limit:50}).results.some((item)=>item.ref.id==='bind_surface'));",
 "  assert.ok(queryEntities(store.document,{kinds:['binding']},{maxResults:50}).entities.some((item)=>item.ref.id==='bind_surface'));")
+patch('tests/veyra-m8-data-binding.test.mjs',
+"  assert.equal(manifest.authoringContract.dataGraph.runtimeState.includes('never serialized'),true);",
+"  assert.equal(manifest.authoring.dataGraph.runtimeState.includes('never serialized'),true);")
 
 print('M8 additive test fixes applied')
