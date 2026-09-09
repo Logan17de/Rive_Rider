@@ -1,0 +1,19 @@
+name: M8-C4 source snapshot
+on:
+  push:
+    branches: [m8-c4-resolved-context]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 04ac6842bbc57125e37604c84112a7a8ce937f7f
+      - run: git archive --format=tar HEAD > /tmp/m8-c4-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m8-c4-source
+          path: /tmp/m8-c4-source.tar
+          retention-days: 2
