@@ -12,9 +12,9 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 
 | Area | Current verified estimate | Notes |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~94–96%** | Stable typed identity, universal semantics, name-independent resolution, canonical control plane, dependency/ownership graph, Components and current editor command surfaces are verified through M7. M8 remains unverified. |
-| Core editor / engine foundation | **~93–95%** | M0–M7 foundations are verified, including workspace/camera behavior, Components, interaction loop, persistent Pen paths, stable vertex editing, multi-selection/marquee and canonical grouping. |
-| Modern Rive editor/runtime feature parity | **~53–57%** | M8 Data Binding/View Models is implemented but not yet independently accepted; do not count it until this correction pass is verified. |
+| AI-native identity / semantics / control architecture | **~94–96%** | Stable typed identity, universal semantics, name-independent resolution, canonical control plane, dependency/ownership graph, Components and current editor command surfaces are independently verified through M7. M8 remains unverified. |
+| Core editor / engine foundation | **~93–95%** | M0–M7 foundations are independently verified. M8 runtime-data correctness is not counted yet. |
+| Modern Rive editor/runtime feature parity | **~53–57%** | View Models/Data Binding are implemented substantially, but M8 remains outside verified progress until the runtime consistency issues below pass. |
 | Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No newly verified interchange capability in M8. |
 | Full Veyra superset target | **~46–49%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
 | Remaining full-target work | **~51–54%** | Verified-only estimate remains frozen at the M7 level until M8 passes independent verification. |
@@ -26,216 +26,174 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 - Interstitial M5 — Workspace UX Stabilization: **VERIFIED**.
 - `plan.md` M2 / implementation M6 — Multi-Artboard, Components & Project Graph: **VERIFIED**.
 - Interstitial implementation M7 — Vector Authoring, Multi-Selection & Grouping UX: **VERIFIED**.
-- `plan.md` M3 / implementation M8 — View Models & Data Binding: **AWAITING VERIFICATION**.
+- `plan.md` M3 / implementation M8 — View Models & Data Binding: **CORRECTIONS REQUIRED**.
 
-### Independent M8 verification result
+### Independent M8-C1 verification result
 
-The main M8 implementation commit `f772ba71f30cc3ac0e3b7b07cad290634af4e295` establishes the intended data graph, runtime, commands, Components integration and dedicated tests, but independent review found contract mismatches that must be corrected before M8 can be accepted.
+M8-C1 commit `d51bca71dca6d23f053dd0655e985d742488adaf` successfully fixes the previously identified capability-validation, two-way-shape validation, typed dependency blocker, ownership reporting, trigger multiplicity and settled non-data-source invalidation defects.
 
-The final handoff head `1a0274d654218a0919c5a1b9c9a505a8272d5994` also has no standard `.github/workflows/test.yml` run on that exact head yet. Do **not** trigger/claim the final CI gate until the correctness defects below are fixed.
+Standard GitHub `Tests` run #171 (`34319200295`) is **SUCCESS** on exact final head `4ad598fbdf61f8227f996c0fa6510fe93a89164d`; its Syntax check and Run test suites steps both succeeded.
+
+Independent warm-runtime review nevertheless found the remaining consistency defects below. Do not advance to M9 until they are corrected and independently verified on one final head.
 
 ---
 
-# MILESTONE M8-C1 — Binding Capability, Ownership & Runtime Correctness
+# MILESTONE M8-C2 — Warm Runtime Cache & Authored/Runtime Boundary
 
-**Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding  
-**Status:** `AWAITING VERIFICATION`
+**Roadmap mapping:** final correction pass for `plan.md` M3 — View Models & Data Binding  
+**Status:** `READY`
 
 ## Goal
 
-Keep the M8 architecture and close only the correctness/verification gaps found by independent review. Do not expand into M9/layered state machines or any later feature family.
+Make a long-lived `VeyraDataRuntime` remain correct after authored data/binding changes and nested View Model runtime changes. M8 must behave correctly not only on the first evaluation, but after caches/indexes are warm for many frames.
 
-A binding that the authored model accepts must be executable by the runtime, explainable by ownership/dependency APIs, capability-safe, typed-ID-safe, deterministic and fail-closed before authored state is committed.
-
----
-
-## Mandatory correction rules
-
-1. **One capability contract.** Binding validation, evaluator execution, manifest metadata, UI and AI must agree on what is readable, writable and bindable.
-2. **No accepted-but-unexecutable binding.** If runtime/evaluator cannot honor a binding form, normalization/command preview must reject it before commit with machine-readable evidence.
-3. **Typed identity means `(kind,id)`.** Dependency checks must never collapse typed refs to an unqualified ID string.
-4. **Ownership must tell the truth.** A data-bound evaluated property must not tell AI to edit the authored target as if it were the active writable source.
-5. **Each trigger fire is an event.** Multiple explicit fires must not silently collapse into one pulse unless a separately documented queue policy explicitly says so; for M8 use deterministic per-fire consumption.
-6. **Settled graphs sleep.** Unchanged Property Group/property-sourced bindings must not be forced dirty every evaluation merely because their source is not a data endpoint.
-7. Preserve all M0–M7 behavior, M8 stable IDs, serialization compatibility, Component scoping and zero-binding O(1) fast path.
-8. Names remain display-only.
-9. Run `npm run check`, `npm test`, and standard exact-final-head GitHub `Tests` only after corrections are complete.
+This pass must preserve every accepted M8/M8-C1 behavior and must not start layered state machines, Layout, text/media/effects, scripting, interchange, MCP, or runtime rewrite work.
 
 ---
 
-## Task 1 — Canonical endpoint capability validation
+## Blocker 1 — Nested data paths do not invalidate their bound branch after warm-up
 
-Fix the current split where `dataGraph.js` can accept a property endpoint by raw readability/type while `evaluation.js` later rejects it through `propertyTargetStatus()`.
-
-Required contract by endpoint role:
-
-- one-way source: must be readable **and bindable**;
-- one-way target: must be writable **and bindable** and supported by the canonical data-binding/evaluation write surface;
-- two-way source and target: both directions must satisfy their declared readable/writable/bindable capabilities;
-- `dataProperty.readable`, `.writable` and `.bindable` must be enforced, not descriptive only;
-- Property Group capability flags must be enforced;
-- normal Veyra property targets must reuse canonical property capability/status logic rather than a second raw-object interpretation;
-- unsupported targets such as non-drivable display metadata must fail during preview/dispatch/normalization, not during scene evaluation.
-
-Add precise diagnostics for at least:
+A nested binding can be authored as:
 
 ```text
-binding-source-unreadable
-binding-source-unbindable
-binding-target-readonly
-binding-target-unbindable
-binding-target-not-drivable
+data:inst_main / nested / nested_value
 ```
 
-Exact wording may differ, but tests must identify the failed capability and stable target.
-
----
-
-## Task 2 — Make two-way validation and runtime semantics identical
-
-Current validation accepts broader writable endpoints than `VeyraDataRuntime.setTwoWayTarget()` can reverse-write. Remove that mismatch.
-
-Requirements:
-
-- every binding accepted as `mode: 'twoWay'` must have a working deterministic reverse-write path;
-- nested data paths required by M8 must reverse-write through stable `viewModelInstance` + `dataProperty` refs;
-- Property Group endpoints that are declared writable/bindable must have explicit reverse-write behavior;
-- converter-bearing two-way bindings remain rejected until an inverse converter contract exists;
-- any intentionally unsupported two-way shape must fail validation/preview before authored mutation;
-- reverse writes remain runtime-only unless the source is explicitly an authored Property Group value;
-- Component runtime scope must be preserved on reverse writes.
-
-Do not solve this by merely loosening runtime errors after commit.
-
----
-
-## Task 3 — Replace untyped dependency blocker scanning
-
-Replace `blockersForReference()` JSON/string-substring detection with structural typed-reference traversal or canonical dependency-graph evidence.
-
-Requirements:
-
-- dependency identity is always `{ kind, id }`;
-- equal IDs in different kinds are legal and must not create false blockers;
-- real dependents still fail closed with stable blocker refs;
-- owner-child relationships are handled explicitly, not inferred by substring;
-- deletion diagnostics are deterministically sorted;
-- the existing View Model-instance live-binding deletion fix remains protected.
-
-Mandatory collision fixture: create multiple M8 entities of different kinds with the same literal ID and prove deleting one is blocked only by references to that exact typed identity.
-
----
-
-## Task 4 — Correct Data Binding ownership/writable-source reporting
-
-`getOwnership()` already detects `evaluatedSource: 'data-binding'`, but the writable-source result must also reflect Data Binding.
-
-For a bound property expose at minimum:
+but `VeyraDataRuntime.setValue('inst_nested', 'nested_value', ...)` currently dirties only the direct endpoint key:
 
 ```text
-active binding ref
-source endpoint
-converter chain
-runtime scope when relevant
-one-way/two-way mode
-conflict winner evidence
-where a user/AI should edit to affect the visible value
-whether that edit is authored or runtime-only
+data:inst_nested / nested_value
 ```
 
-Required behavior:
+The binding index is keyed by the root nested path, so after the first evaluation has cached the binding, changing the terminal nested instance can leave the bound visual/property output stale.
 
-- a one-way data-bound visual target must not report its authored target property as the recommended active writable source;
-- direct runtime data source should identify the stable View Model instance/property path and runtime mutation port;
-- Property Group source should identify its canonical property address/ref;
-- two-way binding should explain that target edits propagate through the binding contract;
-- owner stack must identify only the actual conflict-policy winner as active.
+The same issue affects a nested `setTwoWayTarget()` reverse write: the terminal runtime value changes, but the forward binding may remain clean/cached.
 
-Add `read(..., { evaluated: true })`/ownership tests, not just dependency-graph existence tests.
+### Required correction
 
----
+- runtime invalidation must understand every canonical binding endpoint that reaches the changed terminal runtime property;
+- do not solve this with display names or full-document polling;
+- nested resolution must remain stable-ref based;
+- dirty propagation must remain bounded to reachable branches;
+- Component runtime scope path must remain part of the runtime identity;
+- sibling/repeated nested Component scopes remain isolated;
+- triggers and nested list/view-model paths must follow the same identity discipline where applicable.
 
-## Task 5 — Trigger multiplicity and settled-runtime invalidation
+### Mandatory tests
 
-### Trigger queue
-
-Prove each explicit `fire()` is consumed deterministically.
-
-For two fires before evaluation, the runtime must preserve two event pulses rather than collapsing the count to one boolean event. After all queued pulses are consumed, the bound target must settle back to its false/inactive value and then stop recomputing.
-
-### Settled non-data sources
-
-Remove the unconditional behavior that dirties every binding whose source kind is not `data` on every evaluation.
-
-Requirements:
-
-- unchanged Property Group/property-source bindings use cached results after settling;
-- when an authored/animation/playback Property Group or readable property source actually changes, only reachable binding branches invalidate;
-- zero-binding path remains O(1);
-- no polling loop/DOM dependency is introduced;
-- runtime stats make the behavior testable.
+1. Warm a nested binding until `evaluatedBindings === 0`, then change the terminal nested value; next evaluation must recompute the nested branch and update the target.
+2. A completely unrelated branch must remain a cache hit.
+3. Warm the graph, call nested `setTwoWayTarget()`, then evaluate; the forward target must reflect the reverse-written value immediately on the next evaluation.
+4. Repeat #1–#3 in two different Component instance paths and prove zero leakage.
+5. Rename/reorder nested definitions after binding creation and prove invalidation still follows stable refs.
 
 ---
 
-## Task 6 — Close the adversarial coverage gap
+## Blocker 2 — Binding/index signature changes can reuse stale binding cache entries
 
-The existing file has 28 checks, but the original M8 acceptance list requires specific behaviors, not merely a count of 28. Extend/restructure the tests so every original mandatory M8 case has explicit evidence.
+`bindingIndexSignature()` correctly notices authored binding/converter changes and causes a new runtime index to be built, but cached binding outputs are keyed only by:
 
-At minimum add coverage currently missing or too weak for:
+```text
+runtimeScope + bindingId
+```
 
-1. random, duplicate and empty human names;
-2. required property types through save/load determinism;
-3. nested View Model paths after rename/reorder;
-4. incompatible two-way binding failure with document/revision/history unchanged;
-5. binding type/capability mismatch with machine-readable evidence;
-6. runtime reset restoring deterministic initial values;
-7. repeated **nested** Component-instance data scopes;
-8. Property Group binding direction + cycle behavior;
-9. enum reorder while a binding/value still uses the same enumValue ID;
-10. incompatible converter-chain composition failure;
-11. runtime list mutation invalidating only relevant dependents;
-12. semantic registry support for every persistent M8 reference kind;
-13. full persistent UI/helper ↔ canonical command-catalog parity, not a representative subset only;
-14. preview/failure/read/query/ownership non-mutation of document/revision/history;
-15. unsupported/non-drivable property target rejected before commit;
-16. readable/writable/bindable capability enforcement;
-17. cross-kind equal-ID dependency blocker correctness;
-18. multiple queued trigger fires;
-19. settled non-data binding cache behavior;
-20. data-binding `getOwnership().writableSource` correctness.
+A long-lived runtime can therefore reuse an old output after the same binding ID changes source/target/converter configuration. Authored View Model default/initial-value changes can also leave a clean data-source binding cached because data endpoints skip non-data source snapshot checks.
 
-Keep the 220-binding fixture and make its budget/complexity assertion deterministic rather than wall-clock dependent.
+### Required correction
 
----
+Define one deterministic cache-generation/invalidation contract. Acceptable approaches include a canonical graph/data revision signature in cache keys or explicit invalidation when the relevant authored dependency signature changes.
 
-## Explicit non-goals
+It must cover at least:
 
-Do not expand this correction pass into:
+- binding source change under the same binding ID;
+- binding target change under the same binding ID;
+- converter chain/config change under the same converter/binding IDs;
+- binding enable/disable/priority winner changes;
+- dataProperty default changes when no live runtime override exists;
+- View Model instance initial-value changes when no live runtime override exists;
+- nested View Model initial-reference changes;
+- Property Group authored source changes (preserve C1 incremental behavior);
+- removal/recreation of a binding with a reused ID;
+- Component/runtime-scope isolation.
 
-- layered state-machine parity or visual graph editor;
-- Layout;
-- text/media/effects;
-- scripts/WGSL;
-- Lottie/dotLottie;
-- Rust/WASM runtime;
-- MCP/headless CLI;
-- broad UI redesign.
+Do not simply clear every runtime cache every frame. `QUALITY.md` dirty/settled guarantees must remain intact.
+
+### Mandatory tests
+
+1. Warm a binding, update its converter config, evaluate again, and prove the new output is used.
+2. Warm a binding, change its source while preserving binding ID, and prove the new source controls the target.
+3. Warm a binding, change its target while preserving binding ID, and prove the old target is no longer reported/applied and the new target receives output.
+4. Warm a data binding with no live override, update the authored default/initial value, and prove the evaluated target refreshes.
+5. Set an explicit runtime override, change the authored default, and prove the live runtime override still wins until reset.
+6. After one invalidating authored mutation, a subsequent unchanged frame must sleep/cache again.
 
 ---
 
-## M8-C1 acceptance
+## Blocker 3 — Property Group two-way reverse write crosses the authored boundary directly
 
-M8 may be independently VERIFIED only when:
+M8-C1 added Property Group two-way reverse writes by assigning directly to `property.value` inside `VeyraDataRuntime.setTwoWayTarget()`.
 
-- canonical capability validation prevents accepted-but-unexecutable bindings;
-- `readable` / `writable` / `bindable` flags have real enforcement;
-- every accepted two-way form can reverse-write correctly in scope;
-- dependency blockers use exact typed identity and survive cross-kind ID collisions;
-- Data Binding ownership points to the real controlling/writable source;
-- trigger multiplicity is deterministic and no explicit fire is silently lost;
-- settled non-data bindings stop recomputing until their source changes;
-- every original M8 mandatory adversarial requirement is explicitly covered;
-- existing M0–M8 tests are green;
+That makes a runtime port mutate serialized authored project state without crossing the Store/control-plane transaction/history boundary. This conflicts with Veyra's authored/evaluated separation and canonical mutation contract.
+
+### Required correction
+
+Choose and mechanically enforce one explicit contract:
+
+### Preferred runtime contract
+
+- normal two-way interaction writes a **runtime/evaluated Property Group value**, leaving authored `property.value`, serialization, Store revision and history unchanged;
+- reset restores the authored Property Group value;
+- bindings/ownership can distinguish authored Property Group value from runtime value.
+
+### Or explicit authored-write contract
+
+If an operation intentionally persists a Property Group edit, it must cross the canonical Store/command/control-plane validation/history path and produce exactly one undoable authored transaction. A runtime-only API must never silently perform the authored write.
+
+Whichever contract is selected:
+
+- `getOwnership().writableSource` must report the correct runtime vs authored port;
+- preview/read/evaluation remain non-mutating;
+- Component runtime scope remains isolated;
+- serialization cannot change merely because a runtime interaction fired unless the caller explicitly requested a canonical authored mutation.
+
+### Mandatory tests
+
+1. Capture serialized document + Store revision/history, execute a normal runtime two-way Property Group interaction, and prove the declared boundary contract exactly.
+2. Reset and prove deterministic restoration.
+3. Two Component scopes using the same authored Property Group source must not leak live reverse-written values.
+4. If authored persistence is supported, prove one command = one undo entry and undo restores the previous authored value.
+
+---
+
+## Must-preserve M8-C1 fixes
+
+Do not regress:
+
+- canonical binding capability classifier shared by validation and evaluation;
+- readable/writable/bindable/drivable enforcement;
+- accepted two-way shapes have executable reverse-write ports;
+- converter-bearing two-way bindings fail closed without inverse converters;
+- typed `(kind,id)` dependency blockers and cross-kind equal-ID safety;
+- winning Data Binding ownership/writable-source evidence;
+- multiple queued trigger pulses consumed one per evaluation;
+- settled Property Group/property sources stop recomputing until their value changes;
+- O(1) zero-binding fast path;
+- 220-binding bounded dirty-propagation fixture;
+- all M0–M7 regressions;
+- original M8 and M8-C1 adversarial suites.
+
+---
+
+## Acceptance
+
+M8 can be independently VERIFIED only when:
+
+- nested terminal runtime changes invalidate every reachable root nested binding path and nothing unrelated;
+- warm runtime caches cannot survive an authored dependency change that changes binding output/ownership;
+- unchanged settled graphs return to sleeping after invalidation;
+- runtime two-way Property Group interaction no longer silently bypasses the authored Store/history boundary;
+- all M8/M8-C1 tests remain green;
+- dedicated M8-C2 warm-cache tests are green;
 - `npm run check` passes;
 - `npm test` passes;
 - latest standard GitHub `Tests` succeeds on the **exact final `main` head**.
@@ -245,21 +203,21 @@ M8 may be independently VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction implementation commits: d51bca71dca6d23f053dd0655e985d742488adaf
-- Changed files: src/veyra/capabilities.js, src/veyra/commands.js, src/veyra/controlPlane.js, src/veyra/dataGraph.js, src/veyra/manifest.js, src/veyra/properties.js, src/veyra/propertyBinding.js, src/veyra/propertyCapabilities.js, tests/veyra-m8-c1-corrections.test.mjs
-- Tests added/changed: `tests/veyra-m8-c1-corrections.test.mjs` adds 28 focused M8-C1 checks and mechanically maps original M8 acceptance #1-#27; original #28 is the exact-final-head standard CI gate.
-- Endpoint-capability proof: binding preview/dispatch and evaluation share the canonical property capability classifier; source/target readable, writable, bindable and drivable requirements fail closed with stable capability error codes.
-- Two-way parity proof: every accepted two-way source has deterministic reverse-write behavior, including nested View Model data paths and writable/bindable Property Group values; converter-bearing two-way bindings remain rejected without an inverse contract.
-- Typed dependency proof: blocker traversal matches structural typed refs by exact `(kind,id)`, sorts diagnostics deterministically and passes cross-kind equal-ID collision fixtures.
-- Ownership/writable-source proof: evaluated data-bound properties report the winning binding and its real source endpoint/runtime or authored mutation port instead of falling through to the authored visual target.
-- Trigger multiplicity proof: queued trigger counts are consumed one pulse per evaluation, preserve multiple explicit fires and settle inactive after the queue drains.
-- Settled-runtime proof: non-data roots are source-snapshotted and invalidate reachable branches only when their actual value changes; settled graphs cache, and zero-binding evaluation keeps the O(1) fast path.
-- Original M8 adversarial coverage map: correction suite reports original M8 acceptance #1-#27 explicitly mapped; duplicate/empty/random names, nested rename/reorder, reset, repeated nested Component scopes, enum reorder, converter failures, command/UI parity, non-mutation and cycle cases are explicit.
-- npm run check: PASS — 45/45 source files in the clean promotion tree.
-- npm test: PASS — 38/38 suites in the clean promotion tree; M8-C1 28 checks green and original M8 28/28 green.
-- Exact-final-head standard GitHub Tests: REQUIRED to succeed on the exact final clean `main` head after handoff; the GitHub Actions check attached to that head is authoritative evidence.
-- Existing M0–M7 regression proof: all existing suites remain in the same `npm test` discovery surface and passed in the 38/38 clean-tree run.
-- Persistence/migration impact: no format-version migration; existing M8 stable IDs/serialization shape retained. Capability validation is stricter and rejects authored bindings the evaluator could not execute safely.
-- Suggestions added to `suggestions`: none.
-- Known limitations: two-way converter chains remain intentionally unsupported until an inverse-converter contract exists; M8 remains unverified until independent review accepts this correction pass.
+- Correction implementation commits:
+- Changed files:
+- Tests added/changed:
+- Nested-path invalidation proof:
+- Warm-cache authored-change proof:
+- Converter/source/target cache-generation proof:
+- Default/initial-value invalidation proof:
+- Property Group two-way boundary proof:
+- Component-scope isolation proof:
+- Settled/zero-binding performance proof:
+- npm run check:
+- npm test:
+- Exact-final-head standard GitHub Tests:
+- Existing M0–M8-C1 regression proof:
+- Persistence/history impact:
+- Suggestions added to `suggestions`:
+- Known limitations:
 ```
