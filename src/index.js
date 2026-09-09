@@ -133,8 +133,9 @@ export {
 } from './veyra/editorAuthoring.js';
 
 
-// M8 View Models/Data Binding: persistent definitions stay authored while live values,
-// trigger queues, subscriptions and dirty caches remain DOM-free runtime state.
+// M8 View Models/Data Binding keeps authored definitions separate from runtime values.
+// Binding validation/evaluation share one capability contract; trigger queues,
+// subscriptions, dirty caches and reverse-write scope stay DOM-free runtime state.
 export {
   VEYRA_DATA_VERSION, VEYRA_DATA_PROPERTY_TYPES, VEYRA_BINDING_MODES, VEYRA_CONVERTER_TYPES,
   VEYRA_DATA_RUNTIME_SCOPE_KIND, VEYRA_BINDING_CONFLICT_POLICY, VEYRA_DATA_EVALUATION_COMPLEXITY,
