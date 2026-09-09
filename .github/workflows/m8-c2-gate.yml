@@ -1,0 +1,30 @@
+name: M8-C2 Warm Runtime Gate
+
+on:
+  push:
+    branches:
+      - m8-c2-warm-runtime
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply M8-C2 corrections
+        run: |
+          python scripts/apply-m8-c2.py
+          python scripts/apply-m8-c2-scope-fix.py
+      - name: Install
+        run: npm ci
+      - name: Syntax gate
+        run: npm run check
+      - name: Full test gate
+        run: npm test
