@@ -40,6 +40,9 @@ patch('tests/veyra-m8-data-binding.test.mjs',
 "  assert.equal(envelope.bindings, count);",
 "  assert.equal(envelope.bindingCount, count);")
 patch('tests/veyra-m8-data-binding.test.mjs',
+"  assert.equal(VEYRA_DATA_EVALUATION_COMPLEXITY.dirty, 'O(reachable dirty binding subgraph)');",
+"  assert.equal(VEYRA_DATA_EVALUATION_COMPLEXITY.dirtyPropagation, 'O(reachable binding edges)');")
+patch('tests/veyra-m8-data-binding.test.mjs',
 "  runtime.insertListItem('list_main', { id: 'runtime_item', value: 'Runtime' }, 1);\n  assert.equal(runtime.getList('list_main').items[1].id, 'runtime_item');",
 "  const inserted = runtime.insertListItem('list_main', 'Runtime', 1);\n  assert.equal(runtime.getList('list_main')[1].id, inserted.id);\n  assert.equal(runtime.getList('list_main')[1].value, 'Runtime');")
 patch('tests/veyra-m8-data-binding.test.mjs',
