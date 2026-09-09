@@ -1,0 +1,32 @@
+name: Record M7 Handoff
+
+on:
+  push:
+    paths:
+      - '.github/workflows/record-m7-handoff.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record M7 handoff
+        run: python scripts/record-m7-handoff.py
+      - name: Syntax gate
+        run: npm run check
+      - name: Full test battery
+        run: npm test
+      - name: Commit clean handoff
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f scripts/record-m7-handoff.py
+          git rm -f .github/workflows/record-m7-handoff.yml
+          git add milestone.md
+          git commit -m "Complete M7 implementation handoff [m7-handoff]"
+          git push origin HEAD:main
