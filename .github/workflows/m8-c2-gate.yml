@@ -25,6 +25,7 @@ jobs:
           cp scripts/apply-m8-c2.py /tmp/apply-m8-c2.py
           cp scripts/apply-m8-c2-scope-fix.py /tmp/apply-m8-c2-scope-fix.py
           cp scripts/fix-m8-c2-tests.py /tmp/fix-m8-c2-tests.py
+          cp scripts/write-m8-c2-handoff.py /tmp/write-m8-c2-handoff.py
           cp tests/veyra-m8-c2-warm-runtime.test.mjs /tmp/veyra-m8-c2-warm-runtime.test.mjs
       - name: Reprove staging correction gate
         run: |
@@ -34,18 +35,15 @@ jobs:
           npm ci
           npm run check
           npm test
-      - name: Build clean correction tree from exact main baseline
+      - name: Build clean correction tree
         run: |
           git fetch origin main
           test "$(git rev-parse origin/main)" = "ce4ffe88bef3ffc892182a1f1dce32a14e7db848"
           git checkout -B m8-c2-clean origin/main
           cp /tmp/veyra-m8-c2-warm-runtime.test.mjs tests/veyra-m8-c2-warm-runtime.test.mjs
-          cp /tmp/apply-m8-c2.py /tmp/run-m8-c2.py
-          cp /tmp/apply-m8-c2-scope-fix.py /tmp/run-m8-c2-scope-fix.py
-          cp /tmp/fix-m8-c2-tests.py /tmp/run-m8-c2-tests-fix.py
-          python /tmp/run-m8-c2.py
-          python /tmp/run-m8-c2-scope-fix.py
-          python /tmp/run-m8-c2-tests-fix.py
+          python /tmp/apply-m8-c2.py
+          python /tmp/apply-m8-c2-scope-fix.py
+          python /tmp/fix-m8-c2-tests.py
           npm ci
           npm run check
           npm test
@@ -54,48 +52,12 @@ jobs:
           git add src/veyra/dataGraph.js src/veyra/controlPlane.js tests/veyra-m8-c1-corrections.test.mjs tests/veyra-m8-c2-warm-runtime.test.mjs
           git commit -m "Fix M8 warm runtime cache and authored boundary"
           git rev-parse HEAD > /tmp/m8_c2_impl_sha
-      - name: Record M8-C2 handoff
+      - name: Record handoff
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path('milestone.md')
-          text = p.read_text()
-          marker = '# MILESTONE M8-C2 — Warm Runtime Cache & Authored/Runtime Boundary'
-          start = text.index(marker)
-          prefix, body = text[:start], text[start:]
-          body = body.replace('**Status:** `READY`', '**Status:** `AWAITING VERIFICATION`', 1)
-          impl = Path('/tmp/m8_c2_impl_sha').read_text().strip()
-          handoff = f'''## Handoff
-
-```text
-Handoff
-- Status: AWAITING VERIFICATION
-- Correction implementation commits: {impl}
-- Changed files: src/veyra/dataGraph.js, src/veyra/controlPlane.js, tests/veyra-m8-c1-corrections.test.mjs, tests/veyra-m8-c2-warm-runtime.test.mjs
-- Tests added/changed: dedicated M8-C2 warm-runtime suite adds 13 adversarial checks; M8-C1 Property Group two-way assertion updated to the corrected runtime-only boundary.
-- Nested-path invalidation proof: terminal View Model property changes walk stable-ref nested source paths in the active runtime scope and dirty only bindings whose data path touches the changed `(instance,property)` pair; unrelated warm branches remain cache hits.
-- Warm-cache authored-change proof: a deterministic authored runtime signature covers binding/converter structure, View Model property defaults/schema, instance initial values/nested refs, Property Group capability schema and authored lists; a signature change invalidates the affected scope once, preserves live runtime overrides, then returns to sleeping.
-- Converter/source/target cache-generation proof: same-ID converter config, source, target, priority/winner and remove/recreate changes cannot reuse old binding cache output.
-- Default/initial-value invalidation proof: authored defaults and instance initial values refresh warm bindings when no runtime override exists; explicit runtime values keep precedence until reset.
-- Property Group two-way boundary proof: normal two-way interaction writes scoped ephemeral Property Group runtime state, never serialized `property.value`; Store revision/history/serialization remain byte-stable, reset restores authored value, and ownership reports the runtime mutation port.
-- Component-scope isolation proof: nested View Model and Property Group runtime writes are keyed by the full typed Component scope path; repeated outer/inner scopes do not leak.
-- Settled/zero-binding performance proof: one authored/runtime invalidation wakes the reachable or generation-invalidated work once; the next unchanged frame returns to `evaluatedBindings === 0`; zero-binding remains the O(1) early return.
-- npm run check: PASS — 45/45 source files in the clean promotion tree.
-- npm test: PASS — 39/39 suites in the clean promotion tree; M8-C2 13 checks green, M8-C1 28 checks green, original M8 28/28 green.
-- Exact-final-head standard GitHub Tests: REQUIRED to succeed on the exact final clean `main` head after handoff; the standard `Tests` run attached to that head is authoritative.
-- Existing M0–M8-C1 regression proof: all prior suites green in the clean promotion gate.
-- Persistence/history impact: no schema/version change; runtime Property Group reverse writes are now ephemeral and excluded from serialization/history unless a caller intentionally uses the existing canonical authored command surface.
-- Suggestions added to `suggestions`: none.
-- Known limitations: converter-bearing two-way bindings still require a future inverse-converter contract; no M9/layered-state-machine work included.
-```
-'''
-          body = re.sub(r'## Handoff\n\n```text\nHandoff\n.*?\n```\s*$', handoff.rstrip() + '\n', body, count=1, flags=re.S)
-          p.write_text(prefix + body)
-          PY
+          python /tmp/write-m8-c2-handoff.py "$(cat /tmp/m8_c2_impl_sha)"
           git add milestone.md
           git commit -m "Complete M8-C2 correction handoff"
-      - name: Push clean M8-C2 history to main
+      - name: Push clean history to main
         run: |
           git fetch origin main
           test "$(git rev-parse origin/main)" = "ce4ffe88bef3ffc892182a1f1dce32a14e7db848"
@@ -104,7 +66,7 @@ Handoff
         run: |
           git checkout m8-c2-warm-runtime
           git reset --hard origin/m8-c2-warm-runtime
-          git rm -f scripts/apply-m8-c2.py scripts/apply-m8-c2-scope-fix.py scripts/fix-m8-c2-tests.py .github/workflows/m8-c2-gate.yml
+          git rm -f scripts/apply-m8-c2.py scripts/apply-m8-c2-scope-fix.py scripts/fix-m8-c2-tests.py scripts/write-m8-c2-handoff.py .github/workflows/m8-c2-gate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Clean M8-C2 staging helpers"
