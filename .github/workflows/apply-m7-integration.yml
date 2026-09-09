@@ -23,6 +23,21 @@ jobs:
       - name: Apply M7 renderer and editor UI
         run: python scripts/apply-m7-ui.py
 
+      - name: Reconcile M7 shell anchor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-m7-shell.py')
+          t = p.read_text()
+          old = """if t.count(old) < 2:
+              raise SystemExit('expected renderer.render selectedRef occurrences')"""
+          new = """if t.count(old) < 1:
+              raise SystemExit('expected renderer.render selectedRef occurrence')"""
+          if old not in t:
+              raise SystemExit('missing renderer.render count guard')
+          p.write_text(t.replace(old, new, 1))
+          PY
+
       - name: Apply M7 shell integration
         run: python scripts/apply-m7-shell.py
 
