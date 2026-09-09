@@ -26,4 +26,21 @@ patch('tests/veyra-model.test.mjs',
 "  console.log('✓ every accepted historical/project version loads and canonicalizes to v5');",
 "  console.log('✓ every accepted historical/project/data version loads; data-free documents canonicalize to v5');")
 
+# Keep M8 adversarial checks on the canonical runtime/result field names.
+patch('tests/veyra-m8-data-binding.test.mjs',
+"  assert.equal(result.stats.fastPath, true);\n  assert.equal(result.stats.graphConstructed, false);",
+"  assert.equal(result.stats.zeroBindingFastPath, true);\n  assert.equal(result.stats.graphBuilt, false);")
+patch('tests/veyra-m8-data-binding.test.mjs',
+"  assert.equal(dirty.stats.evaluatedBindings, 1);\n  assert.equal(dirty.stats.skippedBindings, 1);",
+"  assert.equal(dirty.stats.evaluatedBindings, 1);\n  assert.equal(dirty.stats.cacheHits, 1);")
+patch('tests/veyra-m8-data-binding.test.mjs',
+"  assert.equal(next.stats.evaluatedBindings, 1);\n  assert.ok(next.stats.visitedEdges <= 1);",
+"  assert.equal(next.stats.evaluatedBindings, 1);\n  assert.ok(runtime.stats.dirtyInvalidations <= 1);")
+patch('tests/veyra-m8-data-binding.test.mjs',
+"  runtime.insertListItem('list_main', { id: 'runtime_item', value: 'Runtime' }, 1);\n  assert.equal(runtime.getList('list_main').items[1].id, 'runtime_item');",
+"  const inserted = runtime.insertListItem('list_main', 'Runtime', 1);\n  assert.equal(runtime.getList('list_main')[1].id, inserted.id);\n  assert.equal(runtime.getList('list_main')[1].value, 'Runtime');")
+patch('tests/veyra-m8-data-binding.test.mjs',
+"  assert.ok(queryEntities(store.document,{kind:'binding'},{limit:50}).results.some((item)=>item.ref.id==='bind_surface'));",
+"  assert.ok(queryEntities(store.document,{kinds:['binding']},{maxResults:50}).entities.some((item)=>item.ref.id==='bind_surface'));")
+
 print('M8 additive test fixes applied')
