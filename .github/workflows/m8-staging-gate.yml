@@ -22,6 +22,12 @@ jobs:
         run: python scripts/apply-m8-control.py
       - name: Apply M8 shell patch
         run: python scripts/apply-m8-shell.py
+      - name: Apply M8 stable enum reorder contract
+        run: python scripts/apply-m8-contract-completion.py
+      - name: Apply M8 bounded human authoring completion
+        run: python scripts/apply-m8-ui-completion.py
+      - name: Apply M8 artboard lifecycle completion
+        run: python scripts/apply-m8-project-lifecycle.py
       - name: Apply M8 tests
         run: python scripts/apply-m8-tests.py
       - name: Apply M8 additive test fixes
