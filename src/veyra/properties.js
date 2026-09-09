@@ -7,9 +7,17 @@ import {
   nodeById,
   semanticFor,
 } from './model.js';
-import { propertyGroupPropertyById } from './dataGraph.js';
 import { supportsNodeProperty, supportsRigProperty } from './capabilities.js';
+import { canonicalPropertyBindingCapabilities } from './propertyBinding.js';
 import { createNodeRef, createReference, normalizeReference } from './references.js';
+
+function propertyGroupPropertyById(document, value) {
+  for (const group of document.propertyGroups || []) {
+    const item = (group.properties || []).find((candidate) => candidate.id === value);
+    if (item) return item;
+  }
+  return null;
+}
 
 export const VEYRA_PROPERTY_TARGET_KINDS = Object.freeze([
   'node',
@@ -165,24 +173,12 @@ export function writeProperty(document, address, value) {
  */
 export function propertyTargetStatus(document, address) {
   const parsed = parsePropertyAddress(address);
-  if (parsed.reference.kind === 'propertyGroupProperty') {
-    const property = propertyGroupPropertyById(document, parsed.reference.id);
-    if (!property) return 'missing-target';
-    return parsed.path === 'value' && property.keyable !== false ? 'animatable' : 'non-animatable';
-  }
-  if (parsed.reference.kind !== 'node') {
-    const finder = { bone: boneById, mesh: meshById, control: controlById, constraint: constraintById }[parsed.reference.kind];
-    const object = finder?.(document, parsed.reference.id);
-    if (!object) return 'missing-target';
-    return supportsRigProperty(parsed.reference.kind, object, parsed.path, 'animatable')
-      ? 'animatable'
-      : 'non-animatable';
-  }
-  const node = nodeById(document, parsed.reference.id);
-  if (!node) return 'missing-target';
-  return supportsNodeProperty(node, nodePropertyPath(parsed.segments), 'animatable')
-    ? 'animatable'
-    : 'non-animatable';
+  return canonicalPropertyBindingCapabilities(document, parsed).status;
+}
+
+export function propertyBindingCapabilities(document, address) {
+  const parsed = typeof address === 'string' ? parsePropertyAddress(address) : address;
+  return canonicalPropertyBindingCapabilities(document, parsed);
 }
 
 export function isAnimatableProperty(document, address) {

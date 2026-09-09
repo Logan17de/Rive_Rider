@@ -1,4 +1,5 @@
 import { createReference, normalizeReference, referenceId } from './references.js';
+import { canonicalPropertyBindingCapabilities } from './propertyBinding.js';
 
 export const VEYRA_DATA_VERSION = 6;
 export const VEYRA_DATA_PROPERTY_TYPES = Object.freeze([
@@ -471,12 +472,43 @@ export function bindingEndpointType(document, endpoint) {
   if (endpoint.kind === 'propertyGroupProperty') return propertyGroupPropertyById(document, endpoint.property.id)?.type || null;
   return endpointDataProperty(document, endpoint)?.type || null;
 }
-function endpointWritable(document, endpoint) {
-  if (endpoint.kind === 'property') {
-    try { readDataAwareAddress(document, endpoint.address); return true; } catch { return false; }
+export function bindingEndpointCapabilities(document, endpoint) {
+  if (!endpoint || typeof endpoint !== 'object') return { exists: false, readable: false, writable: false, bindable: false, drivable: false, reverseWritable: false, type: null };
+  if (endpoint.kind === 'data') {
+    const property = endpointDataProperty(document, endpoint);
+    if (!property) return { exists: false, readable: false, writable: false, bindable: false, drivable: false, reverseWritable: false, type: null };
+    const readable = property.readable !== false;
+    const writable = property.writable !== false;
+    const bindable = property.bindable !== false;
+    return {
+      exists: true, readable, writable, bindable,
+      drivable: writable && bindable,
+      reverseWritable: writable && bindable && property.type !== 'trigger',
+      type: property.type, property,
+    };
   }
-  if (endpoint.kind === 'propertyGroupProperty') return Boolean(propertyGroupPropertyById(document, endpoint.property.id)?.writable);
-  return Boolean(endpointDataProperty(document, endpoint)?.writable);
+  if (endpoint.kind === 'propertyGroupProperty') {
+    const property = propertyGroupPropertyById(document, endpoint.property.id);
+    if (!property) return { exists: false, readable: false, writable: false, bindable: false, drivable: false, reverseWritable: false, type: null };
+    const readable = property.readable !== false;
+    const writable = property.writable !== false;
+    const bindable = property.bindable !== false;
+    return {
+      exists: true, readable, writable, bindable,
+      drivable: writable && bindable && property.keyable !== false,
+      reverseWritable: writable && bindable && property.type !== 'trigger',
+      type: property.type, property,
+    };
+  }
+  if (endpoint.kind === 'property') {
+    let parsed;
+    try { parsed = parseDataAwarePropertyAddress(endpoint.address); } catch { return { exists: false, readable: false, writable: false, bindable: false, drivable: false, reverseWritable: false, type: null }; }
+    const canonical = canonicalPropertyBindingCapabilities(document, parsed);
+    let type = null;
+    try { type = dataAwareAddressType(document, endpoint.address); } catch {}
+    return { ...canonical, type, reverseWritable: false };
+  }
+  return { exists: false, readable: false, writable: false, bindable: false, drivable: false, reverseWritable: false, type: null };
 }
 function initialValueFor(document, instance, property) {
   const override = instance.initialValues.find((entry) => entry.property.id === property.id);
@@ -540,8 +572,28 @@ function validateConverters(document) {
   }
 }
 
+function bindingCapabilityError(code, binding, endpoint, detail) {
+  throw new TypeError(`[${code}] binding ${binding.id} ${detail}: ${bindingEndpointKey(endpoint)}.`);
+}
+function requireForwardSourceCapabilities(document, binding) {
+  const caps = bindingEndpointCapabilities(document, binding.source);
+  if (!caps.exists) bindingCapabilityError('binding-missing-source', binding, binding.source, 'source does not resolve');
+  if (!caps.readable) bindingCapabilityError('binding-source-unreadable', binding, binding.source, 'source is not readable');
+  if (!caps.bindable) bindingCapabilityError('binding-source-unbindable', binding, binding.source, 'source is not bindable');
+  return caps;
+}
+function requireForwardTargetCapabilities(document, binding) {
+  const caps = bindingEndpointCapabilities(document, binding.target);
+  if (!caps.exists) bindingCapabilityError('binding-missing-target', binding, binding.target, 'target does not resolve');
+  if (binding.target.kind === 'property' && !caps.drivable) bindingCapabilityError('binding-target-not-drivable', binding, binding.target, 'target is outside the canonical data-binding write surface');
+  if (!caps.writable) bindingCapabilityError('binding-target-readonly', binding, binding.target, 'target is not writable');
+  if (!caps.bindable) bindingCapabilityError('binding-target-unbindable', binding, binding.target, 'target is not bindable');
+  if (!caps.drivable) bindingCapabilityError('binding-target-not-drivable', binding, binding.target, 'target is not canonically drivable');
+  return caps;
+}
 function validateBindingTypes(document, binding, index) {
-  let type = bindingEndpointType(document, binding.source);
+  const sourceCaps = requireForwardSourceCapabilities(document, binding);
+  let type = sourceCaps.type ?? bindingEndpointType(document, binding.source);
   if (!type) throw new TypeError(`[binding-missing-source] bindings[${index}] source does not resolve.`);
   for (const ref of binding.converterChain) {
     const converter = converterById(document, ref.id);
@@ -551,19 +603,21 @@ function validateBindingTypes(document, binding, index) {
     }
     type = converter.outputType;
   }
-  const targetType = bindingEndpointType(document, binding.target);
+  const targetCaps = requireForwardTargetCapabilities(document, binding);
+  const targetType = targetCaps.type ?? bindingEndpointType(document, binding.target);
   if (!targetType) throw new TypeError(`[binding-missing-target] bindings[${index}] target does not resolve.`);
   if (!typeAccepts(targetType, type)) {
     throw new TypeError(`[binding-type-mismatch] binding ${binding.id} produces ${type} for ${targetType} target ${bindingEndpointKey(binding.target)}.`);
   }
   if (binding.mode === 'twoWay') {
-    if (!endpointWritable(document, binding.source) || !endpointWritable(document, binding.target)) {
-      throw new TypeError(`[binding-two-way-readonly] binding ${binding.id} requires writable source and target.`);
-    }
     if (binding.converterChain.length) {
       throw new TypeError(`[binding-two-way-converter] binding ${binding.id} cannot be two-way while converters are present without an inverse converter contract.`);
     }
-    if (!typeAccepts(type, targetType)) throw new TypeError(`[binding-two-way-type-mismatch] binding ${binding.id} reverse direction is incompatible.`);
+    if (!targetCaps.readable) bindingCapabilityError('binding-two-way-target-unreadable', binding, binding.target, 'two-way target is not readable for reverse propagation');
+    if (!targetCaps.bindable) bindingCapabilityError('binding-target-unbindable', binding, binding.target, 'two-way target is not bindable');
+    if (!sourceCaps.writable) bindingCapabilityError('binding-two-way-source-readonly', binding, binding.source, 'two-way source is not writable');
+    if (!sourceCaps.reverseWritable) bindingCapabilityError('binding-two-way-source-unsupported', binding, binding.source, 'two-way source has no deterministic reverse-write port');
+    if (!typeAccepts(type, targetType) || !typeAccepts(targetType, type)) throw new TypeError(`[binding-two-way-type-mismatch] binding ${binding.id} reverse direction is incompatible.`);
   }
 }
 function validateBindingCycles(bindings) {
@@ -690,15 +744,18 @@ function replaceById(items, value, kind) {
   if (index < 0) throw new TypeError(`Unknown ${kind} ${value.id}.`);
   items[index] = value;
 }
+function containsTypedReference(value, kind, targetId) {
+  if (Array.isArray(value)) return value.some((item) => containsTypedReference(item, kind, targetId));
+  if (!value || typeof value !== 'object') return false;
+  if (value.kind === kind && value.id === targetId) return true;
+  return Object.values(value).some((item) => containsTypedReference(item, kind, targetId));
+}
 function blockersForReference(document, kind, targetId) {
-  const needle = `${kind}:${targetId}`;
   const blockers = [];
-  const check = (label, ownerId, value) => {
-    if (stableString(value).includes(needle) || stableString(value).includes(`\"id\":\"${targetId}\"`)) blockers.push({ kind: label, id: ownerId });
-  };
+  const check = (label, ownerId, value) => { if (containsTypedReference(value, kind, targetId)) blockers.push({ kind: label, id: ownerId }); };
   for (const binding of document.bindings || []) check('binding', binding.id, binding);
   for (const instance of document.viewModelInstances || []) check('viewModelInstance', instance.id, instance);
-  for (const list of document.lists || []) check('list', list.id, list);
+  for (const converter of document.converters || []) check('converter', converter.id, converter);
   for (const group of document.propertyGroups || []) {
     const ownsTarget = kind === 'propertyGroupProperty' && group.properties.some((item) => item.id === targetId);
     if (!ownsTarget) check('propertyGroup', group.id, group);
@@ -715,7 +772,10 @@ function blockersForReference(document, kind, targetId) {
     const ownsTarget = kind === 'listItem' && list.items.some((item) => item.id === targetId);
     if (!ownsTarget) check('list', list.id, list);
   }
-  return blockers.filter((item) => !(item.kind === kind && item.id === targetId)).sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
+  return blockers
+    .filter((item) => !(item.kind === kind && item.id === targetId))
+    .filter((item, index, all) => all.findIndex((candidate) => candidate.kind === item.kind && candidate.id === item.id) === index)
+    .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
 }
 function refuseBlockers(document, kind, targetId) {
   const blockers = blockersForReference(document, kind, targetId);
@@ -919,11 +979,12 @@ export class VeyraDataRuntime {
   #lists = new Map();
   #indexes = new Map();
   #bindingCache = new Map();
+  #sourceSnapshots = new Map();
   #dirty = new Map();
   #subscribers = new Set();
   #batchDepth = 0;
   #pending = [];
-  #stats = { graphBuilds: 0, evaluations: 0, bindingEvaluations: 0, cacheHits: 0, dirtyInvalidations: 0, notifications: 0, zeroBindingFastPaths: 0 };
+  #stats = { graphBuilds: 0, evaluations: 0, bindingEvaluations: 0, cacheHits: 0, dirtyInvalidations: 0, sourceChecks: 0, sourceInvalidations: 0, triggerPulsesConsumed: 0, notifications: 0, zeroBindingFastPaths: 0 };
 
   constructor(documentOrGetter) { this.#documentSource = documentOrGetter; }
   #document() { return typeof this.#documentSource === 'function' ? this.#documentSource() : this.#documentSource; }
@@ -980,7 +1041,7 @@ export class VeyraDataRuntime {
   }
   reset(options = {}) {
     const scope = scopeKey(options.scopePath); const prefix = `${scope}|`;
-    for (const map of [this.#values, this.#triggers, this.#lists, this.#bindingCache]) for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
+    for (const map of [this.#values, this.#triggers, this.#lists, this.#bindingCache, this.#sourceSnapshots]) for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
     this.#dirty.delete(scope);
     this.#notify({ target: { kind: 'runtimeScope', key: scope }, oldValue: null, newValue: null, event: 'reset', source: String(options.source || 'runtime'), runtimeScope: createDataRuntimeScope(options.scopePath || []) });
     return true;
@@ -1020,7 +1081,7 @@ export class VeyraDataRuntime {
         const key = runtimePropertyKey(scope, instance.id, property.id);
         const count = this.#triggers.get(key) || 0;
         value = count > 0;
-        if (count > 0) triggerReads.add({ key, endpointKey: bindingEndpointKey({ kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] }) });
+        if (count > 0) triggerReads.set(key, bindingEndpointKey({ kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] }));
       } else {
         const key = runtimePropertyKey(scope, instance.id, property.id); value = clone(this.#values.has(key) ? this.#values.get(key) : initialValueFor(document, instance, property));
       }
@@ -1041,13 +1102,33 @@ export class VeyraDataRuntime {
   evaluateBindings(document, options = {}) {
     const artboardId = String(options.artboardId || document.artboards?.[0]?.id || ''); const relevant = (document.bindings || []).filter((item) => item.enabled && item.artboard.id === artboardId);
     this.#stats.evaluations += 1;
-    if (!relevant.length) { this.#stats.zeroBindingFastPaths += 1; return { overrides: {}, ownership: {}, diagnostics: { conflicts: [], errors: [] }, stats: { evaluatedBindings: 0, cacheHits: 0, graphBuilt: false, zeroBindingFastPath: true } }; }
+    if (!relevant.length) { this.#stats.zeroBindingFastPaths += 1; return { overrides: {}, ownership: {}, diagnostics: { conflicts: [], errors: [] }, stats: { evaluatedBindings: 0, cacheHits: 0, sourceInvalidations: 0, graphBuilt: false, zeroBindingFastPath: true } }; }
     const index = this.#index(document, artboardId); const scope = scopeKey(options.scopePath); let dirty = this.#dirty.get(scope);
     if (!dirty) { dirty = new Set(index.winners.map((item) => item.id)); this.#dirty.set(scope, dirty); }
+    for (const binding of index.winners) if (!this.#bindingCache.has(runtimeBindingKey(scope, binding.id))) dirty.add(binding.id);
+
+    let sourceInvalidations = 0;
+    const checkedSources = new Set();
     for (const binding of index.ordered) {
-      if (binding.source.kind !== 'data') this.#cascadeDirty(index, dirty, [binding.id]);
+      if (binding.source.kind === 'data') continue;
+      const sourceKey = bindingEndpointKey(binding.source);
+      if (checkedSources.has(sourceKey) || index.byTarget.has(sourceKey)) continue;
+      checkedSources.add(sourceKey);
+      const snapshotKey = `${scope}|${artboardId}|${sourceKey}`;
+      const current = this.#endpointValue(document, binding.source, scope, new Map(), new Map());
+      this.#stats.sourceChecks += 1;
+      if (!this.#sourceSnapshots.has(snapshotKey)) { this.#sourceSnapshots.set(snapshotKey, clone(current)); continue; }
+      const previous = this.#sourceSnapshots.get(snapshotKey);
+      if (stableString(previous) !== stableString(current)) {
+        this.#sourceSnapshots.set(snapshotKey, clone(current));
+        const invalidated = this.#cascadeDirty(index, dirty, index.bySource.get(sourceKey) || []);
+        sourceInvalidations += invalidated;
+        this.#stats.sourceInvalidations += invalidated;
+        this.#stats.dirtyInvalidations += invalidated;
+      }
     }
-    const virtual = new Map(); const overrides = {}; const ownership = {}; const triggerReads = new Set(); let evaluatedBindings = 0; let cacheHits = 0;
+
+    const virtual = new Map(); const overrides = {}; const ownership = {}; const triggerReads = new Map(); let evaluatedBindings = 0; let cacheHits = 0;
     for (const binding of index.ordered) {
       const cacheKey = runtimeBindingKey(scope, binding.id); let output;
       if (!dirty.has(binding.id) && this.#bindingCache.has(cacheKey)) { output = clone(this.#bindingCache.get(cacheKey)); cacheHits += 1; this.#stats.cacheHits += 1; }
@@ -1071,19 +1152,49 @@ export class VeyraDataRuntime {
       dirty.delete(binding.id);
     }
     if (triggerReads.size) {
-      for (const item of triggerReads) {
-        this.#triggers.set(item.key, 0);
-        this.#cascadeDirty(index, dirty, index.bySource.get(item.endpointKey) || []);
+      for (const [key, endpointKey] of triggerReads) {
+        const count = this.#triggers.get(key) || 0;
+        const remaining = Math.max(0, count - 1);
+        if (remaining) this.#triggers.set(key, remaining); else this.#triggers.delete(key);
+        this.#stats.triggerPulsesConsumed += count > 0 ? 1 : 0;
+        this.#cascadeDirty(index, dirty, index.bySource.get(endpointKey) || []);
       }
     }
     this.#dirty.set(scope, dirty);
-    return { overrides, ownership, virtualValues: Object.fromEntries([...virtual.entries()].map(([key, value]) => [key, clone(value)])), diagnostics: { conflicts: clone(index.conflicts), errors: [] }, stats: { evaluatedBindings, cacheHits, graphBuilt: true, zeroBindingFastPath: false } };
+    return { overrides, ownership, virtualValues: Object.fromEntries([...virtual.entries()].map(([key, value]) => [key, clone(value)])), diagnostics: { conflicts: clone(index.conflicts), errors: [] }, stats: { evaluatedBindings, cacheHits, sourceInvalidations, graphBuilt: true, zeroBindingFastPath: false } };
   }
   setTwoWayTarget(bindingId, value, options = {}) {
     const document = this.#document(); const binding = bindingById(document, bindingId);
     if (!binding || binding.mode !== 'twoWay' || !binding.enabled) throw new TypeError(`[binding-two-way-unavailable] ${bindingId} is not an enabled two-way binding.`);
-    if (binding.source.kind !== 'data' || binding.source.path.length !== 1) throw new TypeError(`[binding-two-way-source] reverse writes currently require a direct data-property source.`);
-    return this.setValue(binding.source.instance.id, binding.source.path[0].id, value, { ...options, source: options.source || 'two-way-binding', provenance: { binding: createReference('binding', binding.id), ...(options.provenance || {}) } });
+    const capabilities = bindingEndpointCapabilities(document, binding.source);
+    if (!capabilities.reverseWritable) throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(binding.source)} has no deterministic reverse-write port.`);
+    if (binding.source.kind === 'data') {
+      let instanceId = binding.source.instance.id;
+      for (let index = 0; index < binding.source.path.length; index += 1) {
+        const propertyId = binding.source.path[index].id;
+        const { instance, property } = this.#instanceProperty(document, instanceId, propertyId);
+        if (index === binding.source.path.length - 1) {
+          return this.setValue(instance.id, property.id, value, { ...options, source: options.source || 'two-way-binding', provenance: { binding: createReference('binding', binding.id), ...(options.provenance || {}) } });
+        }
+        if (property.type !== 'viewModel') throw new TypeError(`[binding-two-way-source] ${property.id} is not a nested View Model property.`);
+        const nested = this.getValue(instance.id, property.id, options);
+        if (nested?.kind !== 'viewModelInstance') throw new TypeError(`[binding-two-way-source] ${property.id} does not resolve a nested View Model instance in this runtime scope.`);
+        instanceId = nested.id;
+      }
+    }
+    if (binding.source.kind === 'propertyGroupProperty') {
+      const property = propertyGroupPropertyById(document, binding.source.property.id);
+      if (!property) throw new TypeError(`[binding-two-way-source] missing Property Group property ${binding.source.property.id}.`);
+      const normalized = validateTypedValueTarget(document, property, value, `two-way Property Group ${property.id}`);
+      const oldValue = clone(property.value);
+      if (stableString(oldValue) === stableString(normalized)) return false;
+      property.value = clone(normalized);
+      const scope = scopeKey(options.scopePath);
+      this.#markDirty(document, binding.artboard.id, scope, bindingEndpointKey(binding.source));
+      this.#notify({ target: clone(binding.source), oldValue, newValue: clone(normalized), source: String(options.source || 'two-way-binding'), provenance: { binding: createReference('binding', binding.id), authoredPropertyGroupWrite: true, ...(options.provenance || {}) }, runtimeScope: createDataRuntimeScope(options.scopePath || []) });
+      return true;
+    }
+    throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(binding.source)} has no deterministic reverse-write port.`);
   }
 
   #runtimeList(document, listId, scope) {
@@ -1156,7 +1267,7 @@ export function dataIndexEntitySpecs(document) {
   for (const converter of document.converters || []) push('converter', converter, converter.type, converter.name, ['converter', 'deterministic-evaluator']);
   for (const group of document.propertyGroups || []) {
     push('propertyGroup', group, 'propertyGroup', group.name, ['artboard-local', 'keyable']);
-    for (const property of group.properties) push('propertyGroupProperty', property, property.type, property.name, ['keyable', 'bindable']);
+    for (const property of group.properties) push('propertyGroupProperty', property, property.type, property.name, [property.keyable !== false ? 'keyable' : '', property.readable !== false ? 'readable' : '', property.writable !== false ? 'writable' : '', property.bindable !== false ? 'bindable' : ''].filter(Boolean));
   }
   for (const list of document.lists || []) {
     push('list', list, 'list', list.name, ['stable-list', 'runtime-clonable']);

@@ -1072,7 +1072,9 @@ export const VEYRA_COMMAND_PROVENANCE_AUDIT = Object.freeze(Object.fromEntries(
 export const VEYRA_NON_DISPATCHABLE_ACTIONS = Object.freeze(['execute', 'mutate', 'subscribe']);
 
 function fail(action, message) {
-  return { ok: false, action, error: message };
+  const error = String(message);
+  const match = /^\[([^\]]+)\]/.exec(error);
+  return { ok: false, action, error, ...(match ? { errorCode: match[1] } : {}) };
 }
 
 /**

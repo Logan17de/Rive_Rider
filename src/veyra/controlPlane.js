@@ -340,7 +340,7 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
   if (source === 'data-binding') {
     const runtimeOwner = evaluation.scene.data?.bindingOwnership?.[address];
     const activeBinding = runtimeOwner?.ref ? bindings.find((item) => referencesEqual(item.ref, runtimeOwner.ref)) : bindings[0];
-    activeOwner = activeBinding ? { ...cloneValue(activeBinding), source: 'data-binding', chain: { binding: cloneValue(activeBinding.ref), source: cloneValue(activeBinding.source), converters: cloneValue(activeBinding.converters), target: cloneValue(activeBinding.target) } } : { kind: 'data-binding', source: 'data-binding', evidence: [{ kind: 'binding-owner-missing' }] };
+    activeOwner = activeBinding ? { ...cloneValue(activeBinding), source: 'data-binding', runtimeScope: cloneValue(runtimeOwner?.runtimeScope || null), chain: { binding: cloneValue(activeBinding.ref), source: cloneValue(activeBinding.source), converters: cloneValue(activeBinding.converters), target: cloneValue(activeBinding.target), mode: activeBinding.mode, runtimeScope: cloneValue(runtimeOwner?.runtimeScope || null) } } : { kind: 'data-binding', source: 'data-binding', evidence: [{ kind: 'binding-owner-missing' }] };
   } else if (source === 'animation' || source === 'playback') {
     const activeTrack = tracks.find((controller) => controller.timeline.id === evaluation.runtime?.timelineId) || (tracks.length === 1 ? tracks[0] : null);
     activeOwner = activeTrack
@@ -370,7 +370,33 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
   }
 
   let writableSource;
-  if (activeOwner.kind === 'animation-track') {
+  if (activeOwner.kind === 'data-binding') {
+    const endpoint = activeOwner.chain?.source || null;
+    if (endpoint?.kind === 'data') {
+      writableSource = {
+        kind: 'data-runtime-property',
+        binding: cloneValue(activeOwner.ref),
+        endpoint: cloneValue(endpoint),
+        instance: cloneValue(endpoint.instance),
+        path: cloneValue(endpoint.path),
+        mode: activeOwner.mode,
+        runtimeScope: cloneValue(activeOwner.runtimeScope),
+        edit: { transport: 'runtime', port: 'setDataRuntimeValue' },
+        authored: false,
+        targetEditsPropagate: activeOwner.mode === 'twoWay',
+      };
+      warnings.push('The visible value is data-bound. Edit the runtime View Model source rather than the authored visual target.');
+    } else if (endpoint?.kind === 'propertyGroupProperty') {
+      const sourceAddress = `propertyGroupProperty:${encodeURIComponent(endpoint.property.id)}/value`;
+      writableSource = { kind: 'property-group-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), address: sourceAddress, mode: activeOwner.mode, authored: true, targetEditsPropagate: activeOwner.mode === 'twoWay' };
+      warnings.push('The visible value is data-bound from an authored Property Group property; edit that source property rather than the visual target.');
+    } else if (endpoint?.kind === 'property') {
+      writableSource = { kind: 'authored-property', binding: cloneValue(activeOwner.ref), address: endpoint.address, mode: activeOwner.mode, authored: true, targetEditsPropagate: activeOwner.mode === 'twoWay' };
+      warnings.push('The visible value is data-bound from another authored property; edit the binding source rather than the visual target.');
+    } else {
+      writableSource = { kind: 'data-binding-source', binding: cloneValue(activeOwner.ref), endpoint: cloneValue(endpoint), writable: false };
+    }
+  } else if (activeOwner.kind === 'animation-track') {
     writableSource = { kind: 'animation-track', ref: cloneValue(activeOwner.ref), address, edit: 'keyframes' };
     warnings.push('Direct authored edits may be overwritten while this animation track is active; edit the track/keyframes for the visible animated value.');
   } else if (activeOwner.kind === 'constraint-system') {

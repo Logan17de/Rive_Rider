@@ -71,6 +71,7 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'data.enums-converters-lists',
   'data.runtime-isolated',
   'data.incremental-dirty-evaluation',
+  'data.binding-capability-validation',
 ]);
 
 function projectCapabilities(document) {
@@ -214,6 +215,7 @@ function authoringContract() {
       identity: 'viewModel/viewModelInstance/dataProperty/enum/enumValue/binding/converter/propertyGroup/propertyGroupProperty/list/listItem stable refs; names advisory only',
       propertyTypes: ['number','boolean','trigger','string','enum','color','viewModel','list','image','artboard'],
       bindingModes: ['oneWay','twoWay'],
+      endpointCapabilities: { source: 'readable && bindable', target: 'writable && bindable && canonical-drivable', twoWay: 'forward capabilities plus target readable and source deterministic reverse-write; converters require a future inverse contract' },
       evaluationOrder: ['authored','animation','playback','data-binding','constraints','interactive'],
       runtimeState: 'ephemeral and scope-isolated; never serialized',
       conflictPolicy: { priority: 'higher-wins', tieBreak: 'lexicographically-lower-binding-id-wins' },
