@@ -18,10 +18,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Apply M8-C1 production corrections
+      - name: Apply M8-C1 corrections
         run: |
           python scripts/apply-m8-c1.py
           python scripts/apply-m8-c1-cycle-fix.py
+          python scripts/fix-m8-c1-tests.py
       - name: Install
         run: npm ci
       - name: Syntax gate
