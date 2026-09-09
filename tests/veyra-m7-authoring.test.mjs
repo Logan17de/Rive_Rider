@@ -8,7 +8,8 @@ import {
 import { VeyraStore } from '../src/veyra/store.js';
 import { createVeyraControlPlane } from '../src/veyra/controlPlane.js';
 import { evaluateDocument } from '../src/veyra/evaluation.js';
-import { pathData } from '../src/veyra/geometry.js';
+import { pathData, pathSegments } from '../src/veyra/geometry.js';
+import { hitTestPoint } from '../src/veyra/hitTest.js';
 import { serializeVeyra, parseVeyra } from '../src/veyra/io.js';
 import {
   createArtboardRef,
@@ -364,6 +365,26 @@ test('name randomization and duplicates do not alter stable command targets', ()
   assert.equal(store.document.nodes.find((n) => n.id === 'stable_b').transform.x, 77);
   store.document.nodes.forEach((node) => { node.name = Math.random().toString(36); });
   assert.equal(store.document.nodes.find((n) => n.id === 'stable_b').transform.x, 77);
+});
+
+test('rounded path corners share one compiled representation between renderer/export and hit testing', () => {
+  const rounded = pathNode('rounded_hit', { geometry: {
+    closed: true,
+    vertices: [
+      pathVertex('rh1', 0, 0),
+      pathVertex('rh2', 100, 0, { cornerRadius: 20 }),
+      pathVertex('rh3', 100, 100),
+      pathVertex('rh4', 0, 100),
+    ],
+  } });
+  rounded.paint.fill = { type: 'solid', color: '#abcdef' };
+  const document = normalizedSingle([rounded], { width: 200, height: 200 });
+  const compiled = pathSegments(document.nodes[0].geometry);
+  assert.ok(compiled.segments.some((segment) => segment.type === 'quadratic'));
+  assert.match(pathData(document.nodes[0].geometry), /Q 100 0 100 20/);
+  const viewport = { width: 200, height: 200, zoom: 1, centerX: 100, centerY: 100 };
+  assert.equal(hitTestPoint({ x: 99, y: 1 }, document, viewport), null, 'point clipped by rounded corner must not hit raw polygon corner');
+  assert.deepEqual(hitTestPoint({ x: 90, y: 5 }, document, viewport), { kind: 'node', id: 'rounded_hit' }, 'point inside compiled rounded path remains hittable');
 });
 
 // 20. Zoom is editor-only; authored path semantics stay byte-for-byte stable.

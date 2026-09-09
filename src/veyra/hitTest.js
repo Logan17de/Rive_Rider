@@ -1,4 +1,4 @@
-import { regularPolygonPoints, starPoints } from './geometry.js';
+import { pathSegments, regularPolygonPoints, starPoints } from './geometry.js';
 import { referenceId } from './references.js';
 import { transformMatrix } from './contracts.js';
 import { createSvgViewBoxScreenTransform } from './viewport.js';
@@ -143,27 +143,38 @@ function flattenCubic(p0, p1, p2, p3, output, tolerance = VEYRA_HIT_TEST_TOLERAN
 }
 
 function pathScreenPoints(node, localToScreen) {
-  const vertices = node.geometry?.vertices || [];
-  if (vertices.length < 2) return { points: [], strokeClosed: false, curvedApproximation: true };
-  const point = (vertex) => ({ x: Number(vertex.x), y: Number(vertex.y) });
-  const handle = (vertex, prefix) => ({
-    x: Number(vertex.x) + Number(vertex[`${prefix}X`] || 0),
-    y: Number(vertex.y) + Number(vertex[`${prefix}Y`] || 0),
-  });
-  const result = [apply(localToScreen, point(vertices[0]))];
-  const appendSegment = (from, to) => {
-    const p0 = apply(localToScreen, point(from));
-    const p1 = apply(localToScreen, handle(from, 'out'));
-    const p2 = apply(localToScreen, handle(to, 'in'));
-    const p3 = apply(localToScreen, point(to));
-    const hasHandle = Math.hypot(p1.x - p0.x, p1.y - p0.y) > 1e-7
-      || Math.hypot(p2.x - p3.x, p2.y - p3.y) > 1e-7;
-    if (hasHandle) flattenCubic(p0, p1, p2, p3, result);
-    else result.push(p3);
-  };
-  for (let index = 1; index < vertices.length; index += 1) appendSegment(vertices[index - 1], vertices[index]);
-  if (node.geometry.closed) appendSegment(vertices.at(-1), vertices[0]);
-  return { points: result, strokeClosed: Boolean(node.geometry.closed), curvedApproximation: true };
+  const compiled = pathSegments(node.geometry);
+  if (!compiled.start) return { points: [], strokeClosed: false, curvedApproximation: true };
+  let current = apply(localToScreen, compiled.start);
+  const result = [current];
+  for (const segment of compiled.segments) {
+    const next = apply(localToScreen, segment.to);
+    if (segment.type === 'cubic') {
+      flattenCubic(
+        current,
+        apply(localToScreen, segment.c1),
+        apply(localToScreen, segment.c2),
+        next,
+        result,
+        VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX,
+      );
+    } else if (segment.type === 'quadratic') {
+      const control = apply(localToScreen, segment.c);
+      const c1 = {
+        x: current.x + (control.x - current.x) * (2 / 3),
+        y: current.y + (control.y - current.y) * (2 / 3),
+      };
+      const c2 = {
+        x: next.x + (control.x - next.x) * (2 / 3),
+        y: next.y + (control.y - next.y) * (2 / 3),
+      };
+      flattenCubic(current, c1, c2, next, result, VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX);
+    } else {
+      result.push(next);
+    }
+    current = next;
+  }
+  return { points: result, strokeClosed: compiled.closed, curvedApproximation: true };
 }
 
 function conicSecondDerivativeBound(localToScreen, rx, ry) {
