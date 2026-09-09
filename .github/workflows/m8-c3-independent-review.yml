@@ -1,0 +1,31 @@
+name: M8 C3 independent baseline review
+on:
+  push:
+    branches: ['verify/m8-c3-d36f0ac']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d36f0ac2841fa6320f4335f617847d123dd394ca
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Archive exact production source
+        run: |
+          test "$(git rev-parse HEAD)" = d36f0ac2841fa6320f4335f617847d123dd394ca
+          git archive --format=zip HEAD -o m8-c3-baseline.zip
+      - run: npm ci
+      - name: Baseline gates
+        run: npm run check && npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m8-c3-pinned-baseline
+          path: m8-c3-baseline.zip
+          retention-days: 7
