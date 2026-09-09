@@ -150,3 +150,5 @@ export {
   createDataRuntimeScope, VeyraDataRuntime, createVeyraDataRuntime,
   bindingDependencyRecords, bindingComplexityEnvelope,
 } from './veyra/dataGraph.js';
+export { createVeyraRuntimeHost } from './veyra/runtimeHost.js';
+export { VEYRA_DATA_RUNTIME_PORTS, VEYRA_DATA_RUNTIME_CONTRACT } from './veyra/runtimePorts.js';

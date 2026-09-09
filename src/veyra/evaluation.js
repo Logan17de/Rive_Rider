@@ -63,6 +63,12 @@ function evaluateNodes(document) {
 }
 
 export function evaluateDocument(authoredDocument, layers = {}, animationPlayback = null, options = {}) {
+  if (options.observe) {
+    return evaluateDocument(authoredDocument, layers, animationPlayback, { ...options, observe: false,
+      dataRuntime: options.dataRuntime?.fork() || createVeyraDataRuntime(authoredDocument),
+      componentRuntime: options.componentRuntime?.fork() || null,
+    });
+  }
   let evaluatedDocument = normalizeDocument(authoredDocument);
   const sources = {};
   const diagnostics = { collisions: [] };
@@ -127,6 +133,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     components: cloneValue(evaluatedDocument.components),
     componentInstances: cloneValue(evaluatedDocument.componentInstances.filter(owned)),
     assets: cloneValue(evaluatedDocument.assets),
+    propertyGroups: cloneValue(evaluatedDocument.propertyGroups.filter(owned)),
     semantics: cloneValue(evaluatedDocument.semantics),
     nodes: baseNodes,
     bones: cloneValue(rig.bones.filter(owned)),

@@ -516,7 +516,7 @@ check('regression gate: M0-M7 suites remain part of the same npm test discovery 
 
 check('runtime scope identity remains deterministic after correction', [16, 25], () => {
   const path=[ref('componentInstance','outer'),ref('componentInstance','inner')];
-  assert.deepEqual(createDataRuntimeScope(path),{kind:'dataRuntimeScope',key:'componentInstance:outer/componentInstance:inner',path});
+  assert.deepEqual(createDataRuntimeScope(path),{kind:'dataRuntimeScope',key:JSON.stringify([['componentInstance','outer'],['componentInstance','inner']]),path});
 });
 
 const requiredOriginal = Array.from({length:27},(_,index)=>index+1);

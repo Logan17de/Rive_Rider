@@ -4,7 +4,7 @@
 
 Complete only the tasks below. Follow-up ideas belong in `suggestions`. Do not start M9. When implementation is complete, set `AWAITING VERIFICATION`, supply reproducible evidence, commit, and stop. Implementers do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed after independent M8-C2 verification
+## Progress snapshot — refreshed for M8-C3 implementation handoff; independent acceptance pending
 
 These are carry-forward approximate planning estimates from the last accepted milestone, not measured vendor-parity percentages or a line-count metric. Unaccepted M8 work receives no new verified-completion credit.
 
@@ -21,7 +21,7 @@ These are carry-forward approximate planning estimates from the last accepted mi
 
 - Implementation M0–M7: previously VERIFIED, with their documented limitations preserved.
 - `plan.md` M3 / implementation M8: **CORRECTIONS REQUIRED**.
-- Current implementation work: **M8-C3**, below.
+- Current implementation work: **M8-C3 — AWAITING VERIFICATION**, below.
 - M9 / layered state machines: **NOT STARTED; blocked on M8 acceptance**.
 
 Every verification/correction/advance must refresh this snapshot. Do not translate test counts into completion percentages.
@@ -50,7 +50,7 @@ The review branch is evidence only, not another implementation milestone. Its te
 **Topic:** Events, Lists, Canonical Identity, AI/Browser Parity & Incremental Work  
 **Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding  
 **M8 verdict:** `CORRECTIONS REQUIRED`  
-**Implementation status:** `READY`
+**Implementation status:** `AWAITING VERIFICATION`
 
 ## Goal
 
@@ -73,7 +73,7 @@ Close the executed failures below while preserving the successful M8-C1/C2 work.
 
 ## Task 1 — Collision-free runtime identity
 
-- [ ] Replace delimiter-only scope/value/list/Property Group/cache keys with a collision-free structural encoding or equivalent nested maps.
+- [x] Replace delimiter-only scope/value/list/Property Group/cache keys with a collision-free structural encoding or equivalent nested maps.
 
 ### Executed failures
 
@@ -99,7 +99,7 @@ Likewise, `(instance "a|b", property "c")` overwrites `(instance "a", property "
 
 ## Task 2 — Canonical endpoint identity before graph operations
 
-- [ ] Normalize equivalent endpoint forms before cycle detection, conflict selection, dirty propagation, caching, dependencies and ownership.
+- [x] Normalize equivalent endpoint forms before cycle detection, conflict selection, dirty propagation, caching, dependencies and ownership.
 
 ### Executed failures
 
@@ -123,7 +123,7 @@ A priority-0 binding then overwrites a priority-10 binding: output 0.75 instead 
 
 ## Task 3 — Event advancement vs non-mutating observation
 
-- [ ] Fix nested-trigger consumption/settling and make live read/ownership inspection observational.
+- [x] Fix nested-trigger consumption/settling and make live read/ownership inspection observational.
 
 ### Executed failures
 
@@ -150,7 +150,7 @@ Separately, `getOwnership(..., {dataRuntime: liveRuntime})` consumes a pending t
 
 ## Task 4 — Typed scoped runtime lists and converter dependencies
 
-- [ ] Make list-consuming converters use the actual scoped runtime list, propagate its dependencies, and validate all runtime list mutations.
+- [x] Make list-consuming converters use the actual scoped runtime list, propagate its dependencies, and validate all runtime list mutations.
 
 ### Executed failures
 
@@ -170,7 +170,7 @@ Inserting `"not-a-number"` into a declared number list succeeds and changes the 
 
 ## Task 5 — Executable public runtime/AI parity
 
-- [ ] Align ownership recommendations, public adapters and registry metadata, then exercise them against live state.
+- [x] Align ownership recommendations, public adapters and registry metadata, then exercise them against live state.
 
 ### Executed failure and existing implementation
 
@@ -189,7 +189,7 @@ Ownership recommends runtime port `setTwoWayTarget`. The browser adapter does no
 
 ## Task 6 — Retained indexes and honest incremental-work gates
 
-- [ ] Retain independent artboard binding indexes and bound actual invalidation work.
+- [x] Retain independent artboard binding indexes and bound actual invalidation work.
 
 ### Executed failure
 
@@ -227,20 +227,20 @@ Do not silently discard established M8 feature types or reject previously suppor
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits:
-- Final clean main SHA:
-- Ten verifier failures -> permanent test mapping:
-- Structured scope/tuple identity proof:
-- Endpoint alias/conflict/cycle proof:
-- Nested trigger + non-consuming read proof:
-- Scoped typed list + converter propagation proof:
-- Public host operation discovery/invoke/read-back proof:
-- Retained index/actual work-counter proof:
-- Preserved C1/C2 positive controls and earlier regressions:
-- npm run check:
-- npm test:
-- Exact-head standard Tests run ID/result:
-- Persistence/migration and performance impact:
-- Cleanup evidence:
-- Suggestions / explicit limitations:
+- Implementation commits: fb616e2d19ed05a983f25b325d79b1dbb986c39f
+- Final clean main SHA: the final merge commit must be reported with the standard Tests head_sha/run evidence; this handoff does not self-certify a not-yet-created merge SHA.
+- Ten verifier failures -> permanent test mapping: docs/M8-C3-runtime-contract.md maps report cases #3-#12 one-for-one to tests/veyra-m8-c3-runtime-contracts.test.mjs; both C2 positive controls remain. The composition suite adds 17 further checks (29 new C3 checks total).
+- Structured scope/tuple identity proof: exact JSON typed tuples preserve every opaque ID and ordered scope path; reset/subtree ownership is structural. Punctuation/Unicode/cross-kind fixtures and valid nested Component graphs are covered.
+- Endpoint alias/conflict/cycle proof: shared propertyAddress parser canonicalizes PG address/ref aliases before graph operations; priority/stable-ID ties, percent encodings, reordered declarations, direct/multi-hop cycles, atomic rejection and derived propagation are tested.
+- Nested trigger + non-consuming read proof: terminal dependency routing is shared by fire and consume/settle; fan-out consumes once per artboard/scope advance. Read/ownership/scene inspection use a fork of current live data/Component/machine state through the same evaluator, with no live event/cache/stat/notification mutation.
+- Scoped typed list + converter propagation proof: converters read scoped lists and register list dependencies; insert/remove/move/replace preserve surviving IDs, validate type/reference/range/index before mutation, retain scoped notifications and copy-on-write/reset precedence.
+- Public host operation discovery/invoke/read-back proof: the real runtimeHost module used by veyra.js is executed in Node. Tests discover manifest/ownership operations, invoke JSON-safe arguments and read live scoped values; nested writes resolve terminal refs, chain recommendations trace controlling sources, and readonly sources do not advertise writes. This is not real-browser visual/usability acceptance.
+- Retained index/actual work-counter proof: independent per-artboard indexes and scope outputs; explicit authored snapshot/epoch invalidation. The 220-binding/two-board/two-scope revisit performs zero graph/catalog/signature builds and zero converter/path evaluations while reporting 440 output applications. One scoped write examines zero bindings and visits one dependency edge, then one binding recomputes and 109 cache.
+- Preserved C1/C2 positive controls and earlier regressions: original M8 28, C1 28, C2 13 checks and all earlier suites pass. Only two legacy exact-key expectations changed to structural encoding; previous behavioral assertions remain.
+- npm run check: PASS — 48/48 source files in local and staging gates.
+- npm test: PASS — 41/41 suites in local and staging gates; C3 reproduced contracts 12/12 and composition checks 17/17.
+- Exact-head standard Tests run ID/result: REQUIRED after the final clean main merge. Standard .github/workflows/test.yml is unchanged; its completed run must match the reported final main SHA before handoff is called ready.
+- Persistence/migration and performance impact: no authored version increment; accepted endpoint aliases canonicalize deterministically. Runtime values/scopes/lists/queues never serialize or enter history. Mutable external hosts must call invalidateAuthoredDocument after in-place edits. Observation copies current runtime state and has real copy cost; zero recomputation is not zero total work.
+- Cleanup evidence: all .veyra-staging/m8-c3 payloads/helpers and m8-c3-stage.yml removed before the clean branch commit; standard test workflow and normal scripts unchanged.
+- Suggestions / explicit limitations: no M9 or new completion credit; no real-browser visual QA claimed. Converter-bearing two-way bindings still require an inverse contract. Empty list-index conversion remains null; finite indexes clamp. Detailed decisions and regression mapping are in docs/M8-C3-runtime-contract.md.
 ```

@@ -1,3 +1,4 @@
+import { VEYRA_DATA_RUNTIME_CONTRACT } from './runtimePorts.js';
 import {
   cloneValue,
   normalizeDocument,
@@ -212,6 +213,7 @@ function semanticActionRefs() {
 function authoringContract() {
   return {
     dataGraph: {
+      runtimeContract: cloneValue(VEYRA_DATA_RUNTIME_CONTRACT),
       identity: 'viewModel/viewModelInstance/dataProperty/enum/enumValue/binding/converter/propertyGroup/propertyGroupProperty/list/listItem stable refs; names advisory only',
       propertyTypes: ['number','boolean','trigger','string','enum','color','viewModel','list','image','artboard'],
       bindingModes: ['oneWay','twoWay'],

@@ -304,6 +304,18 @@ export class ComponentRuntimeRegistry {
     };
   }
 
+  // Snapshot ephemeral controllers without resetting their live inputs/time.
+  fork() {
+    const snapshot = new ComponentRuntimeRegistry(this.#getDocument);
+    for (const [key, bucket] of this.#buckets) {
+      snapshot.#buckets.set(key, { ...bucket, scope: cloneValue(bucket.scope),
+        timelineTimes: new Map(bucket.timelineTimes), machineTargets: new Map(bucket.machineTargets),
+        machines: new Map([...bucket.machines].map(([id, runtime]) => [id, runtime.fork()])),
+      });
+    }
+    return snapshot;
+  }
+
   get size() { return this.#buckets.size; }
 }
 export function createComponentRuntimeRegistry(documentOrGetter) {

@@ -8,6 +8,7 @@ import { evaluateDocument, propertySource } from './evaluation.js';
 import { evaluateTimeline } from './animation.js';
 import {
   parsePropertyAddress,
+  formatPropertyAddress,
   propertyTargetStatus,
   readProperty,
 } from './properties.js';
@@ -21,7 +22,7 @@ import {
 } from './commands.js';
 import { VeyraStore } from './store.js';
 import { VEYRA_SERVICE_NAMES } from './serviceRegistry.js';
-import { bindingControllersForAddress } from './dataGraph.js';
+import { bindingControllersForAddress, createVeyraDataRuntime, propertyGroupPropertyOwner } from './dataGraph.js';
 
 const PLAN_FORBIDDEN_ACTIONS = new Set([
   'select', 'removeSelection', 'replaceDocument', 'begin', 'commit', 'cancel', 'undo', 'redo',
@@ -50,8 +51,10 @@ function targetRef(refOrAddress) {
 }
 
 function targetAddress(refOrAddress) {
-  if (typeof refOrAddress === 'string') return refOrAddress;
-  return refOrAddress?.address ? String(refOrAddress.address) : null;
+  const value = typeof refOrAddress === 'string' ? refOrAddress : refOrAddress?.address;
+  if (!value) return null;
+  try { const parsed = parsePropertyAddress(value); return formatPropertyAddress(parsed.reference, parsed.segments); }
+  catch { return String(value); }
 }
 
 function deterministicHash(text) {
@@ -241,8 +244,10 @@ function evaluatedContext(document, options = {}) {
   const runtime = runtimeTimelineContext(document, options.runtimeContext);
   if (runtime?.error) return { error: runtime.error, runtime, scene: null };
   if (runtime?.overrides) layers.animation = { ...(layers.animation || {}), ...runtime.overrides };
-  const scene = evaluateDocument(document, layers, null, { dataRuntime: options.dataRuntime, artboardId: options.artboardId, runtimeScopePath: options.runtimeScopePath || [] });
-  return { scene, runtime, layers };
+  const dataRuntime = options.dataRuntime?.fork() || createVeyraDataRuntime(document);
+  const componentRuntime = options.componentRuntime?.fork() || null;
+  const scene = evaluateDocument(document, layers, null, { dataRuntime, componentRuntime, artboardId: options.artboardId, runtimeScopePath: options.runtimeScopePath || [] });
+  return { scene, runtime, layers, dataRuntime };
 }
 
 function trackControllers(document, address) {
@@ -340,7 +345,14 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
   if (source === 'data-binding') {
     const runtimeOwner = evaluation.scene.data?.bindingOwnership?.[address];
     const activeBinding = runtimeOwner?.ref ? bindings.find((item) => referencesEqual(item.ref, runtimeOwner.ref)) : bindings[0];
-    activeOwner = activeBinding ? { ...cloneValue(activeBinding), source: 'data-binding', runtimeScope: cloneValue(runtimeOwner?.runtimeScope || null), chain: { binding: cloneValue(activeBinding.ref), source: cloneValue(activeBinding.source), converters: cloneValue(activeBinding.converters), target: cloneValue(activeBinding.target), mode: activeBinding.mode, runtimeScope: cloneValue(runtimeOwner?.runtimeScope || null) } } : { kind: 'data-binding', source: 'data-binding', evidence: [{ kind: 'binding-owner-missing' }] };
+    const stages = runtimeOwner?.chain || [];
+    const root = stages[0];
+    activeOwner = activeBinding ? { ...cloneValue(activeBinding), source: 'data-binding', runtimeScope: cloneValue(runtimeOwner?.runtimeScope || null),
+      chain: { binding: cloneValue(activeBinding.ref), source: cloneValue(root?.source || activeBinding.source),
+        sourceBinding: cloneValue(root?.binding || activeBinding.ref), sourceMode: root?.mode || activeBinding.mode,
+        converters: cloneValue(stages.length ? stages.flatMap(stage => stage.converters) : activeBinding.converters),
+        stages: cloneValue(stages), target: cloneValue(activeBinding.target), mode: activeBinding.mode, runtimeScope: cloneValue(runtimeOwner?.runtimeScope || null) },
+    } : { kind: 'data-binding', source: 'data-binding', evidence: [{ kind: 'binding-owner-missing' }] };
   } else if (source === 'animation' || source === 'playback') {
     const activeTrack = tracks.find((controller) => controller.timeline.id === evaluation.runtime?.timelineId) || (tracks.length === 1 ? tracks[0] : null);
     activeOwner = activeTrack
@@ -372,30 +384,42 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
   let writableSource;
   if (activeOwner.kind === 'data-binding') {
     const endpoint = activeOwner.chain?.source || null;
+    const runtimeOptions = { scopePath: activeOwner.runtimeScope?.path || options.runtimeScopePath || [] };
+    const sourceBinding = activeOwner.chain?.sourceBinding || activeOwner.ref;
+    const sourceMode = activeOwner.chain?.sourceMode || activeOwner.mode;
     if (endpoint?.kind === 'data') {
+      const terminal = evaluation.dataRuntime.resolveDataEndpoint(endpoint, runtimeOptions);
       writableSource = {
         kind: 'data-runtime-property',
         binding: cloneValue(activeOwner.ref),
         endpoint: cloneValue(endpoint),
-        instance: cloneValue(endpoint.instance),
+        instance: cloneValue(terminal.instance),
+        property: cloneValue(terminal.property),
+        rootInstance: cloneValue(endpoint.instance),
         path: cloneValue(endpoint.path),
         mode: activeOwner.mode,
         runtimeScope: cloneValue(activeOwner.runtimeScope),
-        edit: { transport: 'runtime', port: 'setDataRuntimeValue' },
+        writable: terminal.writable,
+        edit: !terminal.writable ? null : terminal.type === 'trigger'
+          ? { transport: 'runtime', port: 'fireDataTrigger', arguments: [terminal.instance.id, terminal.property.id, runtimeOptions] }
+          : { transport: 'runtime', port: 'setDataRuntimeValue', arguments: [terminal.instance.id, terminal.property.id, null, runtimeOptions], valueIndex: 2 },
         authored: false,
         targetEditsPropagate: activeOwner.mode === 'twoWay',
       };
       warnings.push('The visible value is data-bound. Edit the runtime View Model source rather than the authored visual target.');
     } else if (endpoint?.kind === 'propertyGroupProperty') {
       const sourceAddress = `propertyGroupProperty:${encodeURIComponent(endpoint.property.id)}/value`;
-      if (activeOwner.mode === 'twoWay') {
-        const runtimeOverride = typeof options.dataRuntime?.hasPropertyGroupOverride === 'function'
-          ? options.dataRuntime.hasPropertyGroupOverride(endpoint.property.id, { scopePath: activeOwner.runtimeScope?.path || options.runtimeScopePath || [] })
+      const runtimeOverride = typeof evaluation.dataRuntime?.hasPropertyGroupOverride === 'function'
+          ? evaluation.dataRuntime.hasPropertyGroupOverride(endpoint.property.id, { scopePath: activeOwner.runtimeScope?.path || options.runtimeScopePath || [] })
           : false;
-        writableSource = { kind: 'property-group-runtime-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), authoredAddress: sourceAddress, mode: activeOwner.mode, authored: false, runtimeOverride, runtimeScope: cloneValue(activeOwner.runtimeScope), edit: { transport: 'runtime', port: 'setTwoWayTarget' }, targetEditsPropagate: true };
-        warnings.push('The visible value is two-way data-bound from a Property Group. Runtime interaction writes the scoped evaluated Property Group value; use the canonical Property Group command only for intentional persistence.');
+      if (sourceMode === 'twoWay' || runtimeOverride) {
+        const edit = sourceMode === 'twoWay'
+          ? { transport: 'runtime', port: 'setTwoWayBindingTarget', arguments: [sourceBinding.id, null, runtimeOptions], valueIndex: 1 }
+          : { transport: 'runtime', port: 'setPropertyGroupRuntimeValue', arguments: [endpoint.property.id, null, runtimeOptions], valueIndex: 1 };
+        writableSource = { kind: 'property-group-runtime-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), authoredAddress: sourceAddress, mode: activeOwner.mode, authored: false, runtimeOverride, runtimeScope: cloneValue(activeOwner.runtimeScope), edit, targetEditsPropagate: activeOwner.mode === 'twoWay' };
+        warnings.push('The visible value is controlled by a scoped Property Group runtime value. Runtime interaction writes the scoped evaluated Property Group value; use the canonical Property Group command only for intentional persistence.');
       } else {
-        writableSource = { kind: 'property-group-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), address: sourceAddress, mode: activeOwner.mode, authored: true, targetEditsPropagate: false };
+        writableSource = { kind: 'property-group-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), address: sourceAddress, mode: activeOwner.mode, authored: true, targetEditsPropagate: false, edit: { transport: 'command', action: 'updatePropertyGroupProperty', args: { groupId: propertyGroupPropertyOwner(document, endpoint.property.id)?.id, propertyId: endpoint.property.id, changes: { value: null } }, valuePath: ['changes', 'value'] } };
         warnings.push('The visible value is data-bound from an authored Property Group property; edit that source property rather than the visual target.');
       }
     } else if (endpoint?.kind === 'property') {
