@@ -16,9 +16,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Apply M8 core patch
         run: python scripts/apply-m8-core.py
+      - name: Apply M8 runtime fixes
+        run: python scripts/apply-m8-runtime-fixes.py
       - name: Apply M8 control patch
         run: python scripts/apply-m8-control.py
+      - name: Apply M8 shell patch
+        run: python scripts/apply-m8-shell.py
+      - name: Apply M8 tests
+        run: python scripts/apply-m8-tests.py
       - name: Syntax gate
         run: npm run check
-      - name: Existing suites diagnostic
+      - name: Full test gate
         run: npm test
