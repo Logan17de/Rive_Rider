@@ -1,4 +1,4 @@
-import { supportsNodeProperty, supportsRigProperty } from './capabilities.js';
+import { supportsNodeProperty, supportsRigProperty } from './propertyCapabilities.js';
 
 function propertyGroupPropertyById(document, value) {
   for (const group of document.propertyGroups || []) {
