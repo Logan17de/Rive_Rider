@@ -1,5 +1,6 @@
 import { createReference, normalizeReference, referenceId } from './references.js';
 import { canonicalPropertyBindingCapabilities } from './propertyBinding.js';
+import { parsePropertyAddress, formatPropertyAddress } from './propertyAddress.js';
 
 export const VEYRA_DATA_VERSION = 6;
 export const VEYRA_DATA_PROPERTY_TYPES = Object.freeze([
@@ -215,7 +216,11 @@ export function normalizeBindingEndpoint(value, path = 'binding endpoint') {
   if (kind === 'property') {
     const address = String(value.address || '');
     if (!address) throw new TypeError(`${path}.address is required.`);
-    return { kind, address };
+    const parsed = parsePropertyAddress(address);
+    if (parsed.reference.kind === 'propertyGroupProperty' && parsed.path === 'value') {
+      return { kind: 'propertyGroupProperty', property: parsed.reference };
+    }
+    return { kind, address: formatPropertyAddress(parsed.reference, parsed.segments) };
   }
   if (kind === 'propertyGroupProperty') {
     return { kind, property: typed(value.property ?? value.ref ?? value.propertyId, 'propertyGroupProperty', `${path}.property`) };
@@ -260,6 +265,11 @@ function normalizeTypeDescriptor(value, path) {
   const type = String(source.type || '');
   if (!VEYRA_DATA_PROPERTY_TYPES.includes(type) || type === 'trigger') throw new TypeError(`${path}.type is not a supported list item type.`);
   const result = { type };
+  if (type === 'number') {
+    if (source.min != null) result.min = finite(source.min, `${path}.min`);
+    if (source.max != null) result.max = finite(source.max, `${path}.max`);
+    if (result.min != null && result.max != null && result.min > result.max) throw new RangeError(`${path}.min cannot exceed max.`);
+  }
   if (type === 'enum') result.enum = optionalTyped(source.enum ?? source.enumId, 'enum', `${path}.enum`);
   if (type === 'viewModel') result.viewModel = optionalTyped(source.viewModel ?? source.viewModelId, 'viewModel', `${path}.viewModel`);
   if (type === 'list') result.itemType = normalizeTypeDescriptor(source.itemType ?? { type: 'string' }, `${path}.itemType`);
@@ -404,16 +414,10 @@ function directAddressObject(document, kind, targetId) {
   return (map[kind] || []).find((item) => item.id === targetId) || null;
 }
 export function parseDataAwarePropertyAddress(address) {
-  const text = String(address || '');
-  const slash = text.indexOf('/');
-  const colon = text.indexOf(':');
-  if (colon < 1 || slash < colon + 2) throw new TypeError(`Invalid Veyra property address: ${text}`);
-  const kind = text.slice(0, colon);
-  const targetId = decodeURIComponent(text.slice(colon + 1, slash));
-  const segments = text.slice(slash + 1).split('/').map(decodeURIComponent);
-  if (!targetId || segments.some((segment) => !segment)) throw new TypeError(`Invalid Veyra property address: ${text}`);
-  return { kind, id: targetId, segments, path: segments.join('.') };
+  const parsed = parsePropertyAddress(address);
+  return { kind: parsed.reference.kind, id: parsed.reference.id, segments: parsed.segments, path: parsed.path };
 }
+
 function nestedValue(root, segments) {
   let value = root;
   for (const segment of segments) {
@@ -445,9 +449,18 @@ export function dataAwareAddressType(document, address) {
 }
 
 export function bindingEndpointKey(endpoint) {
-  if (endpoint.kind === 'property') return `property:${endpoint.address}`;
-  if (endpoint.kind === 'propertyGroupProperty') return `propertyGroupProperty:${endpoint.property.id}`;
-  return `data:${endpoint.instance.id}/${endpoint.path.map((ref) => ref.id).join('/')}`;
+  const canonical = normalizeBindingEndpoint(endpoint);
+  if (canonical.kind === 'property') return JSON.stringify(['property', canonical.address]);
+  if (canonical.kind === 'propertyGroupProperty') {
+    return JSON.stringify(['property', formatPropertyAddress(canonical.property, ['value'])]);
+  }
+  return JSON.stringify(['data', ['viewModelInstance', canonical.instance.id], canonical.path.map(ref => ['dataProperty', ref.id])]);
+}
+
+function endpointAddress(endpoint) {
+  const canonical = normalizeBindingEndpoint(endpoint);
+  return canonical.kind === 'property' ? canonical.address : canonical.kind === 'propertyGroupProperty'
+    ? formatPropertyAddress(canonical.property, ['value']) : null;
 }
 
 function endpointDataProperty(document, endpoint) {
@@ -871,7 +884,7 @@ export function addBindingInDocument(document, overrides) { const item = createB
 export function updateBindingInDocument(document, bindingId, changes) { const current = bindingById(document, bindingId); if (!current) throw new TypeError(`Unknown binding ${bindingId}.`); if (changes.id != null && changes.id !== bindingId) throw new TypeError('Binding id is immutable.'); const next = createBinding({ ...current, ...clone(changes), id: bindingId }); replaceById(document.bindings, next, 'binding'); return createReference('binding', bindingId); }
 export function removeBindingInDocument(document, bindingId) { const before = document.bindings.length; document.bindings = document.bindings.filter((item) => item.id !== bindingId); return before !== document.bindings.length; }
 
-function converterValue(document, converter, value) {
+function converterValue(document, converter, value, readList = (listId) => listById(document, listId)?.items) {
   if (converter.type === 'numberToBoolean') return Number(value) !== 0;
   if (converter.type === 'booleanToNumber') return value ? 1 : 0;
   if (converter.type === 'numberToString') {
@@ -893,57 +906,47 @@ function converterValue(document, converter, value) {
   if (converter.type === 'conditional') return stableString(value) === stableString(converter.config.equals) ? clone(converter.config.then) : clone(converter.config.else);
   if (converter.type === 'numberToListIndex') {
     const ref = converter.config.list;
-    const list = ref ? listById(document, ref.id) : null;
-    if (!list) throw new TypeError(`[converter-list-missing] ${converter.id} requires a list.`);
-    if (!list.items.length) return null;
-    const index = Math.max(0, Math.min(list.items.length - 1, Math.trunc(finite(value, `converter ${converter.id} input`))));
-    return clone(list.items[index].value);
+    const items = ref ? readList(ref.id) : null;
+    if (!items) throw new TypeError(`[converter-list-missing] ${converter.id} requires a list.`);
+    if (!items.length) return null;
+    const index = Math.max(0, Math.min(items.length - 1, Math.trunc(finite(value, `converter ${converter.id} input`))));
+    return clone(items[index].value);
   }
   throw new TypeError(`Unsupported converter ${converter.type}.`);
 }
 
-function scopeKey(scopePath = []) {
-  const path = Array.isArray(scopePath) ? scopePath : scopePath?.path || [];
-  if (!path.length) return 'root';
-  return path.map((entry) => `${entry.kind}:${entry.id}`).join('/');
-}
-export function createDataRuntimeScope(path = []) {
-  if (!Array.isArray(path)) throw new TypeError('Data runtime scope path must be an array.');
-  const normalized = path.map((entry, index) => {
-    if (!entry?.kind || !entry?.id) throw new TypeError(`Data runtime scope path[${index}] requires kind/id.`);
-    return { kind: String(entry.kind), id: String(entry.id) };
+function scopePath(value = []) {
+  const path = Array.isArray(value) ? value : value?.path;
+  if (!Array.isArray(path)) throw new TypeError('Data runtime scope path must be an array or typed scope.');
+  return path.map((entry, index) => {
+    if (typeof entry?.kind !== 'string' || !entry.kind || typeof entry?.id !== 'string' || !entry.id) {
+      throw new TypeError(`Data runtime scope path[${index}] requires non-empty string kind/id.`);
+    }
+    return { kind: entry.kind, id: entry.id };
   });
+}
+function scopeKey(value = []) { return JSON.stringify(scopePath(value).map(ref => [ref.kind, ref.id])); }
+function scopeFromKey(key) { return JSON.parse(key).map(([kind, id]) => ({ kind, id })); }
+export function createDataRuntimeScope(path = []) {
+  const normalized = scopePath(path);
   return { kind: VEYRA_DATA_RUNTIME_SCOPE_KIND, key: scopeKey(normalized), path: normalized };
 }
 
-function bindingIndexSignature(document, artboardId) {
-  const bindings = (document.bindings || []).filter((item) => item.artboard.id === artboardId).map((item) => ({ id: item.id, source: item.source, target: item.target, mode: item.mode, enabled: item.enabled, priority: item.priority, converters: item.converterChain }));
-  const converters = (document.converters || []).map((item) => ({ id: item.id, type: item.type, inputType: item.inputType, outputType: item.outputType, config: item.config }));
-  return hash(stableString({ bindings, converters }));
+// Exact signatures are generation checks, never shortened hash identities. These
+// are built only after an authored snapshot change, not on every frame/write.
+function bindingSignature(binding, converters) {
+  return stableString({ id: binding.id, artboard: binding.artboard, source: normalizeBindingEndpoint(binding.source),
+    target: normalizeBindingEndpoint(binding.target), mode: binding.mode, enabled: binding.enabled, priority: binding.priority,
+    converters: binding.converterChain.map(ref => {
+      const c = converters.get(ref.id);
+      return c ? { id: c.id, type: c.type, inputType: c.inputType, outputType: c.outputType, config: c.config } : ref;
+    }),
+  });
 }
-function authoredRuntimeSignature(document, artboardId) {
-  const viewModels = (document.viewModels || []).map((model) => ({
-    id: model.id,
-    properties: model.properties.map((property) => ({
-      id: property.id, type: property.type, readable: property.readable, writable: property.writable, bindable: property.bindable,
-      defaultValue: property.defaultValue, min: property.min, max: property.max, enum: property.enum, viewModel: property.viewModel, itemType: property.itemType,
-    })),
-  }));
-  const viewModelInstances = (document.viewModelInstances || []).map((instance) => ({
-    id: instance.id, viewModel: instance.viewModel, artboard: instance.artboard, initialValues: instance.initialValues,
-  }));
-  const propertyGroups = (document.propertyGroups || []).filter((group) => group.artboard.id === artboardId).map((group) => ({
-    id: group.id, artboard: group.artboard, properties: group.properties.map((property) => ({
-      id: property.id, type: property.type, readable: property.readable, writable: property.writable, bindable: property.bindable, keyable: property.keyable,
-      min: property.min, max: property.max, enum: property.enum, viewModel: property.viewModel, itemType: property.itemType,
-    })),
-  }));
-  const lists = (document.lists || []).map((list) => ({ id: list.id, owner: list.owner, property: list.property, items: list.items }));
-  return hash(stableString({ bindingIndex: bindingIndexSignature(document, artboardId), viewModels, viewModelInstances, propertyGroups, lists }));
-}
+
 function bindingOrder(left, right) { return right.priority - left.priority || left.id.localeCompare(right.id); }
-function buildRuntimeIndex(document, artboardId) {
-  const all = (document.bindings || []).filter((item) => item.enabled && item.artboard.id === artboardId).sort((a, b) => a.id.localeCompare(b.id));
+function buildRuntimeIndex(bindings) {
+  const all = bindings.filter(item => item.enabled).sort((a, b) => a.id.localeCompare(b.id));
   const contenders = new Map();
   for (const binding of all) {
     const key = bindingEndpointKey(binding.target);
@@ -970,6 +973,7 @@ function buildRuntimeIndex(document, artboardId) {
     const next = bySource.get(bindingEndpointKey(binding.target)) || [];
     downstream.set(binding.id, [...next].sort());
   }
+  const byId = new Map(winners.map(item => [item.id, item]));
   const indegree = new Map(winners.map((item) => [item.id, 0]));
   for (const ids of downstream.values()) for (const next of ids) indegree.set(next, (indegree.get(next) || 0) + 1);
   const queue = winners.filter((item) => indegree.get(item.id) === 0).sort((a, b) => a.id.localeCompare(b.id));
@@ -979,46 +983,83 @@ function buildRuntimeIndex(document, artboardId) {
     for (const nextId of downstream.get(current.id) || []) {
       indegree.set(nextId, indegree.get(nextId) - 1);
       if (indegree.get(nextId) === 0) {
-        const item = winners.find((candidate) => candidate.id === nextId);
+        const item = byId.get(nextId);
         queue.push(item); queue.sort((a, b) => a.id.localeCompare(b.id));
       }
     }
   }
   if (ordered.length !== winners.length) throw new TypeError('[binding-cycle] runtime index found a cycle after normalization.');
-  return { all, winners, ordered, conflicts, bySource, downstream, byTarget };
+  return { all, winners, ordered, conflicts, bySource, downstream, byTarget, byId };
 }
 
-function runtimePropertyKey(scope, instanceId, propertyId) { return `${scope}|${instanceId}|${propertyId}`; }
-function runtimePropertyGroupKey(scope, propertyId) { return `${scope}|propertyGroupProperty|${propertyId}`; }
-function runtimeListKey(scope, listId) { return `${scope}|${listId}`; }
-function runtimeBindingKey(scope, bindingId) { return `${scope}|${bindingId}`; }
+// Runtime identity is an exact typed tuple. No delimiter parsing, hashes, or
+// string-prefix scope ownership is used for values, events, lists or caches.
+function runtimeKey(scope, kind, ...ids) { return JSON.stringify([scope, kind, ...ids]); }
+function runtimePropertyKey(scope, instanceId, propertyId) { return runtimeKey(scope, 'data', instanceId, propertyId); }
+function runtimePropertyGroupKey(scope, propertyId) { return runtimeKey(scope, 'propertyGroupProperty', propertyId); }
+function runtimeListKey(scope, listId) { return runtimeKey(scope, 'list', listId); }
+function runtimeBucketKey(scope, artboardId) { return runtimeKey(scope, 'artboard', artboardId); }
 
 export class VeyraDataRuntime {
   #documentSource;
+  #catalog = null;
+  #authoredEpoch = 0;
   #values = new Map();
   #triggers = new Map();
   #lists = new Map();
+  #listSequences = new Map();
   #propertyGroupValues = new Map();
   #indexes = new Map();
-  #bindingCache = new Map();
-  #sourceSnapshots = new Map();
-  #authoredSignatures = new Map();
-  #dirty = new Map();
+  #buckets = new Map();
+  #dependents = new Map();
   #subscribers = new Set();
   #batchDepth = 0;
   #pending = [];
-  #stats = { graphBuilds: 0, evaluations: 0, bindingEvaluations: 0, cacheHits: 0, dirtyInvalidations: 0, authoredInvalidations: 0, sourceChecks: 0, sourceInvalidations: 0, triggerPulsesConsumed: 0, notifications: 0, zeroBindingFastPaths: 0 };
+  #stats = { graphBuilds: 0, catalogBuilds: 0, signatureBuilds: 0, bindingsExamined: 0,
+    dependencyEdgesVisited: 0, pathSegmentsVisited: 0, converterEvaluations: 0, outputApplications: 0,
+    evaluations: 0, bindingEvaluations: 0, cacheHits: 0, dirtyInvalidations: 0, authoredInvalidations: 0,
+    sourceChecks: 0, sourceInvalidations: 0, triggerPulsesConsumed: 0, notifications: 0, zeroBindingFastPaths: 0 };
 
   constructor(documentOrGetter) { this.#documentSource = documentOrGetter; }
   #document() { return typeof this.#documentSource === 'function' ? this.#documentSource() : this.#documentSource; }
   get stats() { return clone(this.#stats); }
   resetStats() { for (const key of Object.keys(this.#stats)) this.#stats[key] = 0; }
-  subscribe(listener) { if (typeof listener !== 'function') throw new TypeError('Data runtime subscriber must be a function.'); this.#subscribers.add(listener); return () => this.#subscribers.delete(listener); }
-  #notify(change) {
-    this.#pending.push(change);
-    if (this.#batchDepth) return;
-    this.#flush();
+
+  // Store supplies immutable-by-replacement authored snapshots. Mutable external
+  // hosts must call this after an intentional authored edit; no whole-project
+  // serialization is required to detect an unchanged frame.
+  invalidateAuthoredDocument() { this.#authoredEpoch += 1; }
+  #authored() {
+    const document = this.#document();
+    if (this.#catalog?.document === document && this.#catalog.epoch === this.#authoredEpoch) return this.#catalog;
+    if (this.#catalog && this.#catalog.document.id !== document.id) {
+      for (const map of [this.#values, this.#triggers, this.#lists, this.#listSequences, this.#propertyGroupValues, this.#indexes, this.#buckets, this.#dependents]) map.clear();
+    }
+    const map = items => new Map((items || []).map(item => [item.id, item]));
+    const byArtboard = new Map(), enabledArtboards = new Set();
+    for (const binding of document.bindings || []) {
+      this.#stats.bindingsExamined += 1;
+      if (!byArtboard.has(binding.artboard.id)) byArtboard.set(binding.artboard.id, []);
+      byArtboard.get(binding.artboard.id).push(binding);
+      if (binding.enabled) enabledArtboards.add(binding.artboard.id);
+    }
+    const properties = new Map((document.viewModels || []).map(model => [model.id, map(model.properties)]));
+    const catalog = { document, epoch: this.#authoredEpoch, byArtboard, enabledArtboards, properties,
+      instances: map(document.viewModelInstances), converters: map(document.converters), lists: map(document.lists),
+      bindings: map(document.bindings), groups: map((document.propertyGroups || []).flatMap(group => group.properties)) };
+    this.#catalog = catalog;
+    this.#stats.catalogBuilds += 1;
+    const boards = new Set((document.artboards || []).map(item => item.id));
+    for (const artboardId of this.#indexes.keys()) if (!boards.has(artboardId)) this.#indexes.delete(artboardId);
+    for (const [key, bucket] of this.#buckets) if (!boards.has(bucket.artboardId)) { this.#dropBucket(bucket); this.#buckets.delete(key); }
+    return catalog;
   }
+
+  subscribe(listener) {
+    if (typeof listener !== 'function') throw new TypeError('Data runtime subscriber must be a function.');
+    this.#subscribers.add(listener); return () => this.#subscribers.delete(listener);
+  }
+  #notify(change) { this.#pending.push(change); if (!this.#batchDepth) this.#flush(); }
   #flush() {
     if (!this.#pending.length) return;
     const changes = this.#pending.splice(0).sort((a, b) => stableString(a.target).localeCompare(stableString(b.target)) || String(a.source).localeCompare(String(b.source)));
@@ -1027,273 +1068,397 @@ export class VeyraDataRuntime {
   }
   batch(callback) { this.#batchDepth += 1; try { return callback(); } finally { this.#batchDepth -= 1; if (!this.#batchDepth) this.#flush(); } }
 
-  #instanceProperty(document, instanceId, propertyId) {
-    const instance = viewModelInstanceById(document, instanceId);
-    const model = instance ? viewModelById(document, instance.viewModel.id) : null;
-    const property = model?.properties.find((item) => item.id === propertyId) || null;
+  #instanceProperty(instanceId, propertyId) {
+    const authored = this.#authored();
+    const instance = authored.instances.get(instanceId);
+    const property = instance && authored.properties.get(instance.viewModel.id)?.get(propertyId);
     if (!instance || !property) throw new TypeError(`Runtime data target ${instanceId}/${propertyId} does not exist.`);
     return { instance, property };
   }
-  getValue(instanceId, propertyId, options = {}) {
-    const document = this.#document(); const { instance, property } = this.#instanceProperty(document, instanceId, propertyId); const scope = scopeKey(options.scopePath);
-    if (property.type === 'trigger') return (this.#triggers.get(runtimePropertyKey(scope, instance.id, property.id)) || 0) > 0;
+  #value(instance, property, scope) {
     const key = runtimePropertyKey(scope, instance.id, property.id);
-    return clone(this.#values.has(key) ? this.#values.get(key) : initialValueFor(document, instance, property));
+    if (property.type === 'trigger') return (this.#triggers.get(key) || 0) > 0;
+    return clone(this.#values.has(key) ? this.#values.get(key) : initialValueFor(this.#document(), instance, property));
+  }
+  getValue(instanceId, propertyId, options = {}) {
+    const { instance, property } = this.#instanceProperty(instanceId, propertyId);
+    return this.#value(instance, property, scopeKey(options.scopePath));
   }
   #propertyGroupValue(document, propertyId, scope) {
     const property = propertyGroupPropertyById(document, propertyId);
     if (!property) throw new TypeError(`Runtime Property Group target ${propertyId} does not exist.`);
-    const key = runtimePropertyGroupKey(scope, property.id);
+    const key = runtimePropertyGroupKey(scope, propertyId);
     return clone(this.#propertyGroupValues.has(key) ? this.#propertyGroupValues.get(key) : property.value);
   }
-  getPropertyGroupValue(propertyId, options = {}) {
-    return this.#propertyGroupValue(this.#document(), propertyId, scopeKey(options.scopePath));
-  }
-  hasPropertyGroupOverride(propertyId, options = {}) {
-    return this.#propertyGroupValues.has(runtimePropertyGroupKey(scopeKey(options.scopePath), propertyId));
-  }
+  getPropertyGroupValue(propertyId, options = {}) { return this.#propertyGroupValue(this.#document(), propertyId, scopeKey(options.scopePath)); }
+  hasPropertyGroupOverride(propertyId, options = {}) { return this.#propertyGroupValues.has(runtimePropertyGroupKey(scopeKey(options.scopePath), propertyId)); }
+
   setValue(instanceId, propertyId, value, options = {}) {
-    const document = this.#document(); const { instance, property } = this.#instanceProperty(document, instanceId, propertyId);
+    const { instance, property } = this.#instanceProperty(instanceId, propertyId);
     if (!property.writable) throw new TypeError(`[data-readonly] ${propertyId} is not writable.`);
     if (property.type === 'trigger') throw new TypeError(`[data-trigger-set] ${propertyId} is a trigger; use fire().`);
-    const normalized = validateTypedValueTarget(document, property, value, 'runtime value');
-    const scope = scopeKey(options.scopePath); const key = runtimePropertyKey(scope, instance.id, property.id); const oldValue = this.getValue(instanceId, propertyId, options);
-    if (stableString(oldValue) === stableString(normalized)) return false;
+    const normalized = validateTypedValueTarget(this.#document(), property, value, 'runtime value');
+    const scope = scopeKey(options.scopePath), key = runtimePropertyKey(scope, instance.id, property.id);
+    const oldValue = this.#value(instance, property, scope);
+    if (this.#values.has(key) && stableString(oldValue) === stableString(normalized)) return false;
     this.#values.set(key, clone(normalized));
+    if (stableString(oldValue) !== stableString(normalized)) this.#invalidateDependency(key);
     const endpoint = { kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] };
-    this.#markDataPropertyDirty(document, scope, instance.id, property.id);
     this.#notify({ target: endpoint, oldValue, newValue: clone(normalized), source: String(options.source || 'runtime'), provenance: clone(options.provenance || null), runtimeScope: createDataRuntimeScope(options.scopePath || []) });
     return true;
   }
   fire(instanceId, propertyId, options = {}) {
-    const document = this.#document(); const { instance, property } = this.#instanceProperty(document, instanceId, propertyId);
+    const { instance, property } = this.#instanceProperty(instanceId, propertyId);
     if (property.type !== 'trigger') throw new TypeError(`[data-trigger-type] ${propertyId} is ${property.type}, not trigger.`);
-    const scope = scopeKey(options.scopePath); const key = runtimePropertyKey(scope, instance.id, property.id); const count = (this.#triggers.get(key) || 0) + 1; this.#triggers.set(key, count);
+    if (!property.writable) throw new TypeError(`[data-readonly] ${propertyId} is not writable.`);
+    const scope = scopeKey(options.scopePath), key = runtimePropertyKey(scope, instance.id, property.id);
+    const count = (this.#triggers.get(key) || 0) + 1;
+    this.#triggers.set(key, count); this.#invalidateDependency(key);
     const endpoint = { kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] };
-    this.#markDataPropertyDirty(document, scope, instance.id, property.id);
     this.#notify({ target: endpoint, oldValue: false, newValue: true, event: 'trigger', sequence: count, source: String(options.source || 'runtime'), provenance: clone(options.provenance || null), runtimeScope: createDataRuntimeScope(options.scopePath || []) });
     return count;
   }
+
   reset(options = {}) {
-    const scope = scopeKey(options.scopePath); const prefix = `${scope}|`;
-    for (const map of [this.#values, this.#triggers, this.#lists, this.#propertyGroupValues, this.#bindingCache, this.#sourceSnapshots, this.#authoredSignatures]) for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
-    this.#dirty.delete(scope);
-    this.#notify({ target: { kind: 'runtimeScope', key: scope }, oldValue: null, newValue: null, event: 'reset', source: String(options.source || 'runtime'), runtimeScope: createDataRuntimeScope(options.scopePath || []) });
+    const path = scopePath(options.scopePath || []), scope = scopeKey(path);
+    const matches = key => {
+      if (!options.subtree) return key === scope;
+      const candidate = scopeFromKey(key);
+      return candidate.length >= path.length && path.every((ref, i) => candidate[i].kind === ref.kind && candidate[i].id === ref.id);
+    };
+    for (const map of [this.#values, this.#triggers, this.#lists, this.#listSequences, this.#propertyGroupValues]) {
+      for (const key of map.keys()) if (matches(JSON.parse(key)[0])) map.delete(key);
+    }
+    for (const [key, bucket] of this.#buckets) if (matches(bucket.scope)) { this.#dropBucket(bucket); this.#buckets.delete(key); }
+    this.#notify({ target: { kind: 'runtimeScope', key: scope }, oldValue: null, newValue: null, event: 'reset', source: String(options.source || 'runtime'), runtimeScope: createDataRuntimeScope(path) });
     return true;
   }
 
-  #index(document, artboardId) {
-    const signature = bindingIndexSignature(document, artboardId); const key = `${artboardId}|${signature}`;
-    if (this.#indexes.has(key)) return this.#indexes.get(key);
-    const index = buildRuntimeIndex(document, artboardId); this.#indexes.clear(); this.#indexes.set(key, index); this.#stats.graphBuilds += 1; return index;
+  #index(artboardId) {
+    const catalog = this.#authored();
+    let entry = this.#indexes.get(artboardId);
+    if (entry?.catalog === catalog) return entry.index;
+    const bindings = catalog.byArtboard.get(artboardId) || [];
+    const signatures = new Map(bindings.map(binding => [binding.id, bindingSignature(binding, catalog.converters)]));
+    this.#stats.signatureBuilds += 1; this.#stats.bindingsExamined += bindings.length;
+    const signature = stableString([...signatures].sort(([a], [b]) => a.localeCompare(b)));
+    if (!entry || entry.signature !== signature) {
+      const index = { ...buildRuntimeIndex(bindings), signatures };
+      this.#stats.graphBuilds += 1; this.#stats.bindingsExamined += bindings.length;
+      entry = { signature, catalog, index };
+    } else entry = { ...entry, catalog };
+    this.#indexes.set(artboardId, entry);
+    return entry.index;
   }
-  #ensureAuthoredGeneration(document, artboardId, scope, index) {
-    const signature = authoredRuntimeSignature(document, artboardId);
-    const key = `${scope}|${artboardId}`;
-    const previous = this.#authoredSignatures.get(key);
-    if (previous === signature) return false;
-    this.#authoredSignatures.set(key, signature);
-    if (previous === undefined) return false;
-    const cachePrefix = `${scope}|`;
-    for (const cacheKey of [...this.#bindingCache.keys()]) if (cacheKey.startsWith(cachePrefix)) this.#bindingCache.delete(cacheKey);
-    const snapshotPrefix = `${scope}|${artboardId}|`;
-    for (const snapshotKey of [...this.#sourceSnapshots.keys()]) if (snapshotKey.startsWith(snapshotPrefix)) this.#sourceSnapshots.delete(snapshotKey);
-    const dirty = this.#dirty.get(scope) || new Set();
-    for (const binding of index.winners) dirty.add(binding.id);
-    this.#dirty.set(scope, dirty);
-    this.#stats.authoredInvalidations += index.winners.length;
-    this.#stats.dirtyInvalidations += index.winners.length;
-    return true;
-  }
-  #cascadeDirty(index, dirty, bindingIds) {
-    const queue = [...bindingIds]; const seen = new Set();
-    while (queue.length) {
-      const current = queue.shift();
-      if (seen.has(current)) continue;
-      seen.add(current); dirty.add(current);
-      for (const next of index.downstream.get(current) || []) queue.push(next);
+  #cascadeDirty(bucket, ids) {
+    const queue = [...ids], seen = new Set(); let added = 0;
+    for (let i = 0; i < queue.length; i += 1) {
+      const id = queue[i]; if (seen.has(id)) continue;
+      seen.add(id);
+      if (!bucket.dirty.has(id)) { bucket.dirty.add(id); added += 1; }
+      for (const next of bucket.index.downstream.get(id) || []) { this.#stats.dependencyEdgesVisited += 1; queue.push(next); }
     }
-    return seen.size;
+    this.#stats.dirtyInvalidations += added;
+    return added;
   }
-  #markDirty(document, artboardId, scope, sourceKey) {
-    const bindings = (document.bindings || []).filter((item) => item.enabled && item.artboard.id === artboardId);
-    if (!bindings.length) return;
-    const index = this.#index(document, artboardId);
-    const dirty = this.#dirty.get(scope) || new Set();
-    const count = this.#cascadeDirty(index, dirty, index.bySource.get(sourceKey) || []);
-    this.#dirty.set(scope, dirty); this.#stats.dirtyInvalidations += count;
+  #invalidateDependency(key) {
+    for (const [bucketKey, ids] of this.#dependents.get(key) || []) {
+      const bucket = this.#buckets.get(bucketKey); if (!bucket) continue;
+      this.#stats.dependencyEdgesVisited += ids.size;
+      this.#cascadeDirty(bucket, ids);
+    }
   }
-  #dataEndpointTouches(document, endpoint, scope, instanceId, propertyId) {
-    let instance = viewModelInstanceById(document, endpoint.instance.id);
-    if (!instance) return false;
-    for (let index = 0; index < endpoint.path.length; index += 1) {
-      const model = viewModelById(document, instance.viewModel.id);
-      const property = model?.properties.find((item) => item.id === endpoint.path[index].id) || null;
-      if (!property) return false;
-      if (instance.id === instanceId && property.id === propertyId) return true;
-      if (index >= endpoint.path.length - 1) break;
-      if (property.type !== 'viewModel') return false;
+  #unregister(bucket, id) {
+    for (const key of bucket.dependencies.get(id) || []) {
+      const owners = this.#dependents.get(key), ids = owners?.get(bucket.key);
+      ids?.delete(id);
+      if (ids?.size === 0) owners.delete(bucket.key);
+      if (owners?.size === 0) this.#dependents.delete(key);
+    }
+    bucket.dependencies.delete(id);
+  }
+  #register(bucket, id, dependencies) {
+    this.#unregister(bucket, id);
+    bucket.dependencies.set(id, dependencies);
+    for (const key of dependencies) {
+      if (!this.#dependents.has(key)) this.#dependents.set(key, new Map());
+      const owners = this.#dependents.get(key);
+      if (!owners.has(bucket.key)) owners.set(bucket.key, new Set());
+      owners.get(bucket.key).add(id);
+    }
+  }
+  #dropBucket(bucket) { for (const id of bucket.dependencies.keys()) this.#unregister(bucket, id); }
+  #bucket(scope, artboardId, index) {
+    const key = runtimeBucketKey(scope, artboardId);
+    let bucket = this.#buckets.get(key);
+    if (!bucket) {
+      bucket = { key, scope, artboardId, index, catalog: null, cache: new Map(), dirty: new Set(), dependencies: new Map() };
+      this.#buckets.set(key, bucket);
+    }
+    if (bucket.index !== index) {
+      bucket.index = index;
+      for (const id of bucket.cache.keys()) if (!index.byId.has(id)) { this.#unregister(bucket, id); bucket.cache.delete(id); bucket.dirty.delete(id); }
+    }
+    return bucket;
+  }
+
+  #dataEndpointValue(endpoint, scope, virtual, triggerReads, dependencies) {
+    let instanceId = endpoint.instance.id, value;
+    for (let i = 0; i < endpoint.path.length; i += 1) {
+      const { instance, property } = this.#instanceProperty(instanceId, endpoint.path[i].id);
+      this.#stats.pathSegmentsVisited += 1;
       const key = runtimePropertyKey(scope, instance.id, property.id);
-      const nested = this.#values.has(key) ? this.#values.get(key) : initialValueFor(document, instance, property);
-      if (nested?.kind !== 'viewModelInstance') return false;
-      instance = viewModelInstanceById(document, nested.id);
-      if (!instance) return false;
-    }
-    return false;
-  }
-  #markDataPropertyDirty(document, scope, instanceId, propertyId) {
-    const artboards = [...new Set((document.bindings || []).filter((item) => item.enabled && item.source.kind === 'data').map((item) => item.artboard.id))].sort();
-    for (const artboardId of artboards) {
-      const index = this.#index(document, artboardId);
-      const ids = index.winners.filter((binding) => binding.source.kind === 'data' && this.#dataEndpointTouches(document, binding.source, scope, instanceId, propertyId)).map((binding) => binding.id);
-      if (!ids.length) continue;
-      const dirty = this.#dirty.get(scope) || new Set();
-      const count = this.#cascadeDirty(index, dirty, ids);
-      this.#dirty.set(scope, dirty); this.#stats.dirtyInvalidations += count;
-    }
-  }
-  #dataEndpointValue(document, endpoint, scope, triggerReads) {
-    let instance = viewModelInstanceById(document, endpoint.instance.id);
-    if (!instance) throw new TypeError(`[binding-runtime-source] missing View Model instance ${endpoint.instance.id}.`);
-    let value;
-    for (let index = 0; index < endpoint.path.length; index += 1) {
-      const model = viewModelById(document, instance.viewModel.id); const property = model?.properties.find((item) => item.id === endpoint.path[index].id);
-      if (!property) throw new TypeError(`[binding-runtime-source] missing property ${endpoint.path[index].id}.`);
-      if (property.type === 'trigger') {
-        const key = runtimePropertyKey(scope, instance.id, property.id);
-        const count = this.#triggers.get(key) || 0;
-        value = count > 0;
-        if (count > 0) triggerReads.set(key, bindingEndpointKey({ kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] }));
-      } else {
-        const key = runtimePropertyKey(scope, instance.id, property.id); value = clone(this.#values.has(key) ? this.#values.get(key) : initialValueFor(document, instance, property));
+      dependencies?.add(key);
+      const direct = { kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] };
+      const prefix = { ...endpoint, path: endpoint.path.slice(0, i + 1) };
+      const virtualKey = virtual.has(bindingEndpointKey(prefix)) ? bindingEndpointKey(prefix) : bindingEndpointKey(direct);
+      if (virtual.has(virtualKey)) value = clone(virtual.get(virtualKey));
+      else {
+        value = this.#value(instance, property, scope);
+        if (property.type === 'trigger' && value) triggerReads?.add(key);
       }
-      if (index < endpoint.path.length - 1) {
+      if (value?.kind === 'list') dependencies?.add(runtimeListKey(scope, value.id));
+      if (i < endpoint.path.length - 1) {
         if (property.type !== 'viewModel' || value?.kind !== 'viewModelInstance') throw new TypeError(`[binding-runtime-path] ${property.id} does not resolve a nested View Model instance.`);
-        instance = viewModelInstanceById(document, value.id);
-        if (!instance) throw new TypeError(`[binding-runtime-path] missing nested instance ${value.id}.`);
+        instanceId = value.id;
       }
     }
     return clone(value);
   }
-  #endpointValue(document, endpoint, scope, virtual, triggerReads) {
-    const key = bindingEndpointKey(endpoint); if (virtual.has(key)) return clone(virtual.get(key));
-    if (endpoint.kind === 'data') return this.#dataEndpointValue(document, endpoint, scope, triggerReads);
-    if (endpoint.kind === 'propertyGroupProperty') return this.#propertyGroupValue(document, endpoint.property.id, scope);
+  resolveDataEndpoint(endpointInput, options = {}) {
+    const endpoint = normalizeBindingEndpoint(endpointInput);
+    if (endpoint.kind !== 'data') throw new TypeError('resolveDataEndpoint requires a data endpoint.');
+    let instanceId = endpoint.instance.id;
+    for (let i = 0; i < endpoint.path.length; i += 1) {
+      const { instance, property } = this.#instanceProperty(instanceId, endpoint.path[i].id);
+      if (i === endpoint.path.length - 1) return { instance: createReference('viewModelInstance', instance.id), property: createReference('dataProperty', property.id), type: property.type, writable: property.writable !== false, runtimeScope: createDataRuntimeScope(options.scopePath || []) };
+      const next = this.#value(instance, property, scopeKey(options.scopePath));
+      if (property.type !== 'viewModel' || next?.kind !== 'viewModelInstance') throw new TypeError(`[binding-runtime-path] ${property.id} does not resolve a nested View Model instance.`);
+      instanceId = next.id;
+    }
+  }
+  #endpointValue(document, endpointInput, scope, virtual, triggerReads = null, dependencies = null) {
+    const endpoint = normalizeBindingEndpoint(endpointInput), key = bindingEndpointKey(endpoint);
+    if (virtual.has(key)) return clone(virtual.get(key));
+    if (endpoint.kind === 'data') return this.#dataEndpointValue(endpoint, scope, virtual, triggerReads, dependencies);
+    if (endpoint.kind === 'propertyGroupProperty') {
+      dependencies?.add(runtimePropertyGroupKey(scope, endpoint.property.id));
+      return this.#propertyGroupValue(document, endpoint.property.id, scope);
+    }
     return readDataAwareAddress(document, endpoint.address);
   }
+  #list(document, listId, scope) {
+    const authored = listById(document, listId);
+    if (!authored) throw new TypeError(`Unknown list ${listId}.`);
+    return this.#lists.get(runtimeListKey(scope, listId)) || authored.items;
+  }
+  #sourceToken(document, binding, scope, derived) {
+    const lists = binding.converterChain.map(ref => this.#authored().converters.get(ref.id))
+      .filter(converter => converter?.type === 'numberToListIndex')
+      .map(converter => [converter.config.list.id, this.#list(document, converter.config.list.id, scope)]);
+    const value = derived ? undefined : this.#endpointValue(document, binding.source, scope, new Map());
+    if (!derived && value?.kind === 'list') lists.push([value.id, this.#list(document, value.id, scope)]);
+    return stableString({ value, lists });
+  }
+
+  // Explicit binding advancement consumes at most one pulse per terminal trigger
+  // in this (artboard, scope) advance, irrespective of direct/nested fan-out.
   evaluateBindings(document, options = {}) {
-    const artboardId = String(options.artboardId || document.artboards?.[0]?.id || ''); const relevant = (document.bindings || []).filter((item) => item.enabled && item.artboard.id === artboardId);
+    if (options.observe) return this.peekBindings(document, options);
     this.#stats.evaluations += 1;
-    if (!relevant.length) { this.#stats.zeroBindingFastPaths += 1; return { overrides: {}, ownership: {}, diagnostics: { conflicts: [], errors: [] }, stats: { evaluatedBindings: 0, cacheHits: 0, sourceInvalidations: 0, graphBuilt: false, zeroBindingFastPath: true } }; }
-    const index = this.#index(document, artboardId); const scope = scopeKey(options.scopePath);
-    this.#ensureAuthoredGeneration(document, artboardId, scope, index);
-    let dirty = this.#dirty.get(scope);
-    if (!dirty) { dirty = new Set(index.winners.map((item) => item.id)); this.#dirty.set(scope, dirty); }
-    for (const binding of index.winners) if (!this.#bindingCache.has(runtimeBindingKey(scope, binding.id))) dirty.add(binding.id);
-
+    const empty = () => { this.#stats.zeroBindingFastPaths += 1; return { overrides: {}, ownership: {}, virtualValues: {}, diagnostics: { conflicts: [], errors: [] }, stats: { evaluatedBindings: 0, cacheHits: 0, sourceInvalidations: 0, graphBuilt: false, zeroBindingFastPath: true } }; };
+    if (!(this.#document().bindings || []).length) return empty();
+    const catalog = this.#authored();
+    const artboardId = String(options.artboardId || document.artboards?.[0]?.id || '');
+    if (!catalog.enabledArtboards.has(artboardId)) return empty();
+    const buildsBefore = this.#stats.graphBuilds, index = this.#index(artboardId), scope = scopeKey(options.scopePath);
+    const bucket = this.#bucket(scope, artboardId, index), authoredChanged = bucket.catalog !== catalog;
     let sourceInvalidations = 0;
-    const checkedSources = new Set();
     for (const binding of index.ordered) {
-      if (binding.source.kind === 'data') continue;
-      const sourceKey = bindingEndpointKey(binding.source);
-      if (checkedSources.has(sourceKey) || index.byTarget.has(sourceKey)) continue;
-      checkedSources.add(sourceKey);
-      const snapshotKey = `${scope}|${artboardId}|${sourceKey}`;
-      const current = this.#endpointValue(document, binding.source, scope, new Map(), new Map());
-      this.#stats.sourceChecks += 1;
-      if (!this.#sourceSnapshots.has(snapshotKey)) { this.#sourceSnapshots.set(snapshotKey, clone(current)); continue; }
-      const previous = this.#sourceSnapshots.get(snapshotKey);
-      if (stableString(previous) !== stableString(current)) {
-        this.#sourceSnapshots.set(snapshotKey, clone(current));
-        const invalidated = this.#cascadeDirty(index, dirty, index.bySource.get(sourceKey) || []);
-        sourceInvalidations += invalidated;
-        this.#stats.sourceInvalidations += invalidated;
-        this.#stats.dirtyInvalidations += invalidated;
-      }
-    }
-
-    const virtual = new Map(); const overrides = {}; const ownership = {}; const triggerReads = new Map(); let evaluatedBindings = 0; let cacheHits = 0;
-    for (const binding of index.ordered) {
-      const cacheKey = runtimeBindingKey(scope, binding.id); let output;
-      if (!dirty.has(binding.id) && this.#bindingCache.has(cacheKey)) { output = clone(this.#bindingCache.get(cacheKey)); cacheHits += 1; this.#stats.cacheHits += 1; }
-      else {
-        output = this.#endpointValue(document, binding.source, scope, virtual, triggerReads);
-        for (const ref of binding.converterChain) output = converterValue(document, converterById(document, ref.id), output);
-        this.#bindingCache.set(cacheKey, clone(output)); evaluatedBindings += 1; this.#stats.bindingEvaluations += 1;
-      }
-      const targetKey = bindingEndpointKey(binding.target); virtual.set(targetKey, clone(output));
-      if (binding.target.kind === 'property') {
-        overrides[binding.target.address] = clone(output);
-        ownership[binding.target.address] = {
-          kind: 'data-binding', ref: createReference('binding', binding.id), mode: binding.mode,
-          source: clone(binding.source), converters: binding.converterChain.map((ref) => clone(ref)), target: clone(binding.target), runtimeScope: createDataRuntimeScope(options.scopePath || []),
-        };
-      } else if (binding.target.kind === 'propertyGroupProperty') {
-        const address = `propertyGroupProperty:${encodeURIComponent(binding.target.property.id)}/value`;
-        overrides[address] = clone(output);
-        ownership[address] = { kind: 'data-binding', ref: createReference('binding', binding.id), mode: binding.mode, source: clone(binding.source), converters: binding.converterChain.map((ref) => clone(ref)), target: clone(binding.target), runtimeScope: createDataRuntimeScope(options.scopePath || []) };
-      }
-      dirty.delete(binding.id);
-    }
-    if (triggerReads.size) {
-      for (const [key, endpointKey] of triggerReads) {
-        const count = this.#triggers.get(key) || 0;
-        const remaining = Math.max(0, count - 1);
-        if (remaining) this.#triggers.set(key, remaining); else this.#triggers.delete(key);
-        this.#stats.triggerPulsesConsumed += count > 0 ? 1 : 0;
-        this.#cascadeDirty(index, dirty, index.bySource.get(endpointKey) || []);
-      }
-    }
-    this.#dirty.set(scope, dirty);
-    return { overrides, ownership, virtualValues: Object.fromEntries([...virtual.entries()].map(([key, value]) => [key, clone(value)])), diagnostics: { conflicts: clone(index.conflicts), errors: [] }, stats: { evaluatedBindings, cacheHits, sourceInvalidations, graphBuilt: true, zeroBindingFastPath: false } };
-  }
-  setTwoWayTarget(bindingId, value, options = {}) {
-    const document = this.#document(); const binding = bindingById(document, bindingId);
-    if (!binding || binding.mode !== 'twoWay' || !binding.enabled) throw new TypeError(`[binding-two-way-unavailable] ${bindingId} is not an enabled two-way binding.`);
-    const capabilities = bindingEndpointCapabilities(document, binding.source);
-    if (!capabilities.reverseWritable) throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(binding.source)} has no deterministic reverse-write port.`);
-    if (binding.source.kind === 'data') {
-      let instanceId = binding.source.instance.id;
-      for (let index = 0; index < binding.source.path.length; index += 1) {
-        const propertyId = binding.source.path[index].id;
-        const { instance, property } = this.#instanceProperty(document, instanceId, propertyId);
-        if (index === binding.source.path.length - 1) {
-          return this.setValue(instance.id, property.id, value, { ...options, source: options.source || 'two-way-binding', provenance: { binding: createReference('binding', binding.id), ...(options.provenance || {}) } });
+      this.#stats.bindingsExamined += 1;
+      const entry = bucket.cache.get(binding.id), derived = index.byTarget.has(bindingEndpointKey(binding.source));
+      if (!entry || entry.signature !== index.signatures.get(binding.id) || entry.derived !== derived) {
+        if (!bucket.catalog) bucket.dirty.add(binding.id); // cold work is not invalidation
+        else this.#cascadeDirty(bucket, [binding.id]);
+      } else if (authoredChanged || (!derived && binding.source.kind !== 'data')) {
+        this.#stats.sourceChecks += 1;
+        const token = this.#sourceToken(document, binding, scope, derived);
+        if (entry.sourceToken !== token) {
+          const added = this.#cascadeDirty(bucket, [binding.id]); sourceInvalidations += added;
+          if (authoredChanged) this.#stats.authoredInvalidations += added;
         }
-        if (property.type !== 'viewModel') throw new TypeError(`[binding-two-way-source] ${property.id} is not a nested View Model property.`);
-        const nested = this.getValue(instance.id, property.id, options);
-        if (nested?.kind !== 'viewModelInstance') throw new TypeError(`[binding-two-way-source] ${property.id} does not resolve a nested View Model instance in this runtime scope.`);
-        instanceId = nested.id;
       }
     }
-    if (binding.source.kind === 'propertyGroupProperty') {
-      const property = propertyGroupPropertyById(document, binding.source.property.id);
-      if (!property) throw new TypeError(`[binding-two-way-source] missing Property Group property ${binding.source.property.id}.`);
-      const normalized = validateTypedValueTarget(document, property, value, `two-way Property Group ${property.id}`);
-      const scope = scopeKey(options.scopePath);
-      const key = runtimePropertyGroupKey(scope, property.id);
-      const oldValue = this.getPropertyGroupValue(property.id, options);
-      if (stableString(oldValue) === stableString(normalized)) return false;
-      this.#propertyGroupValues.set(key, clone(normalized));
-      this.#markDirty(document, binding.artboard.id, scope, bindingEndpointKey(binding.source));
-      this.#notify({ target: clone(binding.source), oldValue, newValue: clone(normalized), source: String(options.source || 'two-way-binding'), provenance: { binding: createReference('binding', binding.id), authoredPropertyGroupWrite: false, runtimePropertyGroupWrite: true, ...(options.provenance || {}) }, runtimeScope: createDataRuntimeScope(options.scopePath || []) });
-      return true;
+    this.#stats.sourceInvalidations += sourceInvalidations;
+    bucket.catalog = catalog;
+    const virtual = new Map(), chains = new Map(), overrides = {}, ownership = {}, triggerReads = new Set();
+    let evaluatedBindings = 0, cacheHits = 0;
+    for (const binding of index.ordered) {
+      this.#stats.bindingsExamined += 1;
+      const derived = index.byTarget.has(bindingEndpointKey(binding.source));
+      let output;
+      if (!bucket.dirty.has(binding.id) && bucket.cache.has(binding.id)) {
+        output = clone(bucket.cache.get(binding.id).value); cacheHits += 1; this.#stats.cacheHits += 1;
+      } else {
+        const dependencies = new Set();
+        output = this.#endpointValue(document, binding.source, scope, virtual, triggerReads, dependencies);
+        for (const ref of binding.converterChain) {
+          const converter = catalog.converters.get(ref.id);
+          this.#stats.converterEvaluations += 1;
+          output = converterValue(document, converter, output, listId => {
+            dependencies.add(runtimeListKey(scope, listId));
+            return this.#list(document, listId, scope);
+          });
+        }
+        this.#register(bucket, binding.id, dependencies);
+        bucket.cache.set(binding.id, { value: clone(output), signature: index.signatures.get(binding.id), derived,
+          sourceToken: this.#sourceToken(document, binding, scope, derived) });
+        evaluatedBindings += 1; this.#stats.bindingEvaluations += 1;
+      }
+      const targetKey = bindingEndpointKey(binding.target);
+      virtual.set(targetKey, clone(output));
+      const stages = [...(chains.get(bindingEndpointKey(binding.source)) || []), {
+        binding: createReference('binding', binding.id), source: clone(binding.source), target: clone(binding.target),
+        converters: clone(binding.converterChain), mode: binding.mode,
+      }];
+      chains.set(targetKey, stages);
+      const address = endpointAddress(binding.target);
+      if (address) {
+        overrides[address] = clone(output);
+        ownership[address] = { kind: 'data-binding', ref: createReference('binding', binding.id), mode: binding.mode,
+          source: clone(binding.source), converters: clone(binding.converterChain), target: clone(binding.target),
+          chain: stages, runtimeScope: createDataRuntimeScope(scopeFromKey(scope)) };
+      }
+      this.#stats.outputApplications += 1;
+      bucket.dirty.delete(binding.id);
     }
-    throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(binding.source)} has no deterministic reverse-write port.`);
+    // Use the same terminal dependency index on fire AND consume/settle.
+    for (const key of triggerReads) {
+      const count = this.#triggers.get(key) || 0;
+      if (count > 1) this.#triggers.set(key, count - 1); else this.#triggers.delete(key);
+      if (count) this.#stats.triggerPulsesConsumed += 1;
+      this.#invalidateDependency(key);
+    }
+    return { overrides, ownership, virtualValues: Object.fromEntries([...virtual].map(([key, value]) => [key, clone(value)])),
+      diagnostics: { conflicts: clone(index.conflicts), errors: [] },
+      stats: { evaluatedBindings, cacheHits, sourceInvalidations, graphBuilt: this.#stats.graphBuilds > buildsBefore, zeroBindingFastPath: false } };
   }
 
-  #runtimeList(document, listId, scope) {
-    const key = runtimeListKey(scope, listId); if (!this.#lists.has(key)) { const authored = listById(document, listId); if (!authored) throw new TypeError(`Unknown list ${listId}.`); this.#lists.set(key, clone(authored.items)); } return this.#lists.get(key);
+  // Observation shares the evaluator and the live state, but advances only a
+  // private snapshot. No live cache/queue/notification or clock is changed.
+  fork() {
+    const fork = new VeyraDataRuntime(this.#documentSource);
+    fork.#authoredEpoch = this.#authoredEpoch; fork.#catalog = this.#catalog;
+    for (const [name, map] of Object.entries({ values: this.#values, triggers: this.#triggers, lists: this.#lists,
+      listSequences: this.#listSequences, propertyGroupValues: this.#propertyGroupValues })) {
+      const copy = new Map([...map].map(([key, value]) => [key, clone(value)]));
+      if (name === 'values') fork.#values = copy;
+      if (name === 'triggers') fork.#triggers = copy;
+      if (name === 'lists') fork.#lists = copy;
+      if (name === 'listSequences') fork.#listSequences = copy;
+      if (name === 'propertyGroupValues') fork.#propertyGroupValues = copy;
+    }
+    fork.#indexes = new Map(this.#indexes);
+    for (const [key, bucket] of this.#buckets) {
+      const copied = { ...bucket, cache: new Map([...bucket.cache].map(([id, value]) => [id, clone(value)])),
+        dirty: new Set(bucket.dirty), dependencies: new Map() };
+      fork.#buckets.set(key, copied);
+      for (const [id, dependencies] of bucket.dependencies) fork.#register(copied, id, new Set(dependencies));
+    }
+    fork.#stats = clone(this.#stats);
+    return fork;
   }
-  getList(listId, options = {}) { const scope = scopeKey(options.scopePath); return clone(this.#runtimeList(this.#document(), listId, scope)); }
+  peekBindings(document, options = {}) { return this.fork().evaluateBindings(document, { ...options, observe: false }); }
+
+  setTwoWayTarget(bindingId, value, options = {}) {
+    const document = this.#document(), binding = bindingById(document, bindingId);
+    if (!binding || binding.mode !== 'twoWay' || !binding.enabled) throw new TypeError(`[binding-two-way-unavailable] ${bindingId} is not an enabled two-way binding.`);
+    const source = normalizeBindingEndpoint(binding.source), capabilities = bindingEndpointCapabilities(document, source);
+    if (!capabilities.reverseWritable) throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(source)} has no deterministic reverse-write port.`);
+    if (source.kind === 'data') {
+      const terminal = this.resolveDataEndpoint(source, options);
+      return this.setValue(terminal.instance.id, terminal.property.id, value, { ...options, source: options.source || 'two-way-binding', provenance: { ...(options.provenance || {}), binding: createReference('binding', binding.id) } });
+    }
+    if (source.kind === 'propertyGroupProperty') {
+      return this.setPropertyGroupValue(source.property.id, value, { ...options, source: options.source || 'two-way-binding',
+        provenance: { ...(options.provenance || {}), binding: createReference('binding', binding.id) } });
+    }
+    throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(source)} has no deterministic reverse-write port.`);
+  }
+
+  setPropertyGroupValue(propertyId, value, options = {}) {
+    const document = this.#document(), property = propertyGroupPropertyById(document, propertyId);
+    if (!property) throw new TypeError(`[runtime-property-group-missing] ${propertyId} does not exist.`);
+    if (!property.writable || !property.bindable || property.type === 'trigger') throw new TypeError(`[runtime-property-group-readonly] ${propertyId} has no value write port.`);
+    const normalized = validateTypedValueTarget(document, property, value, `runtime Property Group ${propertyId}`);
+    const scope = scopeKey(options.scopePath), key = runtimePropertyGroupKey(scope, propertyId), oldValue = this.getPropertyGroupValue(propertyId, options);
+    if (this.#propertyGroupValues.has(key) && stableString(oldValue) === stableString(normalized)) return false;
+    this.#propertyGroupValues.set(key, clone(normalized)); this.#invalidateDependency(key);
+    this.#notify({ target: { kind: 'propertyGroupProperty', property: createReference('propertyGroupProperty', propertyId) }, oldValue, newValue: clone(normalized),
+      source: String(options.source || 'runtime'), provenance: { ...(options.provenance || {}), authoredPropertyGroupWrite: false, runtimePropertyGroupWrite: true }, runtimeScope: createDataRuntimeScope(options.scopePath || []) });
+    return true;
+  }
+
+  getList(listId, options = {}) { return clone(this.#list(this.#document(), listId, scopeKey(options.scopePath))); }
+  #validateListItem(listId, value) {
+    const document = this.#document(), list = listById(document, listId);
+    if (!list) throw new TypeError(`Unknown list ${listId}.`);
+    const { property } = this.#instanceProperty(list.owner.id, list.property.id);
+    if (!property.writable) throw new TypeError(`[data-readonly] ${property.id} is not writable.`);
+    const descriptor = property.itemType;
+    if (descriptor.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) throw new TypeError('[runtime-list-item-type] number item must be a finite number.');
+    const normalized = validateTypedValueTarget(document, descriptor, value, `runtime list ${listId} item`);
+    if (descriptor.type === 'list' && normalized) {
+      const nested = listById(document, normalized.id), nestedProperty = dataPropertyById(document, nested.property.id);
+      if (stableString(descriptor.itemType) !== stableString(nestedProperty.itemType)) throw new TypeError('[runtime-list-item-type] nested list item schema is incompatible.');
+    }
+    return normalized;
+  }
+  #listIndex(index, maximum) {
+    if (typeof index !== 'number' || !Number.isFinite(index)) throw new TypeError('[runtime-list-index] index must be a finite number.');
+    return Math.max(0, Math.min(maximum, Math.trunc(index)));
+  }
+  #commitList(listId, scope, oldItems, nextItems, change, options) {
+    this.#lists.set(runtimeListKey(scope, listId), clone(nextItems));
+    this.#invalidateDependency(runtimeListKey(scope, listId));
+    this.#notify({ target: createReference('list', listId), event: 'list-change', change: clone(change), oldValue: clone(oldItems), newValue: clone(nextItems), source: options.source || 'runtime-list', provenance: clone(options.provenance || null), runtimeScope: createDataRuntimeScope(scopeFromKey(scope)) });
+  }
   insertListItem(listId, value, index = null, options = {}) {
-    const document = this.#document(); const scope = scopeKey(options.scopePath); const items = this.#runtimeList(document, listId, scope); const at = index == null ? items.length : Math.max(0, Math.min(items.length, Math.trunc(Number(index))));
-    const generation = hash(stableString({ scope, listId, ids: items.map((item) => item.id), at, value })); const item = { id: `listItemRuntime_${generation}`, value: clone(value), persistent: false }; items.splice(at, 0, item); this.#markListDirty(document, listId, scope); return clone(item);
+    const normalized = this.#validateListItem(listId, value), scope = scopeKey(options.scopePath);
+    const oldItems = this.#list(this.#document(), listId, scope), at = index == null ? oldItems.length : this.#listIndex(index, oldItems.length);
+    const key = runtimeListKey(scope, listId); let sequence = this.#listSequences.get(key) || 0, itemId;
+    do { sequence += 1; itemId = `listItemRuntime:${runtimeKey(scope, 'listItem', listId, sequence)}`; } while (oldItems.some(item => item.id === itemId));
+    const item = { id: itemId, value: clone(normalized), persistent: false }, nextItems = clone(oldItems);
+    nextItems.splice(at, 0, item); this.#listSequences.set(key, sequence);
+    this.#commitList(listId, scope, oldItems, nextItems, { operation: 'insert', itemId, index: at }, options);
+    return clone(item);
   }
-  removeListItem(listId, itemId, options = {}) { const document = this.#document(); const scope = scopeKey(options.scopePath); const items = this.#runtimeList(document, listId, scope); const before = items.length; this.#lists.set(runtimeListKey(scope, listId), items.filter((item) => item.id !== itemId)); const changed = before !== this.#lists.get(runtimeListKey(scope, listId)).length; if (changed) this.#markListDirty(document, listId, scope); return changed; }
-  moveListItem(listId, itemId, index, options = {}) { const document = this.#document(); const scope = scopeKey(options.scopePath); const items = this.#runtimeList(document, listId, scope); const from = items.findIndex((item) => item.id === itemId); if (from < 0) return false; const at = Math.max(0, Math.min(items.length - 1, Math.trunc(Number(index)))); const [item] = items.splice(from, 1); items.splice(at, 0, item); this.#markListDirty(document, listId, scope); return true; }
-  replaceListItem(listId, itemId, value, options = {}) { const document = this.#document(); const scope = scopeKey(options.scopePath); const items = this.#runtimeList(document, listId, scope); const item = items.find((candidate) => candidate.id === itemId); if (!item) return false; item.value = clone(value); this.#markListDirty(document, listId, scope); return true; }
-  #markListDirty(document, listId, scope) { const list = listById(document, listId); if (!list) return; this.#markDataPropertyDirty(document, scope, list.owner.id, list.property.id); this.#notify({ target: createReference('list', listId), event: 'list-change', source: 'runtime-list', runtimeScope: { kind: VEYRA_DATA_RUNTIME_SCOPE_KIND, key: scope, path: [] } }); }
+  removeListItem(listId, itemId, options = {}) {
+    const scope = scopeKey(options.scopePath), oldItems = this.#list(this.#document(), listId, scope), from = oldItems.findIndex(item => item.id === itemId);
+    this.#requireListWritable(listId);
+    if (from < 0) return false;
+    const next = clone(oldItems); next.splice(from, 1);
+    this.#commitList(listId, scope, oldItems, next, { operation: 'remove', itemId, index: from }, options); return true;
+  }
+  #requireListWritable(listId) {
+    const list = listById(this.#document(), listId);
+    if (!list) throw new TypeError(`Unknown list ${listId}.`);
+    const { property } = this.#instanceProperty(list.owner.id, list.property.id);
+    if (!property.writable) throw new TypeError(`[data-readonly] ${property.id} is not writable.`);
+  }
+  moveListItem(listId, itemId, index, options = {}) {
+    const scope = scopeKey(options.scopePath), oldItems = this.#list(this.#document(), listId, scope), at = this.#listIndex(index, Math.max(0, oldItems.length - 1));
+    this.#requireListWritable(listId);
+    const from = oldItems.findIndex(item => item.id === itemId); if (from < 0 || from === at) return false;
+    const next = clone(oldItems), [item] = next.splice(from, 1); next.splice(at, 0, item);
+    this.#commitList(listId, scope, oldItems, next, { operation: 'move', itemId, from, index: at }, options); return true;
+  }
+  replaceListItem(listId, itemId, value, options = {}) {
+    const normalized = this.#validateListItem(listId, value), scope = scopeKey(options.scopePath), oldItems = this.#list(this.#document(), listId, scope);
+    const at = oldItems.findIndex(item => item.id === itemId); if (at < 0 || stableString(oldItems[at].value) === stableString(normalized)) return false;
+    const next = clone(oldItems); next[at].value = clone(normalized);
+    this.#commitList(listId, scope, oldItems, next, { operation: 'replace', itemId, index: at }, options); return true;
+  }
 }
 
 export function createVeyraDataRuntime(documentOrGetter) { return new VeyraDataRuntime(documentOrGetter); }
@@ -1381,7 +1546,11 @@ export function dataIndexRelationshipSpecs(document) {
     const enumRef = createReference('enum', item.id); add(enumRef, 'owner', documentRef, 'owns');
     for (const value of item.values) add(createReference('enumValue', value.id), 'owner', enumRef, 'owns');
   }
-  for (const converter of document.converters || []) add(createReference('converter', converter.id), 'owner', documentRef, 'owns');
+  for (const converter of document.converters || []) {
+    const ref = createReference('converter', converter.id);
+    add(ref, 'owner', documentRef, 'owns');
+    if (converter.type === 'numberToListIndex' && converter.config.list) add(ref, 'converter_reads_list', converter.config.list, 'read_by_converter');
+  }
   for (const group of document.propertyGroups || []) {
     const groupRef = createReference('propertyGroup', group.id); add(groupRef, 'owner', group.artboard, 'owns');
     for (const property of group.properties) add(createReference('propertyGroupProperty', property.id), 'owner', groupRef, 'owns');
@@ -1402,10 +1571,8 @@ export function dataIndexRelationshipSpecs(document) {
 }
 
 export function bindingControllersForAddress(document, address) {
-  return (document.bindings || []).filter((binding) => binding.enabled && (
-    (binding.target.kind === 'property' && binding.target.address === address)
-    || (binding.target.kind === 'propertyGroupProperty' && address === `propertyGroupProperty:${encodeURIComponent(binding.target.property.id)}/value`)
-  )).sort(bindingOrder).map((binding, index, all) => ({
+  const canonicalAddress = endpointAddress({ kind: 'property', address });
+  return (document.bindings || []).filter((binding) => binding.enabled && endpointAddress(binding.target) === canonicalAddress).sort(bindingOrder).map((binding, index, all) => ({
     kind: 'data-binding', ref: createReference('binding', binding.id), mode: binding.mode,
     source: clone(binding.source), target: clone(binding.target), converters: binding.converterChain.map((ref) => clone(ref)),
     priority: binding.priority, activeByConflictPolicy: index === 0,

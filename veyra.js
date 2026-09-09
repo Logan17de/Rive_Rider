@@ -1,3 +1,4 @@
+import { createVeyraRuntimeHost } from './src/veyra/runtimeHost.js';
 import {
   cloneValue,
   boneById,
@@ -233,6 +234,7 @@ activeArtboardId = store.document.artboards[0].id;
 if (restored) savedRevision = -1;
 const componentRuntimeRegistry = createComponentRuntimeRegistry(() => store.document);
 const dataRuntime = createVeyraDataRuntime(() => store.document);
+let currentEvaluationLayers = {};
 
 function activeArtboard() {
   return store.document.artboards.find((item) => item.id === activeArtboardId) || store.document.artboards[0];
@@ -2244,7 +2246,7 @@ function renderTimeline() {
   updatePlayhead();
 }
 
-function evaluateCurrentFrame() {
+function evaluateCurrentFrame({ advanceEvents = false } = {}) {
   const timeline = activeTimelineId ? timelineById(store.document, activeTimelineId) : null;
   // While playback is running, honor the per-play loop preview so the canvas
   // and the playhead agree (e.g. looping a loop:'none' authored timeline).
@@ -2256,7 +2258,9 @@ function evaluateCurrentFrame() {
   const runtimeAnimation = machineInteractionBridge.evaluateAll().overrides;
   const animation = { ...manualAnimation, ...runtimeAnimation };
   const layers = Object.keys(animation).length ? { animation } : {};
+  currentEvaluationLayers = cloneValue(layers);
   evaluatedScene = evaluateDocument(store.document, layers, null, {
+    observe: !advanceEvents,
     artboardId: activeArtboard().id,
     componentRuntime: componentRuntimeRegistry,
     dataRuntime,
@@ -2272,7 +2276,7 @@ function setCurrentFrame(frame) {
   currentFrame = Math.max(0, Math.min(frame, timeline.duration));
   updatePlayhead();
   renderTimelineSettings();
-  evaluateCurrentFrame();
+  evaluateCurrentFrame({ advanceEvents: true });
 }
 
 function setPlayButtonState(playing) {
@@ -3519,6 +3523,12 @@ function machineRuntime(machineId) {
 }
 
 const controlPlane = createVeyraControlPlane(store);
+const runtimeHost = createVeyraRuntimeHost({
+  store, dataRuntime, componentRuntime: componentRuntimeRegistry, controlPlane,
+  getContext: () => ({ artboardId: activeArtboard().id, evaluationLayers: currentEvaluationLayers }),
+  onChange: () => evaluateCurrentFrame(),
+  onAdvance: (scene) => { evaluatedScene = scene; renderer.render(scene, store.selectedRef, editorSelection.refs); },
+});
 
 function compactJson(value) {
   if (Array.isArray(value)) return value.map(compactJson);
@@ -3572,16 +3582,19 @@ globalThis.veyra = Object.freeze({
   updateListItem: (listId, itemId, changes) => dispatchCompatibilityCommand('updateListItem', { listId, itemId, changes }, { label: `Update list item ${itemId}`, source: 'script' }),
   removeListItem: (listId, itemId) => dispatchCompatibilityCommand('removeListItem', { listId, itemId }, { label: `Remove list item ${itemId}`, source: 'script' }),
   moveListItem: (listId, itemId, index) => dispatchCompatibilityCommand('moveListItem', { listId, itemId, index }, { label: `Move list item ${itemId}`, source: 'script' }),
-  setDataRuntimeValue: (instanceId, propertyId, value, options = {}) => { const changed = dataRuntime.setValue(instanceId, propertyId, value, options); if (changed) evaluateCurrentFrame(); return changed; },
-  getDataRuntimeValue: (instanceId, propertyId, options = {}) => cloneValue(dataRuntime.getValue(instanceId, propertyId, options)),
-  fireDataTrigger: (instanceId, propertyId, options = {}) => { const sequence = dataRuntime.fire(instanceId, propertyId, options); evaluateCurrentFrame(); return sequence; },
-  resetDataRuntime: (options = {}) => { const result = dataRuntime.reset(options); evaluateCurrentFrame(); return result; },
-  insertRuntimeListItem: (listId, value, index = null, options = {}) => { const result = dataRuntime.insertListItem(listId, value, index, options); evaluateCurrentFrame(); return result; },
-  removeRuntimeListItem: (listId, itemId, options = {}) => { const result = dataRuntime.removeListItem(listId, itemId, options); if (result) evaluateCurrentFrame(); return result; },
-  moveRuntimeListItem: (listId, itemId, index, options = {}) => { const result = dataRuntime.moveListItem(listId, itemId, index, options); if (result) evaluateCurrentFrame(); return result; },
-  replaceRuntimeListItem: (listId, itemId, value, options = {}) => { const result = dataRuntime.replaceListItem(listId, itemId, value, options); if (result) evaluateCurrentFrame(); return result; },
-  setTwoWayBindingTarget: (bindingId, value, options = {}) => { const result = dataRuntime.setTwoWayTarget(bindingId, value, options); if (result) evaluateCurrentFrame(); return result; },
-  getDataRuntimeStats: () => cloneValue(dataRuntime.stats),
+  setDataRuntimeValue: (...args) => runtimeHost.api.setDataRuntimeValue(...args),
+  getDataRuntimeValue: (...args) => runtimeHost.api.getDataRuntimeValue(...args),
+  fireDataTrigger: (...args) => runtimeHost.api.fireDataTrigger(...args),
+  resetDataRuntime: (...args) => runtimeHost.api.resetDataRuntime(...args),
+  insertRuntimeListItem: (...args) => runtimeHost.api.insertRuntimeListItem(...args),
+  removeRuntimeListItem: (...args) => runtimeHost.api.removeRuntimeListItem(...args),
+  moveRuntimeListItem: (...args) => runtimeHost.api.moveRuntimeListItem(...args),
+  replaceRuntimeListItem: (...args) => runtimeHost.api.replaceRuntimeListItem(...args),
+  setPropertyGroupRuntimeValue: (...args) => runtimeHost.api.setPropertyGroupRuntimeValue(...args),
+  setTwoWayBindingTarget: (...args) => runtimeHost.api.setTwoWayBindingTarget(...args),
+  getRuntimeList: (...args) => runtimeHost.api.getRuntimeList(...args),
+  advanceDataRuntime: (...args) => runtimeHost.api.advanceDataRuntime(...args),
+  getDataRuntimeStats: (...args) => runtimeHost.api.getDataRuntimeStats(...args),
   getActiveArtboard: () => cloneValue(activeArtboard()),
   setActiveArtboard: (artboardId, { fit = true } = {}) => {
     if (!store.document.artboards.some((item) => item.id === artboardId)) throw new TypeError(`Unknown artboard ${artboardId}.`);
@@ -3636,18 +3649,18 @@ globalThis.veyra = Object.freeze({
   getManifest: (options = {}) => controlPlane.getManifest(options),
   queryEntities: (query = {}, options = {}) => controlPlane.queryEntities(query, options),
   resolveSemantic: (intent, options = {}) => controlPlane.resolveSemantic(intent, options),
-  read: (refOrAddress, options = {}) => controlPlane.read(refOrAddress, options),
+  read: (refOrAddress, options = {}) => controlPlane.read(refOrAddress, runtimeHost.readOptions(options)),
   previewCommand: (command, options = {}) => controlPlane.previewCommand(command, options),
   dispatchCommand: (command) => controlPlane.dispatchCommand(command),
   dispatchPlan: (commands, policy = {}) => controlPlane.dispatchPlan(commands, policy),
   validateDocument: () => controlPlane.validateDocument(),
   verifyChange: (expected, options = {}) => controlPlane.verifyChange(expected, options),
   getDependencyGraph: (refOrAddress = null, options = {}) => controlPlane.getDependencyGraph(refOrAddress, options),
-  getOwnership: (refOrAddress, options = {}) => controlPlane.getOwnership(refOrAddress, options),
+  getOwnership: (refOrAddress, options = {}) => controlPlane.getOwnership(refOrAddress, runtimeHost.readOptions(options)),
   getSceneSummary: (options = {}) => createSceneSummary(store.document, options),
   getSemanticIndex: (options = {}) => buildSemanticIndex(store.document, options),
   getDocument: () => cloneValue(store.document),
-  getEvaluatedScene: () => cloneValue(evaluateDocument(store.document, {}, null, { artboardId: activeArtboard().id, componentRuntime: componentRuntimeRegistry, dataRuntime })),
+  getEvaluatedScene: (options = {}) => runtimeHost.api.getEvaluatedScene(options),
   readProperty: (address) => controlPlane.read(address).authoredValue,
   addListener: (overrides) => dispatchCompatibilityCommand('addListener', { overrides }, { label: 'Add listener', source: 'script' }),
   updateListener: (listenerId, changes) => dispatchCompatibilityCommand('updateListener', { listenerId, changes }, { label: `Update listener ${listenerId}`, source: 'script' }),

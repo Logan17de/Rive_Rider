@@ -154,6 +154,16 @@ export class MachineRuntime {
     this.#resetRuntime(machine);
   }
 
+  // Read-only hosts reconcile only this private snapshot, never the live clock
+  // or its invalidation listeners. The evaluator remains unchanged.
+  fork() {
+    const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId);
+    snapshot.#overrideValues = new Map([...this.#overrideValues].map(([key, value]) => [key, cloneValue(value)]));
+    snapshot.#stateId = this.#stateId; snapshot.#stateTime = this.#stateTime;
+    snapshot.#transition = cloneValue(this.#transition); snapshot.#signature = this.#signature;
+    return snapshot;
+  }
+
   get machineId() {
     return this.#machineId;
   }

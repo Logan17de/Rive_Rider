@@ -345,7 +345,7 @@ check('26 static browser integration routes persistent M8 writes through dispatc
 
 check('27 runtime scopes are canonical and deterministic', () => {
   const scope = createDataRuntimeScope([ref('componentInstance','outer')]);
-  assert.deepEqual(scope,{kind:'dataRuntimeScope',key:'componentInstance:outer',path:[ref('componentInstance','outer')]});
+  assert.deepEqual(scope,{kind:'dataRuntimeScope',key:JSON.stringify([['componentInstance','outer']]),path:[ref('componentInstance','outer')]});
 });
 
 check('28 validation catches missing nested View Model and list references', () => {
