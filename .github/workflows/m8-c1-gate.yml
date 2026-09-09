@@ -23,7 +23,9 @@ jobs:
           python scripts/apply-m8-c1.py
           python scripts/apply-m8-c1-cycle-fix.py
           python scripts/apply-m8-c1-ownership-fix.py
+          python scripts/apply-m8-c1-twoway-boundary.py
           python scripts/fix-m8-c1-tests.py
+          python scripts/apply-m8-c1-coverage-completion.py
       - name: Install
         run: npm ci
       - name: Syntax gate
