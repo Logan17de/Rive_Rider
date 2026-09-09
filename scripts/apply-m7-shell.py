@@ -267,11 +267,9 @@ new = """    } else if (node.type === 'path') {
           field('Corner radius', activeVertex.cornerRadius || 0, (value) => projectCommand('setVertexCornerRadius', { nodeId: node.id, vertexId: activeVertex.id, radius: value }, `Set ${node.name} vertex radius`), { type: 'number', number: true, min: 0, step: 1 }),
         );
       }
-      const summary = document.createElement('div');
-      summary.className = 'vertexSummary';
-      summary.innerHTML = `<span>Stable authored vertices</span><strong>${node.geometry.vertices.length}</strong>`;
-      const actions = document.createElement('div');
-      actions.className = 'pathVertexActions';
+      const summary = document.createElement('div'); summary.className = 'vertexSummary';
+      summary.innerHTML = `<span>Stable pathVertex refs</span><strong>${node.geometry.vertices.length}</strong>`;
+      const actions = document.createElement('div'); actions.className = 'pathVertexActions';
       actions.append(
         inspectorAction('Add vertex', 'plus', () => addPathVertex(node)),
         inspectorAction('Remove vertex', 'minus', () => removePathVertex(node)),
@@ -380,7 +378,7 @@ function finishPenDraft({ closed = false, enterVertex = true, reason = 'finish' 
     return false;
   }
   const geometry = finalizePenDraftGeometry(createPenDraft(draftPathPoints), { closed });
-  const nodeId = projectCommand('add', {
+  const created = projectCommand('add', {
     type: 'path',
     options: {
       artboard: activeArtboardRef(),
@@ -390,7 +388,8 @@ function finishPenDraft({ closed = false, enterVertex = true, reason = 'finish' 
       geometry,
     },
   }, `Draw path (${reason})`);
-  if (!nodeId) return false;
+  const nodeId = created?.id || created;
+  if (!nodeId || !nodeById(store.document, nodeId)) return false;
   draftPathPoints = [];
   renderer.setDraftPath([]);
   const node = nodeById(store.document, nodeId);
