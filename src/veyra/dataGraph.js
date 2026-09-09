@@ -921,6 +921,26 @@ function bindingIndexSignature(document, artboardId) {
   const converters = (document.converters || []).map((item) => ({ id: item.id, type: item.type, inputType: item.inputType, outputType: item.outputType, config: item.config }));
   return hash(stableString({ bindings, converters }));
 }
+function authoredRuntimeSignature(document, artboardId) {
+  const viewModels = (document.viewModels || []).map((model) => ({
+    id: model.id,
+    properties: model.properties.map((property) => ({
+      id: property.id, type: property.type, readable: property.readable, writable: property.writable, bindable: property.bindable,
+      defaultValue: property.defaultValue, min: property.min, max: property.max, enum: property.enum, viewModel: property.viewModel, itemType: property.itemType,
+    })),
+  }));
+  const viewModelInstances = (document.viewModelInstances || []).map((instance) => ({
+    id: instance.id, viewModel: instance.viewModel, artboard: instance.artboard, initialValues: instance.initialValues,
+  }));
+  const propertyGroups = (document.propertyGroups || []).filter((group) => group.artboard.id === artboardId).map((group) => ({
+    id: group.id, artboard: group.artboard, properties: group.properties.map((property) => ({
+      id: property.id, type: property.type, readable: property.readable, writable: property.writable, bindable: property.bindable, keyable: property.keyable,
+      min: property.min, max: property.max, enum: property.enum, viewModel: property.viewModel, itemType: property.itemType,
+    })),
+  }));
+  const lists = (document.lists || []).map((list) => ({ id: list.id, owner: list.owner, property: list.property, items: list.items }));
+  return hash(stableString({ bindingIndex: bindingIndexSignature(document, artboardId), viewModels, viewModelInstances, propertyGroups, lists }));
+}
 function bindingOrder(left, right) { return right.priority - left.priority || left.id.localeCompare(right.id); }
 function buildRuntimeIndex(document, artboardId) {
   const all = (document.bindings || []).filter((item) => item.enabled && item.artboard.id === artboardId).sort((a, b) => a.id.localeCompare(b.id));
@@ -969,6 +989,7 @@ function buildRuntimeIndex(document, artboardId) {
 }
 
 function runtimePropertyKey(scope, instanceId, propertyId) { return `${scope}|${instanceId}|${propertyId}`; }
+function runtimePropertyGroupKey(scope, propertyId) { return `${scope}|propertyGroupProperty|${propertyId}`; }
 function runtimeListKey(scope, listId) { return `${scope}|${listId}`; }
 function runtimeBindingKey(scope, bindingId) { return `${scope}|${bindingId}`; }
 
@@ -977,14 +998,16 @@ export class VeyraDataRuntime {
   #values = new Map();
   #triggers = new Map();
   #lists = new Map();
+  #propertyGroupValues = new Map();
   #indexes = new Map();
   #bindingCache = new Map();
   #sourceSnapshots = new Map();
+  #authoredSignatures = new Map();
   #dirty = new Map();
   #subscribers = new Set();
   #batchDepth = 0;
   #pending = [];
-  #stats = { graphBuilds: 0, evaluations: 0, bindingEvaluations: 0, cacheHits: 0, dirtyInvalidations: 0, sourceChecks: 0, sourceInvalidations: 0, triggerPulsesConsumed: 0, notifications: 0, zeroBindingFastPaths: 0 };
+  #stats = { graphBuilds: 0, evaluations: 0, bindingEvaluations: 0, cacheHits: 0, dirtyInvalidations: 0, authoredInvalidations: 0, sourceChecks: 0, sourceInvalidations: 0, triggerPulsesConsumed: 0, notifications: 0, zeroBindingFastPaths: 0 };
 
   constructor(documentOrGetter) { this.#documentSource = documentOrGetter; }
   #document() { return typeof this.#documentSource === 'function' ? this.#documentSource() : this.#documentSource; }
@@ -1017,6 +1040,18 @@ export class VeyraDataRuntime {
     const key = runtimePropertyKey(scope, instance.id, property.id);
     return clone(this.#values.has(key) ? this.#values.get(key) : initialValueFor(document, instance, property));
   }
+  #propertyGroupValue(document, propertyId, scope) {
+    const property = propertyGroupPropertyById(document, propertyId);
+    if (!property) throw new TypeError(`Runtime Property Group target ${propertyId} does not exist.`);
+    const key = runtimePropertyGroupKey(scope, property.id);
+    return clone(this.#propertyGroupValues.has(key) ? this.#propertyGroupValues.get(key) : property.value);
+  }
+  getPropertyGroupValue(propertyId, options = {}) {
+    return this.#propertyGroupValue(this.#document(), propertyId, scopeKey(options.scopePath));
+  }
+  hasPropertyGroupOverride(propertyId, options = {}) {
+    return this.#propertyGroupValues.has(runtimePropertyGroupKey(scopeKey(options.scopePath), propertyId));
+  }
   setValue(instanceId, propertyId, value, options = {}) {
     const document = this.#document(); const { instance, property } = this.#instanceProperty(document, instanceId, propertyId);
     if (!property.writable) throw new TypeError(`[data-readonly] ${propertyId} is not writable.`);
@@ -1026,7 +1061,7 @@ export class VeyraDataRuntime {
     if (stableString(oldValue) === stableString(normalized)) return false;
     this.#values.set(key, clone(normalized));
     const endpoint = { kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] };
-    this.#markDirty(document, instance.artboard.id, scope, bindingEndpointKey(endpoint));
+    this.#markDataPropertyDirty(document, scope, instance.id, property.id);
     this.#notify({ target: endpoint, oldValue, newValue: clone(normalized), source: String(options.source || 'runtime'), provenance: clone(options.provenance || null), runtimeScope: createDataRuntimeScope(options.scopePath || []) });
     return true;
   }
@@ -1035,13 +1070,13 @@ export class VeyraDataRuntime {
     if (property.type !== 'trigger') throw new TypeError(`[data-trigger-type] ${propertyId} is ${property.type}, not trigger.`);
     const scope = scopeKey(options.scopePath); const key = runtimePropertyKey(scope, instance.id, property.id); const count = (this.#triggers.get(key) || 0) + 1; this.#triggers.set(key, count);
     const endpoint = { kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] };
-    this.#markDirty(document, instance.artboard.id, scope, bindingEndpointKey(endpoint));
+    this.#markDataPropertyDirty(document, scope, instance.id, property.id);
     this.#notify({ target: endpoint, oldValue: false, newValue: true, event: 'trigger', sequence: count, source: String(options.source || 'runtime'), provenance: clone(options.provenance || null), runtimeScope: createDataRuntimeScope(options.scopePath || []) });
     return count;
   }
   reset(options = {}) {
     const scope = scopeKey(options.scopePath); const prefix = `${scope}|`;
-    for (const map of [this.#values, this.#triggers, this.#lists, this.#bindingCache, this.#sourceSnapshots]) for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
+    for (const map of [this.#values, this.#triggers, this.#lists, this.#propertyGroupValues, this.#bindingCache, this.#sourceSnapshots, this.#authoredSignatures]) for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
     this.#dirty.delete(scope);
     this.#notify({ target: { kind: 'runtimeScope', key: scope }, oldValue: null, newValue: null, event: 'reset', source: String(options.source || 'runtime'), runtimeScope: createDataRuntimeScope(options.scopePath || []) });
     return true;
@@ -1051,6 +1086,24 @@ export class VeyraDataRuntime {
     const signature = bindingIndexSignature(document, artboardId); const key = `${artboardId}|${signature}`;
     if (this.#indexes.has(key)) return this.#indexes.get(key);
     const index = buildRuntimeIndex(document, artboardId); this.#indexes.clear(); this.#indexes.set(key, index); this.#stats.graphBuilds += 1; return index;
+  }
+  #ensureAuthoredGeneration(document, artboardId, scope, index) {
+    const signature = authoredRuntimeSignature(document, artboardId);
+    const key = `${scope}|${artboardId}`;
+    const previous = this.#authoredSignatures.get(key);
+    if (previous === signature) return false;
+    this.#authoredSignatures.set(key, signature);
+    if (previous === undefined) return false;
+    const cachePrefix = `${scope}|`;
+    for (const cacheKey of [...this.#bindingCache.keys()]) if (cacheKey.startsWith(cachePrefix)) this.#bindingCache.delete(cacheKey);
+    const snapshotPrefix = `${scope}|${artboardId}|`;
+    for (const snapshotKey of [...this.#sourceSnapshots.keys()]) if (snapshotKey.startsWith(snapshotPrefix)) this.#sourceSnapshots.delete(snapshotKey);
+    const dirty = this.#dirty.get(scope) || new Set();
+    for (const binding of index.winners) dirty.add(binding.id);
+    this.#dirty.set(scope, dirty);
+    this.#stats.authoredInvalidations += index.winners.length;
+    this.#stats.dirtyInvalidations += index.winners.length;
+    return true;
   }
   #cascadeDirty(index, dirty, bindingIds) {
     const queue = [...bindingIds]; const seen = new Set();
@@ -1069,6 +1122,35 @@ export class VeyraDataRuntime {
     const dirty = this.#dirty.get(scope) || new Set();
     const count = this.#cascadeDirty(index, dirty, index.bySource.get(sourceKey) || []);
     this.#dirty.set(scope, dirty); this.#stats.dirtyInvalidations += count;
+  }
+  #dataEndpointTouches(document, endpoint, scope, instanceId, propertyId) {
+    let instance = viewModelInstanceById(document, endpoint.instance.id);
+    if (!instance) return false;
+    for (let index = 0; index < endpoint.path.length; index += 1) {
+      const model = viewModelById(document, instance.viewModel.id);
+      const property = model?.properties.find((item) => item.id === endpoint.path[index].id) || null;
+      if (!property) return false;
+      if (instance.id === instanceId && property.id === propertyId) return true;
+      if (index >= endpoint.path.length - 1) break;
+      if (property.type !== 'viewModel') return false;
+      const key = runtimePropertyKey(scope, instance.id, property.id);
+      const nested = this.#values.has(key) ? this.#values.get(key) : initialValueFor(document, instance, property);
+      if (nested?.kind !== 'viewModelInstance') return false;
+      instance = viewModelInstanceById(document, nested.id);
+      if (!instance) return false;
+    }
+    return false;
+  }
+  #markDataPropertyDirty(document, scope, instanceId, propertyId) {
+    const artboards = [...new Set((document.bindings || []).filter((item) => item.enabled && item.source.kind === 'data').map((item) => item.artboard.id))].sort();
+    for (const artboardId of artboards) {
+      const index = this.#index(document, artboardId);
+      const ids = index.winners.filter((binding) => binding.source.kind === 'data' && this.#dataEndpointTouches(document, binding.source, scope, instanceId, propertyId)).map((binding) => binding.id);
+      if (!ids.length) continue;
+      const dirty = this.#dirty.get(scope) || new Set();
+      const count = this.#cascadeDirty(index, dirty, ids);
+      this.#dirty.set(scope, dirty); this.#stats.dirtyInvalidations += count;
+    }
   }
   #dataEndpointValue(document, endpoint, scope, triggerReads) {
     let instance = viewModelInstanceById(document, endpoint.instance.id);
@@ -1096,14 +1178,16 @@ export class VeyraDataRuntime {
   #endpointValue(document, endpoint, scope, virtual, triggerReads) {
     const key = bindingEndpointKey(endpoint); if (virtual.has(key)) return clone(virtual.get(key));
     if (endpoint.kind === 'data') return this.#dataEndpointValue(document, endpoint, scope, triggerReads);
-    if (endpoint.kind === 'propertyGroupProperty') return clone(propertyGroupPropertyById(document, endpoint.property.id)?.value);
+    if (endpoint.kind === 'propertyGroupProperty') return this.#propertyGroupValue(document, endpoint.property.id, scope);
     return readDataAwareAddress(document, endpoint.address);
   }
   evaluateBindings(document, options = {}) {
     const artboardId = String(options.artboardId || document.artboards?.[0]?.id || ''); const relevant = (document.bindings || []).filter((item) => item.enabled && item.artboard.id === artboardId);
     this.#stats.evaluations += 1;
     if (!relevant.length) { this.#stats.zeroBindingFastPaths += 1; return { overrides: {}, ownership: {}, diagnostics: { conflicts: [], errors: [] }, stats: { evaluatedBindings: 0, cacheHits: 0, sourceInvalidations: 0, graphBuilt: false, zeroBindingFastPath: true } }; }
-    const index = this.#index(document, artboardId); const scope = scopeKey(options.scopePath); let dirty = this.#dirty.get(scope);
+    const index = this.#index(document, artboardId); const scope = scopeKey(options.scopePath);
+    this.#ensureAuthoredGeneration(document, artboardId, scope, index);
+    let dirty = this.#dirty.get(scope);
     if (!dirty) { dirty = new Set(index.winners.map((item) => item.id)); this.#dirty.set(scope, dirty); }
     for (const binding of index.winners) if (!this.#bindingCache.has(runtimeBindingKey(scope, binding.id))) dirty.add(binding.id);
 
@@ -1186,12 +1270,13 @@ export class VeyraDataRuntime {
       const property = propertyGroupPropertyById(document, binding.source.property.id);
       if (!property) throw new TypeError(`[binding-two-way-source] missing Property Group property ${binding.source.property.id}.`);
       const normalized = validateTypedValueTarget(document, property, value, `two-way Property Group ${property.id}`);
-      const oldValue = clone(property.value);
-      if (stableString(oldValue) === stableString(normalized)) return false;
-      property.value = clone(normalized);
       const scope = scopeKey(options.scopePath);
+      const key = runtimePropertyGroupKey(scope, property.id);
+      const oldValue = this.getPropertyGroupValue(property.id, options);
+      if (stableString(oldValue) === stableString(normalized)) return false;
+      this.#propertyGroupValues.set(key, clone(normalized));
       this.#markDirty(document, binding.artboard.id, scope, bindingEndpointKey(binding.source));
-      this.#notify({ target: clone(binding.source), oldValue, newValue: clone(normalized), source: String(options.source || 'two-way-binding'), provenance: { binding: createReference('binding', binding.id), authoredPropertyGroupWrite: true, ...(options.provenance || {}) }, runtimeScope: createDataRuntimeScope(options.scopePath || []) });
+      this.#notify({ target: clone(binding.source), oldValue, newValue: clone(normalized), source: String(options.source || 'two-way-binding'), provenance: { binding: createReference('binding', binding.id), authoredPropertyGroupWrite: false, runtimePropertyGroupWrite: true, ...(options.provenance || {}) }, runtimeScope: createDataRuntimeScope(options.scopePath || []) });
       return true;
     }
     throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(binding.source)} has no deterministic reverse-write port.`);
@@ -1208,7 +1293,7 @@ export class VeyraDataRuntime {
   removeListItem(listId, itemId, options = {}) { const document = this.#document(); const scope = scopeKey(options.scopePath); const items = this.#runtimeList(document, listId, scope); const before = items.length; this.#lists.set(runtimeListKey(scope, listId), items.filter((item) => item.id !== itemId)); const changed = before !== this.#lists.get(runtimeListKey(scope, listId)).length; if (changed) this.#markListDirty(document, listId, scope); return changed; }
   moveListItem(listId, itemId, index, options = {}) { const document = this.#document(); const scope = scopeKey(options.scopePath); const items = this.#runtimeList(document, listId, scope); const from = items.findIndex((item) => item.id === itemId); if (from < 0) return false; const at = Math.max(0, Math.min(items.length - 1, Math.trunc(Number(index)))); const [item] = items.splice(from, 1); items.splice(at, 0, item); this.#markListDirty(document, listId, scope); return true; }
   replaceListItem(listId, itemId, value, options = {}) { const document = this.#document(); const scope = scopeKey(options.scopePath); const items = this.#runtimeList(document, listId, scope); const item = items.find((candidate) => candidate.id === itemId); if (!item) return false; item.value = clone(value); this.#markListDirty(document, listId, scope); return true; }
-  #markListDirty(document, listId, scope) { const list = listById(document, listId); if (!list) return; const endpoint = { kind: 'data', instance: clone(list.owner), path: [clone(list.property)] }; this.#markDirty(document, viewModelInstanceById(document, list.owner.id)?.artboard.id, scope, bindingEndpointKey(endpoint)); this.#notify({ target: createReference('list', listId), event: 'list-change', source: 'runtime-list', runtimeScope: { kind: VEYRA_DATA_RUNTIME_SCOPE_KIND, key: scope, path: [] } }); }
+  #markListDirty(document, listId, scope) { const list = listById(document, listId); if (!list) return; this.#markDataPropertyDirty(document, scope, list.owner.id, list.property.id); this.#notify({ target: createReference('list', listId), event: 'list-change', source: 'runtime-list', runtimeScope: { kind: VEYRA_DATA_RUNTIME_SCOPE_KIND, key: scope, path: [] } }); }
 }
 
 export function createVeyraDataRuntime(documentOrGetter) { return new VeyraDataRuntime(documentOrGetter); }

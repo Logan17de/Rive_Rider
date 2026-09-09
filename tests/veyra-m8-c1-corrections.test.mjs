@@ -168,13 +168,18 @@ check('two-way: nested data source reverse-writes in the same runtime scope', [4
   assert.equal(serializeVeyra(store.document), authored);
 });
 
-check('two-way: Property Group source has explicit authored reverse-write semantics', [6, 17], () => {
+check('two-way: Property Group source has explicit scoped runtime reverse-write semantics', [6, 17, 24], () => {
   const store = baseStore(); seedCore(store);
   store.createPropertyGroup({ id: 'pg_two', artboard: ref('artboard','art_main'), properties: [{ id: 'pg_two_value', type: 'number', value: 0.3 }] });
   store.createBinding({ id: 'pg_two_way', mode: 'twoWay', artboard: ref('artboard','art_main'), source: pgEndpoint('pg_two_value'), target: propertyEndpoint('node:box/opacity') });
   const runtime = createVeyraDataRuntime(() => store.document);
+  const before = snapshot(store);
   assert.equal(runtime.setTwoWayTarget('pg_two_way', 0.62), true);
-  assert.equal(store.document.propertyGroups[0].properties[0].value, 0.62);
+  assert.equal(runtime.getPropertyGroupValue('pg_two_value'), 0.62);
+  assert.equal(store.document.propertyGroups[0].properties[0].value, 0.3);
+  assertSnapshot(store, before);
+  runtime.reset();
+  assert.equal(runtime.getPropertyGroupValue('pg_two_value'), 0.3);
 });
 
 check('typed identity: equal literal IDs across kinds never create false dependency blockers', [1, 12, 24], () => {

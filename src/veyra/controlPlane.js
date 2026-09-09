@@ -388,8 +388,16 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
       warnings.push('The visible value is data-bound. Edit the runtime View Model source rather than the authored visual target.');
     } else if (endpoint?.kind === 'propertyGroupProperty') {
       const sourceAddress = `propertyGroupProperty:${encodeURIComponent(endpoint.property.id)}/value`;
-      writableSource = { kind: 'property-group-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), address: sourceAddress, mode: activeOwner.mode, authored: true, targetEditsPropagate: activeOwner.mode === 'twoWay' };
-      warnings.push('The visible value is data-bound from an authored Property Group property; edit that source property rather than the visual target.');
+      if (activeOwner.mode === 'twoWay') {
+        const runtimeOverride = typeof options.dataRuntime?.hasPropertyGroupOverride === 'function'
+          ? options.dataRuntime.hasPropertyGroupOverride(endpoint.property.id, { scopePath: activeOwner.runtimeScope?.path || options.runtimeScopePath || [] })
+          : false;
+        writableSource = { kind: 'property-group-runtime-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), authoredAddress: sourceAddress, mode: activeOwner.mode, authored: false, runtimeOverride, runtimeScope: cloneValue(activeOwner.runtimeScope), edit: { transport: 'runtime', port: 'setTwoWayTarget' }, targetEditsPropagate: true };
+        warnings.push('The visible value is two-way data-bound from a Property Group. Runtime interaction writes the scoped evaluated Property Group value; use the canonical Property Group command only for intentional persistence.');
+      } else {
+        writableSource = { kind: 'property-group-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), address: sourceAddress, mode: activeOwner.mode, authored: true, targetEditsPropagate: false };
+        warnings.push('The visible value is data-bound from an authored Property Group property; edit that source property rather than the visual target.');
+      }
     } else if (endpoint?.kind === 'property') {
       writableSource = { kind: 'authored-property', binding: cloneValue(activeOwner.ref), address: endpoint.address, mode: activeOwner.mode, authored: true, targetEditsPropagate: activeOwner.mode === 'twoWay' };
       warnings.push('The visible value is data-bound from another authored property; edit the binding source rather than the visual target.');
