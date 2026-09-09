@@ -143,7 +143,7 @@ export {
   normalizeBindingEndpoint, normalizeDataGraphDocument, validateDataGraphDocument,
   viewModelById, viewModelInstanceById, dataPropertyById, enumById, enumValueById, converterById,
   propertyGroupById, propertyGroupPropertyById, listById, listItemById, bindingById,
-  bindingEndpointKey, bindingEndpointType, bindingControllersForAddress,
+  bindingEndpointKey, bindingEndpointType, bindingEndpointCapabilities, bindingControllersForAddress,
   createDataRuntimeScope, VeyraDataRuntime, createVeyraDataRuntime,
   bindingDependencyRecords, bindingComplexityEnvelope,
 } from './veyra/dataGraph.js';
