@@ -22,6 +22,7 @@ jobs:
         run: |
           python scripts/apply-m8-c2.py
           python scripts/apply-m8-c2-scope-fix.py
+          python scripts/fix-m8-c2-tests.py
       - name: Install
         run: npm ci
       - name: Syntax gate
