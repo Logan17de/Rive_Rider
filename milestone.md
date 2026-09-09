@@ -1,223 +1,246 @@
 # Veyra — Current Milestone
 
-`plan.md` is the authoritative product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This file contains only the **current implementation milestone**.
+`plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This file is the **only active implementation milestone**.
 
-Agents may complete every task inside this milestone, but must not start work outside its scope. Follow-up ideas belong in `suggestions`.
+Complete only the tasks below. Follow-up ideas belong in `suggestions`. Do not start M9. When implementation is complete, set `AWAITING VERIFICATION`, supply reproducible evidence, commit, and stop. Implementers do not mark their own work VERIFIED.
 
-When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill the handoff, commit, and stop.
+## Progress snapshot — refreshed after independent M8-C2 verification
 
-## Progress snapshot
+These are carry-forward approximate planning estimates from the last accepted milestone, not measured vendor-parity percentages or a line-count metric. Unaccepted M8 work receives no new verified-completion credit.
 
-> These percentages are weighted engineering estimates, not line-count completion. They count only **independently verified capability** and must be refreshed whenever a milestone is verified, corrected, or advanced.
-
-| Area | Current verified estimate | Notes |
+| Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~94–96%** | Stable typed identity, universal semantics, name-independent resolution, canonical control plane, dependency/ownership graph, Components and current editor command surfaces are independently verified through M7. M8 remains unverified. |
-| Core editor / engine foundation | **~93–95%** | M0–M7 foundations are independently verified. M8 runtime-data correctness is not counted yet. |
-| Modern Rive editor/runtime feature parity | **~53–57%** | View Models/Data Binding are implemented substantially, but M8 remains outside verified progress until the runtime consistency issues below pass. |
-| Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No newly verified interchange capability in M8. |
-| Full Veyra superset target | **~46–49%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
-| Remaining full-target work | **~51–54%** | Verified-only estimate remains frozen at the M7 level until M8 passes independent verification. |
+| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation. Remaining M8 runtime identity, graph aliasing and observation defects are not counted as complete. |
+| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; passing C2 cases do not constitute acceptance of the whole data runtime. |
+| Modern Rive editor/runtime parity | **~53–57%** | M8 is implemented substantially but remains outside the accepted increment. |
+| Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No new interchange capability accepted. |
+| Full Veyra superset target | **~46–49%** | Rive-class capability + Lottie/dotLottie interoperability + AI-native semantics, subject to quality/modularity gates. |
+| Remaining full-target work | **~51–54%** | Unchanged until M8 is independently accepted. |
 
 ### Roadmap position
 
-- `plan.md` M0 — AI Identity & Control Foundation: **VERIFIED**.
-- `plan.md` M1 — Current interaction loop: **VERIFIED**.
-- Interstitial M5 — Workspace UX Stabilization: **VERIFIED**.
-- `plan.md` M2 / implementation M6 — Multi-Artboard, Components & Project Graph: **VERIFIED**.
-- Interstitial implementation M7 — Vector Authoring, Multi-Selection & Grouping UX: **VERIFIED**.
-- `plan.md` M3 / implementation M8 — View Models & Data Binding: **CORRECTIONS REQUIRED**.
+- Implementation M0–M7: previously VERIFIED, with their documented limitations preserved.
+- `plan.md` M3 / implementation M8: **CORRECTIONS REQUIRED**.
+- Current implementation work: **M8-C3**, below.
+- M9 / layered state machines: **NOT STARTED; blocked on M8 acceptance**.
 
-### Independent M8-C1 verification result
+Every verification/correction/advance must refresh this snapshot. Do not translate test counts into completion percentages.
 
-M8-C1 commit `d51bca71dca6d23f053dd0655e985d742488adaf` successfully fixes the previously identified capability-validation, two-way-shape validation, typed dependency blocker, ownership reporting, trigger multiplicity and settled non-data-source invalidation defects.
+## Independent verification evidence
 
-Standard GitHub `Tests` run #171 (`34319200295`) is **SUCCESS** on exact final head `4ad598fbdf61f8227f996c0fa6510fe93a89164d`; its Syntax check and Run test suites steps both succeeded.
+- Production baseline: `216deb8c972cf476c3c9c0de90d640e47520568f`.
+- Standard `Tests` #173, run `34325474833`: **SUCCESS on that exact baseline**.
+- Independently reran the unchanged production tree on review commit `93558a3c364a7f34e913b0771f826dc3a4c76985`, Actions run `34344021696`, job `102441231159`.
+- A `git diff --exit-code` gate proved production sources, package files, existing tests and scripts were unchanged from the baseline.
+- **45/45 syntax checks and 39/39 existing suites passed again**, including original M8 28 checks, C1 28 checks and C2 13 checks.
+- Additional targeted verifier probes: **2 positive controls passed; 10 regression assertions failed; no fixture/setup errors**. The same results were reproduced locally from the archived source.
+- Positive controls: warm nested numeric invalidation refreshes once then sleeps; Property Group two-way interaction preserves authored serialization/revision/history while changing runtime output.
+- Scope of this review: executed Node runtime/control-plane probes plus one static host-adapter declaration check. It is not real-browser visual acceptance.
 
-Independent warm-runtime review nevertheless found the remaining consistency defects below. Do not advance to M9 until they are corrected and independently verified on one final head.
+Reproduction source: [verification/m8-c2-review.mjs](https://github.com/Logan17de/Rive_Rider/blob/93558a3c364a7f34e913b0771f826dc3a4c76985/verification/m8-c2-review.mjs).
+
+Executed report: [M8-C2 independent review](https://github.com/Logan17de/Rive_Rider/blob/83711f201dd85a797301b0f9de669f0cf5222209/verification/M8-C2-review.md).
+
+The review branch is evidence only, not another implementation milestone. Its temporary workflow was removed and never entered `main`. Do not cherry-pick that workflow. Convert the demonstrated behaviors into permanent regression tests. The host-port test should prove that the advertised operation is callable, not impose a particular spelling.
 
 ---
 
-# MILESTONE M8-C2 — Warm Runtime Cache & Authored/Runtime Boundary
+# MILESTONE M8-C3 — Runtime Contract Closure
 
-**Roadmap mapping:** final correction pass for `plan.md` M3 — View Models & Data Binding  
-**Status:** `AWAITING VERIFICATION`
+**Topic:** Events, Lists, Canonical Identity, AI/Browser Parity & Incremental Work  
+**Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding  
+**M8 verdict:** `CORRECTIONS REQUIRED`  
+**Implementation status:** `READY`
 
 ## Goal
 
-Make a long-lived `VeyraDataRuntime` remain correct after authored data/binding changes and nested View Model runtime changes. M8 must behave correctly not only on the first evaluation, but after caches/indexes are warm for many frames.
+Close the executed failures below while preserving the successful M8-C1/C2 work. Verify combinations of existing features, not just each isolated happy path. No new Rive feature family is being added in this correction pass.
 
-This pass must preserve every accepted M8/M8-C1 behavior and must not start layered state machines, Layout, text/media/effects, scripting, interchange, MCP, or runtime rewrite work.
+## Instructions for all implementing agents
+
+1. Read this file, `QUALITY.md`, the executed review, and relevant existing tests before changing code.
+2. Preserve one evaluator, one data graph, and the canonical Store/control-plane authored mutation boundary. No browser-only fixes or second runtime.
+3. Add a failing regression for each demonstrated behavior before its production fix. Validate fixtures; do not count setup failures as product failures or weaken expectations to match current defects.
+4. Keep IDs opaque and typed. Do not ban punctuation, rename user objects, or replace IDs to hide identity bugs. Human names remain advisory.
+5. Preserve C2 ephemeral Property Group writes, warm nested-number behavior, authored-generation invalidation, runtime override precedence, and all earlier regression suites.
+6. Runtime ports stay runtime-only. Intentional persistence uses a canonical authored command with validation/provenance/one undo transaction.
+7. Keep diagnostics, metadata and executable APIs aligned. A method name in a manifest is not proof that an agent can call it.
+8. Measure actual graph/index/traversal work separately from converter/output recomputation. Do not fake a lightweight result by counting only one narrow operation.
+9. Keep permanent tests in normal discovery. Remove staging scripts/workflows from promoted code; never change standard CI to hide failing tests.
+10. Stop at AWAITING VERIFICATION with exact commit/run evidence. No M9 or new completion credit.
 
 ---
 
-## Blocker 1 — Nested data paths do not invalidate their bound branch after warm-up
+## Task 1 — Collision-free runtime identity
 
-A nested binding can be authored as:
+- [ ] Replace delimiter-only scope/value/list/Property Group/cache keys with a collision-free structural encoding or equivalent nested maps.
+
+### Executed failures
+
+These distinct accepted runtime paths currently produce the same key:
 
 ```text
-data:inst_main / nested / nested_value
+[{kind: componentInstance, id: "outer/componentInstance:inner"}]
+[{kind: componentInstance, id: "outer"}, {kind: componentInstance, id: "inner"}]
 ```
 
-but `VeyraDataRuntime.setValue('inst_nested', 'nested_value', ...)` currently dirties only the direct endpoint key:
+Writing 0.66 in one makes the other read 0.66 instead of its initial 0.25.
+
+Likewise, `(instance "a|b", property "c")` overwrites `(instance "a", property "b|c")`; both are valid authored instance/property pairs.
+
+### Required behavior and tests
+
+- Preserve complete typed path structure and each opaque ID; a short hash alone is not a collision-proof identity contract.
+- Reset/prune/delete must match structural scope ownership, not ambiguous string prefixes.
+- Cover `/`, `:`, `|`, `%`, quotes, Unicode and equal literal IDs across kinds.
+- Test with valid authored Component graphs as well as direct runtime API scopes.
+- Assert A updates only A; B defaults/runtime values remain unchanged; resetting A leaves B unchanged.
+- Keep runtime/evaluated scope identities out of authored serialization.
+
+## Task 2 — Canonical endpoint identity before graph operations
+
+- [ ] Normalize equivalent endpoint forms before cycle detection, conflict selection, dirty propagation, caching, dependencies and ownership.
+
+### Executed failures
+
+Both forms address the same property but are treated as different graph nodes:
 
 ```text
-data:inst_nested / nested_value
+{kind: "propertyGroupProperty", property: {kind: "propertyGroupProperty", id: "p"}}
+{kind: "property", address: "propertyGroupProperty:p/value"}
 ```
 
-The binding index is keyed by the root nested path, so after the first evaluation has cached the binding, changing the terminal nested instance can leave the bound visual/property output stale.
+A priority-0 binding then overwrites a priority-10 binding: output 0.75 instead of 0.25, wrong owner, zero reported conflicts. A self-cycle expressed through the two forms is accepted and changes the document.
 
-The same issue affects a nested `setTwoWayTarget()` reverse write: the terminal runtime value changes, but the forward binding may remain clean/cached.
+### Required behavior and tests
 
-### Required correction
+- One canonical internal identity for one actual endpoint; retain deterministic compatibility for accepted serialized forms.
+- Reuse the canonical property-address parser/encoding rather than maintaining a parallel string interpretation.
+- Enforce higher-priority then stable-ID tie-breaking across aliases and declaration reorder.
+- Direct and multi-hop cycles through aliases must reject atomically with stable dependency evidence.
+- Chain propagation through equivalent forms must use the latest derived value rather than a stale authored value.
+- Include percent-encoding/opaque-ID cases and prove document/revision/history stay unchanged on rejection.
 
-- runtime invalidation must understand every canonical binding endpoint that reaches the changed terminal runtime property;
-- do not solve this with display names or full-document polling;
-- nested resolution must remain stable-ref based;
-- dirty propagation must remain bounded to reachable branches;
-- Component runtime scope path must remain part of the runtime identity;
-- sibling/repeated nested Component scopes remain isolated;
-- triggers and nested list/view-model paths must follow the same identity discipline where applicable.
+## Task 3 — Event advancement vs non-mutating observation
 
-### Mandatory tests
+- [ ] Fix nested-trigger consumption/settling and make live read/ownership inspection observational.
 
-1. Warm a nested binding until `evaluatedBindings === 0`, then change the terminal nested value; next evaluation must recompute the nested branch and update the target.
-2. A completely unrelated branch must remain a cache hit.
-3. Warm the graph, call nested `setTwoWayTarget()`, then evaluate; the forward target must reflect the reverse-written value immediately on the next evaluation.
-4. Repeat #1–#3 in two different Component instance paths and prove zero leakage.
-5. Rename/reorder nested definitions after binding creation and prove invalidation still follows stable refs.
+### Executed failures
 
----
-
-## Blocker 2 — Binding/index signature changes can reuse stale binding cache entries
-
-`bindingIndexSignature()` correctly notices authored binding/converter changes and causes a new runtime index to be built, but cached binding outputs are keyed only by:
+After warming a nested trigger binding and firing twice:
 
 ```text
-runtimeScope + bindingId
+Expected outputs: true, true, false; two pulses consumed; empty queue
+Actual outputs:   true, true, true;  one pulse consumed; one still queued
 ```
 
-A long-lived runtime can therefore reuse an old output after the same binding ID changes source/target/converter configuration. Authored View Model default/initial-value changes can also leave a clean data-source binding cached because data endpoints skip non-data source snapshot checks.
+C2 invalidates nested paths on fire, but the consumption/settle path still invalidates only the terminal direct endpoint key.
 
-### Required correction
+Separately, `getOwnership(..., {dataRuntime: liveRuntime})` consumes a pending trigger: pending changes from true to false just because the caller reads ownership.
 
-Define one deterministic cache-generation/invalidation contract. Acceptable approaches include a canonical graph/data revision signature in cache keys or explicit invalidation when the relevant authored dependency signature changes.
+### Required behavior and tests
 
-It must cover at least:
+- The same resolved dependency identity must govern fire, pulse consumption and false/inactive settling, including direct and nested aliases.
+- Each explicit fire is delivered according to the documented per-advance contract; fan-out must not consume it once per binding or inspecting observer.
+- Read/query/ownership/current-scene inspection must not advance clocks, consume triggers, change live values, or emit mutation notifications.
+- Do not fix observation by silently substituting a fresh default runtime: reads must still report current live values and scope.
+- Separate explicit advancement from snapshot/peek evaluation using the same evaluator semantics.
+- Test warm nested queues, one/two/multiple fires, fan-out, unrelated cached branches, repeated reads between advances, and two isolated Component paths.
+- After the queue drains, the target settles inactive and unchanged evaluations cache again.
 
-- binding source change under the same binding ID;
-- binding target change under the same binding ID;
-- converter chain/config change under the same converter/binding IDs;
-- binding enable/disable/priority winner changes;
-- dataProperty default changes when no live runtime override exists;
-- View Model instance initial-value changes when no live runtime override exists;
-- nested View Model initial-reference changes;
-- Property Group authored source changes (preserve C1 incremental behavior);
-- removal/recreation of a binding with a reused ID;
-- Component/runtime-scope isolation.
+## Task 4 — Typed scoped runtime lists and converter dependencies
 
-Do not simply clear every runtime cache every frame. `QUALITY.md` dirty/settled guarantees must remain intact.
+- [ ] Make list-consuming converters use the actual scoped runtime list, propagate its dependencies, and validate all runtime list mutations.
 
-### Mandatory tests
+### Executed failures
 
-1. Warm a binding, update its converter config, evaluate again, and prove the new output is used.
-2. Warm a binding, change its source while preserving binding ID, and prove the new source controls the target.
-3. Warm a binding, change its target while preserving binding ID, and prove the old target is no longer reported/applied and the new target receives output.
-4. Warm a data binding with no live override, update the authored default/initial value, and prove the evaluated target refreshes.
-5. Set an explicit runtime override, change the authored default, and prove the live runtime override still wins until reset.
-6. After one invalidating authored mutation, a subsequent unchanged frame must sleep/cache again.
+Replacing runtime item A from 0.2 to 0.6 changes `getList()`, but the bound `numberToListIndex` output remains 0.2. Forcing the numeric source to change and recompute still returns 0.2 because the converter reads authored `document.lists`.
 
----
+Inserting `"not-a-number"` into a declared number list succeeds and changes the list.
 
-## Blocker 3 — Property Group two-way reverse write crosses the authored boundary directly
+### Required behavior and tests
 
-M8-C1 added Property Group two-way reverse writes by assigning directly to `property.value` inside `VeyraDataRuntime.setTwoWayTarget()`.
+- Resolve converter list references through the same scoped data runtime, not a separate list model or authored-only shortcut.
+- Register converter configuration dependencies (including list refs) and invalidate their actual dependent bindings on insert/remove/move/replace.
+- Validate item type, enum/model/asset/artboard references, constraints and index policy before runtime mutation; failures preserve list/value/queue/notification state.
+- Keep surviving item identity stable, handle empty/out-of-range cases explicitly, and preserve source defaults.
+- Test live item 0.6 -> bound output 0.6 immediately and after forced recomputation; sibling scope stays 0.2.
+- Test wrong-type insert and replacement failure, list reordering, nested View Model/list items, reset and authored-initial-list changes under the documented runtime-precedence policy.
+- Notifications must preserve the complete runtime scope and useful old/new/change evidence.
 
-That makes a runtime port mutate serialized authored project state without crossing the Store/control-plane transaction/history boundary. This conflicts with Veyra's authored/evaluated separation and canonical mutation contract.
+## Task 5 — Executable public runtime/AI parity
 
-### Required correction
+- [ ] Align ownership recommendations, public adapters and registry metadata, then exercise them against live state.
 
-Choose and mechanically enforce one explicit contract:
+### Executed failure and existing implementation
 
-### Preferred runtime contract
+Ownership recommends runtime port `setTwoWayTarget`. The browser adapter does not expose that name. It **does** expose `setTwoWayBindingTarget`, which calls the runtime class method. Fix this metadata/transport mismatch rather than claiming the reverse-write implementation is absent.
 
-- normal two-way interaction writes a **runtime/evaluated Property Group value**, leaving authored `property.value`, serialization, Store revision and history unchanged;
-- reset restores the authored Property Group value;
-- bindings/ownership can distinguish authored Property Group value from runtime value.
+### Required behavior and tests
 
-### Or explicit authored-write contract
+- Either advertise the real public helper or provide an explicit callable mapping/alias. Do not require a particular method spelling.
+- Discover a recommended operation, invoke it through the public surface, and read back the correct scoped visible result. A source regex/catalog entry alone is insufficient acceptance evidence.
+- Preserve JSON-safe stable-ref arguments and runtime-vs-authored classification.
+- Test nested-source recommendations with a realizable terminal/path write, not an uncallable root-plus-path description.
+- Live browser read/ownership must use or explicitly request the actual host runtime, active artboard/Component scope and current evaluation context; do not silently report defaults as live output.
+- Preserve Task 3 non-consuming observation while reading live state.
+- Include full controlling-chain evidence for data -> converter/Property Group -> target and winner-only ownership. Do not recommend an overwritten intermediate authored property as the effective edit target.
+- Keep intentional authored source reads distinct and available.
 
-If an operation intentionally persists a Property Group edit, it must cross the canonical Store/command/control-plane validation/history path and produce exactly one undoable authored transaction. A runtime-only API must never silently perform the authored write.
+## Task 6 — Retained indexes and honest incremental-work gates
 
-Whichever contract is selected:
+- [ ] Retain independent artboard binding indexes and bound actual invalidation work.
 
-- `getOwnership().writableSource` must report the correct runtime vs authored port;
-- preview/read/evaluation remain non-mutating;
-- Component runtime scope remains isolated;
-- serialization cannot change merely because a runtime interaction fired unless the caller explicitly requested a canonical authored mutation.
+### Executed failure
 
-### Mandatory tests
+Warm artboard A and B, then revisit A and B unchanged. `graphBuilds` increases by **2**, not 0. `#index()` clears every cached index when installing one, so alternating artboards continually rebuilds graphs.
 
-1. Capture serialized document + Store revision/history, execute a normal runtime two-way Property Group interaction, and prove the declared boundary contract exactly.
-2. Reset and prove deterministic restoration.
-3. Two Component scopes using the same authored Property Group source must not leak live reverse-written values.
-4. If authored persistence is supported, prove one command = one undo entry and undo restores the previous authored value.
+### Required behavior and tests
 
----
-
-## Must-preserve M8-C1 fixes
-
-Do not regress:
-
-- canonical binding capability classifier shared by validation and evaluation;
-- readable/writable/bindable/drivable enforcement;
-- accepted two-way shapes have executable reverse-write ports;
-- converter-bearing two-way bindings fail closed without inverse converters;
-- typed `(kind,id)` dependency blockers and cross-kind equal-ID safety;
-- winning Data Binding ownership/writable-source evidence;
-- multiple queued trigger pulses consumed one per evaluation;
-- settled Property Group/property sources stop recomputing until their value changes;
-- O(1) zero-binding fast path;
-- 220-binding bounded dirty-propagation fixture;
-- all M0–M7 regressions;
-- original M8 and M8-C1 adversarial suites.
+- Cache indexes per document/artboard/relevant generation with explicit invalidation; do not evict all sibling indexes on every lookup.
+- Retain independent scope output caches without sharing mutable runtime values.
+- Use dependency indexes for terminal/nested/list changes instead of scanning and recompiling the entire project for each runtime write.
+- Avoid repeatedly serializing the full authored data graph merely to check an unchanged frame where an explicit generation/revision contract can do so.
+- Measure index builds, bindings examined, dependency edges visited, converter evaluations and output application separately. Output application/rendering may have its own legitimate cost; zero converter evaluations is not zero total work.
+- Keep the 220-binding fixture and add multi-artboard/repeated-Component fixtures. A settled A/B revisit adds zero graph builds; one input change wakes only its relevant dependency branches, then caches again.
+- Preserve the zero-binding fast path, DOM-free engine and no new heavy dependency.
 
 ---
 
-## Acceptance
+## Acceptance and implementer handoff
 
-M8 can be independently VERIFIED only when:
+M8 can be VERIFIED only after the demonstrated behaviors above pass against the **same final production tree**, with all previous M0–M8-C2 regressions intact.
 
-- nested terminal runtime changes invalidate every reachable root nested binding path and nothing unrelated;
-- warm runtime caches cannot survive an authored dependency change that changes binding output/ownership;
-- unchanged settled graphs return to sleeping after invalidation;
-- runtime two-way Property Group interaction no longer silently bypasses the authored Store/history boundary;
-- all M8/M8-C1 tests remain green;
-- dedicated M8-C2 warm-cache tests are green;
-- `npm run check` passes;
-- `npm test` passes;
-- latest standard GitHub `Tests` succeeds on the **exact final `main` head**.
+Required evidence:
 
-## Handoff
+- permanent regressions mapped to all ten verifier failures, plus positive controls and composition cases specified in each task;
+- actual public-adapter execution for runtime/AI parity and explicit distinction from real-browser visual QA;
+- unchanged serialization/revision/history for runtime operations, reads, previews and rejected commands;
+- meaningful index/traversal counters for lightweight behavior;
+- `npm run check` and `npm test` passing;
+- standard `.github/workflows/test.yml` SUCCESS on the exact final clean `main` HEAD;
+- no staging scripts/temporary workflows in promoted code;
+- refreshed progress notes, with percentages unchanged until independent acceptance.
+
+Do not silently discard established M8 feature types or reject previously supported valid IDs/endpoints to make this pass. Unsupported operations need an explicit capability contract and compatibility decision.
 
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction implementation commits: c5ebae1bf4468cbdb4d9d60d103f981fcdf890ae
-- Changed files: src/veyra/dataGraph.js, src/veyra/controlPlane.js, tests/veyra-m8-c1-corrections.test.mjs, tests/veyra-m8-c2-warm-runtime.test.mjs
-- Tests added/changed: dedicated M8-C2 warm-runtime suite adds 13 adversarial checks; M8-C1 Property Group two-way assertion is updated to the corrected runtime-only boundary.
-- Nested-path invalidation proof: terminal View Model property changes traverse stable-ref nested source paths in the active runtime scope and dirty only bindings whose data path touches the changed `(instance,property)` pair; unrelated warm branches remain cache hits.
-- Warm-cache authored-change proof: a deterministic authored runtime signature covers binding/converter structure, View Model property defaults/schema, instance initial values/nested refs, Property Group capability schema and authored lists; a signature change invalidates the scope once, preserves live runtime overrides, then returns to sleeping.
-- Converter/source/target cache-generation proof: same-ID converter config, source, target, priority/winner and remove/recreate changes cannot reuse old binding-cache output.
-- Default/initial-value invalidation proof: authored defaults and instance initial values refresh warm bindings when no runtime override exists; explicit runtime values keep precedence until reset.
-- Property Group two-way boundary proof: normal two-way interaction writes scoped ephemeral Property Group runtime state, never serialized `property.value`; Store revision/history/serialization remain unchanged, reset restores authored value, and ownership reports the runtime mutation port.
-- Component-scope isolation proof: nested View Model and Property Group runtime writes are keyed by the full typed Component scope path; repeated outer/inner scopes do not leak.
-- Settled/zero-binding performance proof: one authored/runtime invalidation wakes required work once; the next unchanged frame returns to `evaluatedBindings === 0`; zero-binding remains the O(1) early return.
-- npm run check: PASS — 45/45 source files in the clean promotion tree.
-- npm test: PASS — 39/39 suites in the clean promotion tree; M8-C2 13 checks green, M8-C1 28 checks green, original M8 28/28 green.
-- Exact-final-head standard GitHub Tests: REQUIRED to succeed on the exact final clean `main` head after handoff; the standard `Tests` run attached to that head is authoritative.
-- Existing M0–M8-C1 regression proof: all prior suites green in the clean promotion gate.
-- Persistence/history impact: no schema/version change; runtime Property Group reverse writes are ephemeral and excluded from serialization/history unless a caller intentionally uses the existing canonical authored command surface.
-- Suggestions added to `suggestions`: none.
-- Known limitations: converter-bearing two-way bindings still require a future inverse-converter contract; no M9/layered-state-machine work included.
+- Implementation commits:
+- Final clean main SHA:
+- Ten verifier failures -> permanent test mapping:
+- Structured scope/tuple identity proof:
+- Endpoint alias/conflict/cycle proof:
+- Nested trigger + non-consuming read proof:
+- Scoped typed list + converter propagation proof:
+- Public host operation discovery/invoke/read-back proof:
+- Retained index/actual work-counter proof:
+- Preserved C1/C2 positive controls and earlier regressions:
+- npm run check:
+- npm test:
+- Exact-head standard Tests run ID/result:
+- Persistence/migration and performance impact:
+- Cleanup evidence:
+- Suggestions / explicit limitations:
 ```
