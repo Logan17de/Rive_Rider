@@ -26,8 +26,4 @@ patch('tests/veyra-model.test.mjs',
 "  console.log('✓ every accepted historical/project version loads and canonicalizes to v5');",
 "  console.log('✓ every accepted historical/project/data version loads; data-free documents canonicalize to v5');")
 
-patch('tests/veyra-m8-data-binding.test.mjs',
-"  const result=queryEntities(store.document,{kinds:['dataProperty']},{limit:100}); assert.ok(result.results.some((item)=>item.ref.id==='p_num'));",
-"  const result=queryEntities(store.document,{kinds:['dataProperty']},{maxResults:100}); assert.ok(result.entities.some((item)=>item.ref.id==='p_num'));")
-
 print('M8 additive test fixes applied')
