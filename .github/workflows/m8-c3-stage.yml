@@ -1,0 +1,59 @@
+name: M8-C3 Clean Implementation Gate
+
+on:
+  push:
+    branches: [m8-c3-runtime-contract-closure]
+
+permissions:
+  contents: write
+
+jobs:
+  implementation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Guard authoritative baseline
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "61e463de42ac3e005953808c00a1ad8359c93aca"
+          git diff --exit-code 61e463de42ac3e005953808c00a1ad8359c93aca -- src tests veyra.js package.json package-lock.json scripts .github/workflows/test.yml
+      - name: Apply exact locally tested production diff
+        run: |
+          cp .veyra-staging/m8-c3/publish.py /tmp/m8-c3-publish.py
+          python /tmp/m8-c3-publish.py
+      - name: Install dependencies
+        run: npm ci
+      - name: Syntax check
+        run: npm run check
+      - name: All permanent regression suites
+        run: npm test
+      - name: Commit clean implementation and handoff
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .veyra-staging/m8-c3 .github/workflows/m8-c3-stage.yml
+          git add src tests veyra.js docs/M8-C3-runtime-contract.md
+          git diff --cached --check
+          git commit -m "fix: close M8 runtime identity events lists and host contracts"
+          implementation=$(git rev-parse HEAD)
+          python /tmp/m8-c3-publish.py "$implementation"
+          git add milestone.md
+          git commit -m "docs: hand off M8-C3 for independent verification"
+          git diff --exit-code 61e463de42ac3e005953808c00a1ad8359c93aca -- package.json package-lock.json scripts .github/workflows/test.yml
+          test -z "$(git ls-tree -r --name-only HEAD | grep -E '(^.veyra-staging/|m8-c3-stage.yml)' || true)"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "61e463de42ac3e005953808c00a1ad8359c93aca"
+          git push origin HEAD:m8-c3-runtime-contract-closure
+          echo "Implementation: $implementation" >> "$GITHUB_STEP_SUMMARY"
+          echo "Clean branch head: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Independent verification remains pending; standard exact-main Tests still required after merge." >> "$GITHUB_STEP_SUMMARY"
