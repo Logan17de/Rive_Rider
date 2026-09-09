@@ -19,7 +19,7 @@ jobs:
           ref: main
           fetch-depth: 0
       - name: Require exact implementation head
-        run: test "$(git rev-parse HEAD)" = "f772ba7c571c4e12d04df5750ef0bdfedec458cd"
+        run: test "$(git rev-parse HEAD)" = "f772ba71f30cc3ac0e3b7b07cad290634af4e295"
       - name: Fetch handoff writer
         run: git show origin/m8-data-binding:scripts/record-m8-handoff.py > /tmp/record-m8-handoff.py
       - name: Record handoff
