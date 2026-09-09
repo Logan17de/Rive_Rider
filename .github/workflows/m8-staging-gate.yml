@@ -1,0 +1,21 @@
+name: M8 Staging Gate
+
+on:
+  push:
+    branches: [m8-data-binding]
+    paths:
+      - 'src/veyra/dataGraph.js'
+      - 'scripts/apply-m8-*.py'
+      - '.github/workflows/m8-staging-gate.yml'
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply M8 core patch
+        run: python scripts/apply-m8-core.py
+      - name: Syntax gate
+        run: npm run check
+      - name: Existing suites diagnostic
+        run: npm test
