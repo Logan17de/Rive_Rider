@@ -54,5 +54,8 @@ patch('tests/veyra-m8-data-binding.test.mjs',
 patch('tests/veyra-m8-data-binding.test.mjs',
 "  assert.equal(manifest.authoringContract.dataGraph.runtimeState.includes('never serialized'),true);",
 "  assert.equal(manifest.authoring.dataGraph.runtimeState.includes('never serialized'),true);")
+patch('tests/veyra-m8-data-binding.test.mjs',
+"  const scope = createDataRuntimeScope({ kind:'dataRuntimeScope', path:[ref('componentInstance','outer')], dataInstance:ref('viewModelInstance','data') });\n  assert.deepEqual(scope,{kind:'dataRuntimeScope',path:[ref('componentInstance','outer')],dataInstance:ref('viewModelInstance','data')});",
+"  const scope = createDataRuntimeScope([ref('componentInstance','outer')]);\n  assert.deepEqual(scope,{kind:'dataRuntimeScope',key:'componentInstance:outer',path:[ref('componentInstance','outer')]});")
 
 print('M8 additive test fixes applied')
