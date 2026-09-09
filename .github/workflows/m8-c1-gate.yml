@@ -1,0 +1,28 @@
+name: M8-C1 Correction Gate
+
+on:
+  push:
+    branches:
+      - m8-c1-binding-corrections
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply M8-C1 production corrections
+        run: python scripts/apply-m8-c1.py
+      - name: Install
+        run: npm ci
+      - name: Syntax gate
+        run: npm run check
+      - name: Full test gate
+        run: npm test
