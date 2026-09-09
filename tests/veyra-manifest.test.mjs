@@ -298,7 +298,7 @@ assert.deepEqual(
 
 // --- Action schema --------------------------------------------------------------
 const actions = manifest.actions;
-assert.equal(actions.length, 76, 'Action catalog grows additively with the 12 canonical M6 and 11 canonical M7 path/group mutations.');
+assert.equal(actions.length, 113, 'Action catalog grows additively with 34 canonical M8 data mutations and 3 runtime-only data affordances.');
 const actionIds = actions.map((item) => item.ref.id);
 assert.equal(new Set(actionIds).size, actionIds.length, 'Action ids must be unique.');
 for (const item of actions) {
@@ -307,7 +307,7 @@ for (const item of actions) {
   assert.ok(item.name.length > 0, `${item.ref.id} needs a name.`);
   assert.ok(item.description.length > 0, `${item.ref.id} needs a description.`);
   assert.ok(typeof item.targetKind === 'string' && item.targetKind.length > 0, `${item.ref.id} needs a targetKind.`);
-  const noParameterActions = new Set(['begin', 'commit', 'cancel', 'undo', 'redo', 'remove-selection']);
+  const noParameterActions = new Set(['begin', 'commit', 'cancel', 'undo', 'redo', 'remove-selection', 'reset-data-runtime']);
   assert.ok(item.parameters.length > 0 || noParameterActions.has(item.ref.id), `${item.ref.id} needs parameters unless it is a no-argument transaction/history command.`);
   assert.ok(item.transport === 'command' || item.transport === 'read' || item.transport === 'runtime', `${item.ref.id} needs a transport classification.`);
   assert.ok(typeof item.hostAvailability === 'string' && item.hostAvailability.length > 0, `${item.ref.id} needs host availability.`);
@@ -361,11 +361,11 @@ assert.ok(
 const runtimeActions = actions.filter((item) => item.capabilities.includes('runtime-only'));
 assert.deepEqual(
   runtimeActions.map((item) => item.ref.id).sort(),
-  ['fire-machine-input', 'reset-machine', 'scrub-machine', 'set-machine-input', 'step-machine'],
+  ['fire-data-trigger', 'fire-machine-input', 'reset-data-runtime', 'reset-machine', 'scrub-machine', 'set-data-runtime-value', 'set-machine-input', 'step-machine'],
 );
 
 // The command table is the canonical registry: every dispatchable command is
-// generated exactly once, while the six explicit read/runtime affordances map
+// generated exactly once, while explicit read/runtime affordances map
 // to no Store command.
 const commandActions = actions.filter((item) => item.transport === 'command');
 assert.equal(commandActions.length, Object.keys(VEYRA_COMMAND_TABLE).length);
@@ -375,10 +375,10 @@ for (const [commandName, command] of Object.entries(VEYRA_COMMAND_TABLE)) {
   assert.equal(matches[0].ref.id, command.manifestId);
 }
 const nonCommandActions = actions.filter((item) => item.transport !== 'command');
-assert.equal(nonCommandActions.length, 6);
+assert.equal(nonCommandActions.length, 9);
 assert.deepEqual(
   nonCommandActions.map((item) => item.ref.id).sort(),
-  ['fire-machine-input', 'read-property', 'reset-machine', 'scrub-machine', 'set-machine-input', 'step-machine'],
+  ['fire-data-trigger', 'fire-machine-input', 'read-property', 'reset-data-runtime', 'reset-machine', 'scrub-machine', 'set-data-runtime-value', 'set-machine-input', 'step-machine'],
 );
 assert.ok(!nonCommandActions.some((item) => 'command' in item));
 

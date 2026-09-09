@@ -26,6 +26,17 @@ export const VEYRA_REFERENCE_KINDS = Object.freeze([
   'machineTransition',
   'machineCondition',
   'listener',
+  'viewModel',
+  'viewModelInstance',
+  'dataProperty',
+  'enum',
+  'enumValue',
+  'binding',
+  'converter',
+  'propertyGroup',
+  'propertyGroupProperty',
+  'list',
+  'listItem',
   'semanticRecord',
 ]);
 
@@ -99,6 +110,17 @@ export function paintOwnerReference(value) {
 }
 
 export function createGradientStopRef(id) { return createReference('gradientStop', id); }
+export function createViewModelRef(id) { return createReference('viewModel', id); }
+export function createViewModelInstanceRef(id) { return createReference('viewModelInstance', id); }
+export function createDataPropertyRef(id) { return createReference('dataProperty', id); }
+export function createEnumRef(id) { return createReference('enum', id); }
+export function createEnumValueRef(id) { return createReference('enumValue', id); }
+export function createBindingRef(id) { return createReference('binding', id); }
+export function createConverterRef(id) { return createReference('converter', id); }
+export function createPropertyGroupRef(id) { return createReference('propertyGroup', id); }
+export function createPropertyGroupPropertyRef(id) { return createReference('propertyGroupProperty', id); }
+export function createListRef(id) { return createReference('list', id); }
+export function createListItemRef(id) { return createReference('listItem', id); }
 export function createSemanticRecordRef(id) { return createReference('semanticRecord', id); }
 
 export function createSemanticTargetRef(kindOrRefOrId, id = null) {

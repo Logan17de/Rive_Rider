@@ -32,15 +32,30 @@ import {
   componentById as projectComponentById,
   componentInstanceById as projectComponentInstanceById,
 } from './projectGraph.js';
+import {
+  VEYRA_DATA_VERSION,
+  normalizeDataGraphDocument,
+  viewModelById as dataViewModelById,
+  viewModelInstanceById as dataViewModelInstanceById,
+  dataPropertyById as graphDataPropertyById,
+  enumById as dataEnumById,
+  enumValueById as dataEnumValueById,
+  bindingById as dataBindingById,
+  converterById as dataConverterById,
+  propertyGroupById as dataPropertyGroupById,
+  propertyGroupPropertyById as dataPropertyGroupPropertyById,
+  listById as dataListById,
+  listItemById as dataListItemById,
+} from './dataGraph.js';
 
-export { VEYRA_PROJECT_VERSION };
+export { VEYRA_PROJECT_VERSION, VEYRA_DATA_VERSION };
 
 export const VEYRA_FORMAT = 'veyra';
 // v4 is feature-gated: ordinary documents continue to normalize as v3, while
 // listener-bearing documents are loud to readers that predate the registry.
 export const VEYRA_VERSION = 3;
 export const VEYRA_LISTENER_VERSION = 4;
-export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4, 5]);
+export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4, 5, 6]);
 export const VEYRA_LISTENER_KINDS = Object.freeze(['pointer']);
 export const VEYRA_LISTENER_EVENTS = Object.freeze([
   'pointerdown', 'pointerup', 'pointermove', 'pointerenter', 'pointerleave', 'click',
@@ -584,6 +599,13 @@ export function createDocument(overrides = {}) {
     timelines: cloneValue(overrides.timelines || []),
     stateMachines: cloneValue(overrides.stateMachines || []),
     listeners: cloneValue(overrides.listeners || []),
+    viewModels: cloneValue(overrides.viewModels || []),
+    viewModelInstances: cloneValue(overrides.viewModelInstances || []),
+    enums: cloneValue(overrides.enums || []),
+    converters: cloneValue(overrides.converters || []),
+    propertyGroups: cloneValue(overrides.propertyGroups || []),
+    lists: cloneValue(overrides.lists || []),
+    bindings: cloneValue(overrides.bindings || []),
   };
 }
 
@@ -1407,6 +1429,25 @@ function validateStableIdentities(document) {
     });
   });
   document.listeners.forEach((listener, index) => register('listener', listener.id, `listeners[${index}]`));
+  document.viewModels.forEach((model, modelIndex) => {
+    register('viewModel', model.id, `viewModels[${modelIndex}]`);
+    model.properties.forEach((property, propertyIndex) => register('dataProperty', property.id, `viewModels[${modelIndex}].properties[${propertyIndex}]`));
+  });
+  document.viewModelInstances.forEach((instance, index) => register('viewModelInstance', instance.id, `viewModelInstances[${index}]`));
+  document.enums.forEach((item, enumIndex) => {
+    register('enum', item.id, `enums[${enumIndex}]`);
+    item.values.forEach((value, valueIndex) => register('enumValue', value.id, `enums[${enumIndex}].values[${valueIndex}]`));
+  });
+  document.converters.forEach((item, index) => register('converter', item.id, `converters[${index}]`));
+  document.propertyGroups.forEach((group, groupIndex) => {
+    register('propertyGroup', group.id, `propertyGroups[${groupIndex}]`);
+    group.properties.forEach((property, propertyIndex) => register('propertyGroupProperty', property.id, `propertyGroups[${groupIndex}].properties[${propertyIndex}]`));
+  });
+  document.lists.forEach((list, listIndex) => {
+    register('list', list.id, `lists[${listIndex}]`);
+    list.items.forEach((item, itemIndex) => register('listItem', item.id, `lists[${listIndex}].items[${itemIndex}]`));
+  });
+  document.bindings.forEach((binding, index) => register('binding', binding.id, `bindings[${index}]`));
 }
 
 export function normalizeDocument(input) {
@@ -1523,9 +1564,10 @@ export function normalizeDocument(input) {
     listeners,
   };
   const projectDocument = normalizeProjectDocument(input, document);
-  validateStableIdentities(projectDocument);
-  validateSemanticRecords(projectDocument);
-  return projectDocument;
+  const dataDocument = normalizeDataGraphDocument(input, projectDocument);
+  validateStableIdentities(dataDocument);
+  validateSemanticRecords(dataDocument);
+  return dataDocument;
 }
 
 export function semanticsFor(document, targetOrNodeId) {
@@ -1591,6 +1633,18 @@ export function pathVertexById(document, vertexId) {
   }
   return null;
 }
+
+export function viewModelById(document, id) { return dataViewModelById(document, id); }
+export function viewModelInstanceById(document, id) { return dataViewModelInstanceById(document, id); }
+export function dataPropertyById(document, id) { return graphDataPropertyById(document, id); }
+export function enumById(document, id) { return dataEnumById(document, id); }
+export function enumValueById(document, id) { return dataEnumValueById(document, id); }
+export function bindingById(document, id) { return dataBindingById(document, id); }
+export function converterById(document, id) { return dataConverterById(document, id); }
+export function propertyGroupById(document, id) { return dataPropertyGroupById(document, id); }
+export function propertyGroupPropertyById(document, id) { return dataPropertyGroupPropertyById(document, id); }
+export function listById(document, id) { return dataListById(document, id); }
+export function listItemById(document, id) { return dataListItemById(document, id); }
 
 export function gradientStopById(document, stopId) {
   for (const node of document.nodes) {

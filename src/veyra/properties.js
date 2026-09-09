@@ -7,6 +7,7 @@ import {
   nodeById,
   semanticFor,
 } from './model.js';
+import { propertyGroupPropertyById } from './dataGraph.js';
 import { supportsNodeProperty, supportsRigProperty } from './capabilities.js';
 import { createNodeRef, createReference, normalizeReference } from './references.js';
 
@@ -18,6 +19,7 @@ export const VEYRA_PROPERTY_TARGET_KINDS = Object.freeze([
   'constraint',
   'mesh',
   'control',
+  'propertyGroupProperty',
 ]);
 
 function encodePart(value) {
@@ -88,6 +90,12 @@ function nestedTarget(root, segments, path) {
 
 function propertyTarget(document, address, createSemantic = false) {
   const parsed = typeof address === 'string' ? parsePropertyAddress(address) : address;
+  if (parsed.reference.kind === 'propertyGroupProperty') {
+    const property = propertyGroupPropertyById(document, parsed.reference.id);
+    if (!property) throw new TypeError(`Property Group property ${parsed.reference.id} does not exist.`);
+    if (parsed.path !== 'value') throw new TypeError(`Property Group property supports only value, not ${parsed.path}.`);
+    return { parsed, object: property, container: property, key: 'value' };
+  }
   if (parsed.reference.kind !== 'node') {
     const collection = {
       bone: boneById,
@@ -157,6 +165,11 @@ export function writeProperty(document, address, value) {
  */
 export function propertyTargetStatus(document, address) {
   const parsed = parsePropertyAddress(address);
+  if (parsed.reference.kind === 'propertyGroupProperty') {
+    const property = propertyGroupPropertyById(document, parsed.reference.id);
+    if (!property) return 'missing-target';
+    return parsed.path === 'value' && property.keyable !== false ? 'animatable' : 'non-animatable';
+  }
   if (parsed.reference.kind !== 'node') {
     const finder = { bone: boneById, mesh: meshById, control: controlById, constraint: constraintById }[parsed.reference.kind];
     const object = finder?.(document, parsed.reference.id);

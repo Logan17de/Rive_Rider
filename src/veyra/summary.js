@@ -75,6 +75,16 @@ export function createSceneSummary(document, options = {}) {
         constraintCount: document.constraints.length,
       },
     },
+    data: {
+      viewModels: (document.viewModels || []).map((model) => ({ ref: { kind: 'viewModel', id: model.id }, name: model.name, properties: model.properties.map((property) => ({ ref: { kind: 'dataProperty', id: property.id }, name: property.name, type: property.type, readable: property.readable, writable: property.writable, bindable: property.bindable, ...(property.defaultValue !== undefined ? { defaultValue: cloneValue(property.defaultValue) } : {}) })) })),
+      instances: (document.viewModelInstances || []).map((instance) => ({ ref: { kind: 'viewModelInstance', id: instance.id }, name: instance.name, viewModel: cloneValue(instance.viewModel), artboard: cloneValue(instance.artboard), initialValues: cloneValue(instance.initialValues) })),
+      enums: cloneValue(document.enums || []),
+      converters: cloneValue(document.converters || []),
+      propertyGroups: cloneValue(document.propertyGroups || []),
+      lists: cloneValue(document.lists || []),
+      bindings: cloneValue(document.bindings || []),
+      runtimeStateSerialized: false,
+    },
     semantics: document.semantics.map(semanticSummary),
     components: (document.components || []).map((component) => ({
       ref: createComponentRef(component.id),

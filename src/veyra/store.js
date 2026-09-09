@@ -40,6 +40,7 @@ import {
   createComponent as createProjectComponent, createComponentInstance as createProjectComponentInstance,
   duplicateArtboardIntoDocument, entityArtboardId,
 } from './projectGraph.js';
+import { installVeyraDataStoreMethods } from './dataStore.js';
 import {
   addVertexToDocument,
   groupNodesInDocument,
@@ -1218,3 +1219,6 @@ export class VeyraStore {
     return cloneValue(this.#activity);
   }
 }
+
+
+installVeyraDataStoreMethods(VeyraStore);

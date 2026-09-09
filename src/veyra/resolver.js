@@ -10,6 +10,7 @@ import {
   referenceId,
   referencesEqual,
 } from './references.js';
+import { dataIndexEntitySpecs, dataIndexRelationshipSpecs } from './dataGraph.js';
 
 export const VEYRA_RESOLVER_CAPABILITIES = Object.freeze({
   functions: Object.freeze(['buildSemanticIndex', 'queryEntities', 'resolveSemantic']),
@@ -453,9 +454,11 @@ function buildIndexData(input) {
   }
 
   for (const listener of document.listeners || []) add(makeEntity(createReference('listener', listener.id), listener, { type: listener.kind, displayName: listener.name || '' }));
+  for (const spec of dataIndexEntitySpecs(document)) add(makeEntity(spec.ref, spec.object, { type: spec.type, displayName: spec.displayName, capabilities: spec.capabilities }));
   for (const record of document.semantics || []) add(makeEntity(createReference('semanticRecord', record.id), record, { type: 'semanticRecord' }));
 
   const documentRef = createReference('document', document.id);
+  for (const relation of dataIndexRelationshipSpecs(document)) link(byKey, relation.from, relation.relation, relation.to, relation.reverse, relation.detail, relation.source);
   for (const artboard of document.artboards) link(byKey, createReference('artboard', artboard.id), 'owner', documentRef, 'owns');
   for (const component of document.components || []) {
     const componentRef = createReference('component', component.id);

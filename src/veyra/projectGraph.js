@@ -251,6 +251,12 @@ function ownerMap(document) {
 
 export function entityArtboardId(document, reference) {
   if (!reference) return null;
+  if (reference.kind === 'viewModelInstance') return document.viewModelInstances?.find((item) => item.id === reference.id)?.artboard?.id || null;
+  if (reference.kind === 'binding') return document.bindings?.find((item) => item.id === reference.id)?.artboard?.id || null;
+  if (reference.kind === 'propertyGroup') return document.propertyGroups?.find((item) => item.id === reference.id)?.artboard?.id || null;
+  if (reference.kind === 'propertyGroupProperty') return document.propertyGroups?.find((group) => group.properties?.some((item) => item.id === reference.id))?.artboard?.id || null;
+  if (reference.kind === 'list') { const list = document.lists?.find((item) => item.id === reference.id); return list ? document.viewModelInstances?.find((item) => item.id === list.owner?.id)?.artboard?.id || null : null; }
+  if (reference.kind === 'listItem') { const list = document.lists?.find((item) => item.items?.some((child) => child.id === reference.id)); return list ? document.viewModelInstances?.find((item) => item.id === list.owner?.id)?.artboard?.id || null : null; }
   if (reference.kind === 'artboard') return reference.id;
   if (reference.kind === 'component') return referenceId(componentById(document, reference.id)?.source, 'artboard');
   if (reference.kind === 'componentOverride') {

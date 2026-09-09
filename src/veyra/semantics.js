@@ -5,6 +5,7 @@ import {
   paintOwnerReference,
   referencesEqual,
 } from './references.js';
+import { dataEntityByReference } from './dataGraph.js';
 
 export const VEYRA_SEMANTIC_STATUSES = Object.freeze(['confirmed', 'inferred', 'rejected', 'stale']);
 export const VEYRA_SEMANTIC_SOURCES = Object.freeze(['user', 'ai', 'import', 'system']);
@@ -223,6 +224,8 @@ export function normalizeSemanticRecords(records = [], document = null) {
 
 export function entityByReference(document, reference) {
   const ref = qualifyPaintReference(normalizeSemanticReference(reference), document, 'reference');
+  const dataEntity = dataEntityByReference(document, ref);
+  if (dataEntity) return dataEntity;
   const find = (items) => (items || []).find((item) => item.id === ref.id) || null;
   switch (ref.kind) {
     case 'document': return document.id === ref.id ? document : null;

@@ -21,6 +21,7 @@ import {
 } from './commands.js';
 import { VeyraStore } from './store.js';
 import { VEYRA_SERVICE_NAMES } from './serviceRegistry.js';
+import { bindingControllersForAddress } from './dataGraph.js';
 
 const PLAN_FORBIDDEN_ACTIONS = new Set([
   'select', 'removeSelection', 'replaceDocument', 'begin', 'commit', 'cancel', 'undo', 'redo',
@@ -117,6 +118,29 @@ function prepareCommandDescriptor(document, descriptor, salt = '0') {
   }
   if (next.action === 'addVertex') next.args.vertex = withId(next.args.vertex, 'pathVertex', seed, 'pathVertex');
   if (next.action === 'groupNodes') next.args.options = withId(next.args.options, 'group', seed, 'group');
+  if (next.action === 'createViewModel') {
+    next.args.overrides = withId(next.args.overrides, 'viewModel', seed, 'viewModel');
+    if (Array.isArray(next.args.overrides.properties)) next.args.overrides.properties = next.args.overrides.properties.map((item,index) => withId(item,'dataProperty',seed,`dataProperty:${index}`));
+  }
+  if (next.action === 'addDataProperty') next.args.overrides = withId(next.args.overrides, 'dataProperty', seed, 'dataProperty');
+  if (next.action === 'createViewModelInstance') next.args.overrides = withId(next.args.overrides, 'viewModelInstance', seed, 'viewModelInstance');
+  if (next.action === 'createBinding') next.args.overrides = withId(next.args.overrides, 'binding', seed, 'binding');
+  if (next.action === 'createEnum') {
+    next.args.overrides = withId(next.args.overrides, 'enum', seed, 'enum');
+    if (Array.isArray(next.args.overrides.values)) next.args.overrides.values = next.args.overrides.values.map((item,index) => withId(item,'enumValue',seed,`enumValue:${index}`));
+  }
+  if (next.action === 'addEnumValue') next.args.overrides = withId(next.args.overrides, 'enumValue', seed, 'enumValue');
+  if (next.action === 'createConverter') next.args.overrides = withId(next.args.overrides, 'converter', seed, 'converter');
+  if (next.action === 'createPropertyGroup') {
+    next.args.overrides = withId(next.args.overrides, 'propertyGroup', seed, 'propertyGroup');
+    if (Array.isArray(next.args.overrides.properties)) next.args.overrides.properties = next.args.overrides.properties.map((item,index) => withId(item,'propertyGroupProperty',seed,`propertyGroupProperty:${index}`));
+  }
+  if (next.action === 'addPropertyGroupProperty') next.args.overrides = withId(next.args.overrides, 'propertyGroupProperty', seed, 'propertyGroupProperty');
+  if (next.action === 'createList') {
+    next.args.overrides = withId(next.args.overrides, 'list', seed, 'list');
+    if (Array.isArray(next.args.overrides.items)) next.args.overrides.items = next.args.overrides.items.map((item,index) => withId(item,'listItem',seed,`listItem:${index}`));
+  }
+  if (next.action === 'addListItem') next.args.overrides = withId(next.args.overrides, 'listItem', seed, 'listItem');
   if (next.action === 'addSemantic') next.args.overrides = withId(next.args.overrides, 'semantic', seed, 'semantic');
   if (next.action === 'addTimeline') next.args.overrides = withId(next.args.overrides, 'timeline', seed, 'timeline');
   if (next.action === 'addListener') next.args.overrides = withId(next.args.overrides, 'listener', seed, 'listener');
@@ -217,7 +241,7 @@ function evaluatedContext(document, options = {}) {
   const runtime = runtimeTimelineContext(document, options.runtimeContext);
   if (runtime?.error) return { error: runtime.error, runtime, scene: null };
   if (runtime?.overrides) layers.animation = { ...(layers.animation || {}), ...runtime.overrides };
-  const scene = evaluateDocument(document, layers);
+  const scene = evaluateDocument(document, layers, null, { dataRuntime: options.dataRuntime, artboardId: options.artboardId, runtimeScopePath: options.runtimeScopePath || [] });
   return { scene, runtime, layers };
 }
 
@@ -304,14 +328,20 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
   const source = propertySource(evaluation.scene, address);
   const tracks = trackControllers(document, address);
   const constraints = constraintControllers(document, parsed.reference);
+  const bindings = bindingControllersForAddress(document, address);
   const potentialControllers = [
     ...tracks,
+    ...bindings,
     ...constraints,
   ];
   const warnings = [];
   let activeOwner;
 
-  if (source === 'animation' || source === 'playback') {
+  if (source === 'data-binding') {
+    const runtimeOwner = evaluation.scene.data?.bindingOwnership?.[address];
+    const activeBinding = runtimeOwner?.ref ? bindings.find((item) => referencesEqual(item.ref, runtimeOwner.ref)) : bindings[0];
+    activeOwner = activeBinding ? { ...cloneValue(activeBinding), source: 'data-binding', chain: { binding: cloneValue(activeBinding.ref), source: cloneValue(activeBinding.source), converters: cloneValue(activeBinding.converters), target: cloneValue(activeBinding.target) } } : { kind: 'data-binding', source: 'data-binding', evidence: [{ kind: 'binding-owner-missing' }] };
+  } else if (source === 'animation' || source === 'playback') {
     const activeTrack = tracks.find((controller) => controller.timeline.id === evaluation.runtime?.timelineId) || (tracks.length === 1 ? tracks[0] : null);
     activeOwner = activeTrack
       ? { kind: 'animation-track', ref: cloneValue(activeTrack.ref), source, evidence: cloneValue(activeTrack.evidence) }
