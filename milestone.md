@@ -26,7 +26,7 @@ When the milestone is complete, set its status to `AWAITING VERIFICATION`, fill 
 - Interstitial M5 — Workspace UX Stabilization: **VERIFIED**.
 - `plan.md` M2 / implementation M6 — Multi-Artboard, Components & Project Graph: **VERIFIED**.
 - Interstitial implementation M7 — Vector Authoring, Multi-Selection & Grouping UX: **VERIFIED**.
-- `plan.md` M3 / implementation M8 — View Models & Data Binding: **CORRECTION REQUIRED**.
+- `plan.md` M3 / implementation M8 — View Models & Data Binding: **AWAITING VERIFICATION**.
 
 ### Independent M8 verification result
 
@@ -39,7 +39,7 @@ The final handoff head `1a0274d654218a0919c5a1b9c9a505a8272d5994` also has no st
 # MILESTONE M8-C1 — Binding Capability, Ownership & Runtime Correctness
 
 **Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding  
-**Status:** `READY`
+**Status:** `AWAITING VERIFICATION`
 
 ## Goal
 
@@ -245,21 +245,21 @@ M8 may be independently VERIFIED only when:
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Correction implementation commits:
-- Changed files:
-- Tests added/changed:
-- Endpoint-capability proof:
-- Two-way parity proof:
-- Typed dependency proof:
-- Ownership/writable-source proof:
-- Trigger multiplicity proof:
-- Settled-runtime proof:
-- Original M8 adversarial coverage map:
-- npm run check:
-- npm test:
-- Exact-final-head standard GitHub Tests:
-- Existing M0–M7 regression proof:
-- Persistence/migration impact:
-- Suggestions added to `suggestions`:
-- Known limitations:
+- Correction implementation commits: d51bca71dca6d23f053dd0655e985d742488adaf
+- Changed files: src/veyra/capabilities.js, src/veyra/commands.js, src/veyra/controlPlane.js, src/veyra/dataGraph.js, src/veyra/manifest.js, src/veyra/properties.js, src/veyra/propertyBinding.js, src/veyra/propertyCapabilities.js, tests/veyra-m8-c1-corrections.test.mjs
+- Tests added/changed: `tests/veyra-m8-c1-corrections.test.mjs` adds 28 focused M8-C1 checks and mechanically maps original M8 acceptance #1-#27; original #28 is the exact-final-head standard CI gate.
+- Endpoint-capability proof: binding preview/dispatch and evaluation share the canonical property capability classifier; source/target readable, writable, bindable and drivable requirements fail closed with stable capability error codes.
+- Two-way parity proof: every accepted two-way source has deterministic reverse-write behavior, including nested View Model data paths and writable/bindable Property Group values; converter-bearing two-way bindings remain rejected without an inverse contract.
+- Typed dependency proof: blocker traversal matches structural typed refs by exact `(kind,id)`, sorts diagnostics deterministically and passes cross-kind equal-ID collision fixtures.
+- Ownership/writable-source proof: evaluated data-bound properties report the winning binding and its real source endpoint/runtime or authored mutation port instead of falling through to the authored visual target.
+- Trigger multiplicity proof: queued trigger counts are consumed one pulse per evaluation, preserve multiple explicit fires and settle inactive after the queue drains.
+- Settled-runtime proof: non-data roots are source-snapshotted and invalidate reachable branches only when their actual value changes; settled graphs cache, and zero-binding evaluation keeps the O(1) fast path.
+- Original M8 adversarial coverage map: correction suite reports original M8 acceptance #1-#27 explicitly mapped; duplicate/empty/random names, nested rename/reorder, reset, repeated nested Component scopes, enum reorder, converter failures, command/UI parity, non-mutation and cycle cases are explicit.
+- npm run check: PASS — 45/45 source files in the clean promotion tree.
+- npm test: PASS — 38/38 suites in the clean promotion tree; M8-C1 28 checks green and original M8 28/28 green.
+- Exact-final-head standard GitHub Tests: REQUIRED to succeed on the exact final clean `main` head after handoff; the GitHub Actions check attached to that head is authoritative evidence.
+- Existing M0–M7 regression proof: all existing suites remain in the same `npm test` discovery surface and passed in the 38/38 clean-tree run.
+- Persistence/migration impact: no format-version migration; existing M8 stable IDs/serialization shape retained. Capability validation is stricter and rejects authored bindings the evaluator could not execute safely.
+- Suggestions added to `suggestions`: none.
+- Known limitations: two-way converter chains remain intentionally unsupported until an inverse-converter contract exists; M8 remains unverified until independent review accepts this correction pass.
 ```
