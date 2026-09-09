@@ -11,21 +11,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d36f0ac2841fa6320f4335f617847d123dd394ca
+          fetch-depth: 8
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Archive exact production source
-        run: |
-          test "$(git rev-parse HEAD)" = d36f0ac2841fa6320f4335f617847d123dd394ca
-          git archive --format=zip HEAD -o m8-c3-baseline.zip
+      - name: Confirm unchanged production baseline
+        run: git diff --exit-code d36f0ac2841fa6320f4335f617847d123dd394ca HEAD -- src veyra.js veyra.html veyra.css scripts tests package.json package-lock.json .github/workflows/test.yml
       - run: npm ci
       - name: Baseline gates
         run: npm run check && npm test
+      - name: Independent composition probes
+        run: node verification/m8-c3-review.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: m8-c3-pinned-baseline
-          path: m8-c3-baseline.zip
+          name: m8-c3-independent-results
+          path: |
+            verification/m8-c3-review.mjs
+            verification/m8-c3-review-results.json
           retention-days: 7
