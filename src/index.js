@@ -97,6 +97,8 @@ export {
 
 // M7 editor-authoring primitives are DOM-free. Draft/selection/marquee state is
 // editor-only; persistent topology/grouping mutations are shared by Store commands.
+// Stable pathVertex identity remains authored, while corner-radius rendering/export
+// and hit testing share one derived canonical path compiler rather than a second model.
 export {
   VEYRA_EDITOR_COMMAND_IDS,
   VEYRA_MARQUEE_MODES,
