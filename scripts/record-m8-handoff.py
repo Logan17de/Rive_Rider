@@ -11,7 +11,7 @@ block = '''## Handoff
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits: f772ba7c571c4e12d04df5750ef0bdfedec458cd — Implement M8 View Models and data binding [m8]
+- Implementation commits: f772ba71f30cc3ac0e3b7b07cad290634af4e295 — Implement M8 View Models and data binding [m8]
 - Changed files: 22 production/test files; new src/veyra/dataGraph.js and src/veyra/dataStore.js plus canonical model/ref/property/evaluator/control-plane/resolver/dependency/manifest/summary/store/browser integration.
 - Tests added/changed: tests/veyra-m8-data-binding.test.mjs (28 adversarial checks) plus additive M6 project-graph, manifest and model gates.
 - npm test: 37/37 suites PASS on the exact implementation tree before commit/push.
