@@ -26,6 +26,8 @@ jobs:
         run: python scripts/apply-m8-tests.py
       - name: Apply M8 additive test fixes
         run: python scripts/apply-m8-test-fixes.py
+      - name: Apply M8 final manifest gate fix
+        run: python scripts/apply-m8-final-test-fix.py
       - name: Syntax gate
         run: npm run check
       - name: Full test gate
