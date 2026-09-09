@@ -25,8 +25,8 @@ patch('src/veyra/commands.js',
 "  removeEnumValue: { summary: 'Remove an unused enumValue fail-closed.', params: [param('enumId','string',true),param('valueId','string',true)], run: (store,args,command) => store.removeEnumValue(args.enumId,args.valueId,command ?? {}) },",
 "  removeEnumValue: { summary: 'Remove an unused enumValue fail-closed.', params: [param('enumId','string',true),param('valueId','string',true)], run: (store,args,command) => store.removeEnumValue(args.enumId,args.valueId,command ?? {}) },\n  moveEnumValue: { summary: 'Reorder an enumValue without changing stable identity.', params: [param('enumId','string',true),param('valueId','string',true),param('index','number',true)], run: (store,args,command) => store.moveEnumValue(args.enumId,args.valueId,args.index,command ?? {}) },")
 patch('src/veyra/commands.js',
-"  removeEnumValue: { targetKind: 'enumValue', capabilities: ['enum','dependency-checked','transactional','undoable'] },",
-"  removeEnumValue: { targetKind: 'enumValue', capabilities: ['enum','dependency-checked','transactional','undoable'] },\n  moveEnumValue: { targetKind: 'enumValue', capabilities: ['enum','presentation-order','identity-preserving','transactional','undoable'] },")
+"  removeEnumValue: { targetKind: 'enumValue', capabilities: ['dependency-checked','transactional','undoable'] },",
+"  removeEnumValue: { targetKind: 'enumValue', capabilities: ['dependency-checked','transactional','undoable'] },\n  moveEnumValue: { targetKind: 'enumValue', capabilities: ['enum-value','presentation-order','identity-preserving','transactional','undoable'] },")
 
 # Persistent browser compatibility is mechanically audited against globalThis.veyra.
 patch('src/veyra/serviceRegistry.js',
