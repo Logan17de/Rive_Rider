@@ -5,6 +5,7 @@ on:
     branches: [m8-data-binding]
     paths:
       - 'src/veyra/dataGraph.js'
+      - 'src/veyra/dataStore.js'
       - 'scripts/apply-m8-*.py'
       - '.github/workflows/m8-staging-gate.yml'
 
@@ -15,6 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Apply M8 core patch
         run: python scripts/apply-m8-core.py
+      - name: Apply M8 control patch
+        run: python scripts/apply-m8-control.py
       - name: Syntax gate
         run: npm run check
       - name: Existing suites diagnostic
