@@ -35,6 +35,7 @@ jobs:
           npm ci
           npm run check
           npm test
+          git reset --hard HEAD
       - name: Build clean correction tree
         run: |
           git fetch origin main
