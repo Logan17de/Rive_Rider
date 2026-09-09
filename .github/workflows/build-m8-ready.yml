@@ -1,0 +1,51 @@
+name: Build Clean M8 Ready
+
+on:
+  push:
+    branches: [m8-data-binding]
+    paths:
+      - '.github/workflows/build-m8-ready.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: m8-ready
+          fetch-depth: 0
+      - name: Fetch staged M8 source
+        run: git fetch origin m8-data-binding
+      - name: Materialize production core and patch scripts
+        run: |
+          git show origin/m8-data-binding:src/veyra/dataGraph.js > src/veyra/dataGraph.js
+          git show origin/m8-data-binding:src/veyra/dataStore.js > src/veyra/dataStore.js
+          for script in apply-m8-core.py apply-m8-runtime-fixes.py apply-m8-control.py apply-m8-shell.py apply-m8-tests.py apply-m8-test-fixes.py apply-m8-final-test-fix.py; do
+            git show origin/m8-data-binding:scripts/$script > /tmp/$script
+          done
+      - name: Apply clean M8 integration
+        run: |
+          python /tmp/apply-m8-core.py
+          python /tmp/apply-m8-runtime-fixes.py
+          python /tmp/apply-m8-control.py
+          python /tmp/apply-m8-shell.py
+          python /tmp/apply-m8-tests.py
+          python /tmp/apply-m8-test-fixes.py
+          python /tmp/apply-m8-final-test-fix.py
+      - name: Verify clean production tree
+        run: |
+          test ! -e scripts/apply-m8-core.py
+          test ! -e .github/workflows/m8-staging-gate.yml
+          test ! -e .github/workflows/build-m8-ready.yml
+          npm run check
+          npm test
+      - name: Commit clean M8 implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Implement M8 View Models and Data Binding [m8]'
+          git push origin HEAD:m8-ready
