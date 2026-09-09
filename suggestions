@@ -3,19 +3,24 @@ Veyra milestone suggestions
 
 Current milestone
 -----------------
-- M0–M6 foundation, interaction, workspace, multi-artboard and Component work is independently VERIFIED.
-- Active work is `milestone.md` M7 — Vector Authoring, Multi-Selection & Grouping UX.
-- M7 must preserve `QUALITY.md`: editor-only UX stays out of the minimal playback runtime, authored geometry remains canonical, and no second evaluator/model is introduced.
+- M0–M7 foundation, interaction, workspace, Components and vector-authoring UX are independently VERIFIED.
+- Active work is `milestone.md` M8 — View Models, Data Binding & Runtime Data Graph.
+- M8 must preserve `QUALITY.md`: projects without bindings should pay effectively zero binding runtime work, data evaluation stays DOM-free, and no second Component/state-machine/AI data model may appear.
 
-Queued work after M7
+Queued work after M8
 --------------------
-1. Resume master `plan.md` with View Models / Data Binding / Property Groups / enums / converters / lists.
-2. Continue into full layered state-machine parity and later Rive feature families in plan order.
-3. Translate the checked-in `deep-research-report (6).md` into later bounded milestones for Lottie JSON + dotLottie interoperability, masks/mattes, Motion Tokens/slots, compatibility analysis, import/export fidelity and modular runtimes. Do not silently collapse these into generic Rive features.
-4. Introduce a semantic shortcut/keymap profile system (Veyra / Rive / Lottie-AE / Custom) once M7's semantic editor-command layer is stable.
-5. Add bundle-size/performance regression tooling when a compiled/distributable runtime target exists; enforce the budgets in `QUALITY.md` rather than optimizing by deleting parity features.
-6. Build a compatibility analyzer before broad interchange export: exact / approximate / bake / rasterize / reject, with no silent feature loss.
+1. Resume master `plan.md` with full layered state-machine parity + visual graph editor.
+2. Continue through Layout, listener/event/accessibility parity, drawing/paint/effects, text/media/assets, advanced rigging, animation-editor power, scripting/WGSL and production runtimes in plan order.
+3. Translate the checked-in `deep-research-report (6).md` into bounded Lottie JSON + dotLottie milestones: masks/mattes, Motion Tokens/slots, packages/themes, compatibility analysis, import/export fidelity and modular runtimes. Do not silently collapse these into generic Rive features.
+4. Introduce semantic shortcut/keymap profiles (Veyra / Rive / Lottie-AE / Custom) on top of M7's semantic editor-command layer.
+5. Add bundle-size/performance regression tooling once a compiled/distributable runtime target exists; enforce `QUALITY.md` budgets instead of deleting parity features.
+6. Build an interchange compatibility analyzer before broad export: exact / approximate / bake / rasterize / reject, with no silent feature loss.
 7. Revisit the paused headless Node API/CLI only after the browser/editor contracts being reused are settled.
+
+Editor follow-ups
+-----------------
+- Broaden M7 grouping beyond the current safe same-artboard + same-parent + contiguous-sibling contract only when Veyra has explicit semantics for preserving animation/property coordinate domains and stacking relative to unselected siblings. The current behavior intentionally fails closed rather than changing appearance silently.
+- Add multi-selection transform operations (move/scale/rotate as a selection) as a later bounded editor-power milestone; M7 established selection/grouping identity but did not define shared transform semantics.
 
 Longer-term lightweight/runtime principles
 ------------------------------------------
