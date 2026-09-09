@@ -46,6 +46,9 @@ patch('tests/veyra-m8-data-binding.test.mjs',
 "  runtime.insertListItem('list_main', { id: 'runtime_item', value: 'Runtime' }, 1);\n  assert.equal(runtime.getList('list_main').items[1].id, 'runtime_item');",
 "  const inserted = runtime.insertListItem('list_main', 'Runtime', 1);\n  assert.equal(runtime.getList('list_main')[1].id, inserted.id);\n  assert.equal(runtime.getList('list_main')[1].value, 'Runtime');")
 patch('tests/veyra-m8-data-binding.test.mjs',
+"  assert.throws(() => store.removeEnumValue('enum_state','enum_idle'), /p_enum/);",
+"  assert.throws(() => store.removeEnumValue('enum_state','enum_idle'), /viewModel:vm_main/);")
+patch('tests/veyra-m8-data-binding.test.mjs',
 "  assert.ok(queryEntities(store.document,{kind:'binding'},{limit:50}).results.some((item)=>item.ref.id==='bind_surface'));",
 "  assert.ok(queryEntities(store.document,{kinds:['binding']},{maxResults:50}).entities.some((item)=>item.ref.id==='bind_surface'));")
 
