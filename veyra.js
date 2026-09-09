@@ -61,6 +61,22 @@ import { createInteractionDispatcher } from './src/veyra/interactionTransport.js
 import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
 import { createComponentRuntimeRegistry, createComponentRuntimeScope } from './src/veyra/components.js';
 import {
+  EditorSelectionState,
+  createEditorCommandDispatcher,
+  editorCommandForKeyEvent,
+  createPenDraft,
+  finalizePenDraftGeometry,
+  coordinateReadout as formatCoordinateReadout,
+  marqueeNodeRefs,
+  selectionWorldBounds,
+  worldRectFromPoints,
+  normalizeOverlayVisibility,
+  moveVertexInDocument,
+  moveBezierHandleInDocument,
+  setVertexHandleModeInDocument,
+  setVertexCornerRadiusInDocument,
+} from './src/veyra/editorAuthoring.js';
+import {
   VEYRA_WORKSPACE_LAYOUT_DEFAULTS,
   artboardResizeCursor,
   classifyArtboardResizeZone,
@@ -135,6 +151,10 @@ const rightSplitter = $('rightSplitter');
 const timelineSplitter = $('timelineSplitter');
 const hierarchyCollapse = $('hierarchyCollapse');
 const inspectorCollapse = $('inspectorCollapse');
+const finishPathButton = $('finishPath');
+const cleanPreviewButton = $('cleanPreview');
+const coordinateReadoutElement = $('coordinateReadout');
+const marqueeBox = $('marqueeBox');
 
 function applyTheme(theme) {
   const nextTheme = normalizeTheme(theme);
@@ -184,6 +204,9 @@ let timelinePxPerFrame = 20;
 let lastEasing = 'linear';
 let lastEasingParams = null;
 let draftPathPoints = [];
+let activePathVertexId = null;
+let cleanPreviewActive = false;
+let marqueeGesture = null;
 const selectedMeshVertices = new Map();
 
 function restoredDocument() {
@@ -199,6 +222,7 @@ function restoredDocument() {
 
 const restored = restoredDocument();
 const store = new VeyraStore(restored || createStarterDocument());
+const editorSelection = new EditorSelectionState(store.selectedRef ? [store.selectedRef] : []);
 activeArtboardId = store.document.artboards[0].id;
 if (restored) savedRevision = -1;
 const componentRuntimeRegistry = createComponentRuntimeRegistry(() => store.document);
@@ -231,12 +255,13 @@ const interactionBridge = createShellInteractionBridge({
   onIntent: (intent) => dispatchInteractionIntent(intent),
 });
 const renderer = new VeyraRenderer($('veyraCanvas'), {
-  select: (reference) => store.select(reference),
-  drawPoint: (point) => {
-    draftPathPoints.push({ x: point.x, y: point.y });
+  select: (reference, options = {}) => selectEditorReference(reference, options),
+  drawVertex: (vertex) => {
+    draftPathPoints.push(cloneValue(vertex));
     renderer.setDraftPath(draftPathPoints);
-    setStatus(`${draftPathPoints.length} path point${draftPathPoints.length === 1 ? '' : 's'} · Enter to commit`);
+    setStatus(`${draftPathPoints.length} path point${draftPathPoints.length === 1 ? '' : 's'} · click-drag curves · Esc/Done commits`);
   },
+  finishPath: ({ closed = false } = {}) => finishPenDraft({ closed, enterVertex: true, reason: closed ? 'close-first-vertex' : 'renderer-finish' }),
   begin: (label) => store.begin(label),
   moveNode: (nodeId, next) => store.mutate((documentModel) => {
     writeProperty(documentModel, nodePropertyAddress(nodeId, 'transform.x'), next.x);
@@ -252,16 +277,22 @@ const renderer = new VeyraRenderer($('veyraCanvas'), {
     writeProperty(documentModel, nodePropertyAddress(groupId, 'transform.x'), target.transform.x + delta.x);
     writeProperty(documentModel, nodePropertyAddress(groupId, 'transform.y'), target.transform.y + delta.y);
   }, 'drag'),
-  moveHandle: (nodeId, vertexIndex, prefix, next) => store.mutate((documentModel) => {
-    const vertexId = nodeById(documentModel, nodeId).geometry.vertices[vertexIndex].id;
-    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, `${prefix}X`]), next.x);
-    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, `${prefix}Y`]), next.y);
+  moveHandle: (nodeId, vertexId, prefix, next) => store.mutate((documentModel) => {
+    moveBezierHandleInDocument(documentModel, nodeId, vertexId, prefix, next);
   }, 'drag'),
-  moveVertex: (nodeId, vertexIndex, next) => store.mutate((documentModel) => {
-    const vertexId = nodeById(documentModel, nodeId).geometry.vertices[vertexIndex].id;
-    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, 'x']), next.x);
-    writeProperty(documentModel, nodePropertyAddress(nodeId, ['geometry', 'vertices', vertexId, 'y']), next.y);
+  'moveVertex': (nodeId, vertexId, next) => store.mutate((documentModel) => {
+    moveVertexInDocument(documentModel, nodeId, vertexId, next);
   }, 'drag'),
+  setVertexModePreview: (nodeId, vertexId, mode) => store.mutate((documentModel) => {
+    setVertexHandleModeInDocument(documentModel, nodeId, vertexId, mode);
+  }, 'drag'),
+  setCornerRadiusPreview: (nodeId, vertexId, radius) => store.mutate((documentModel) => {
+    setVertexCornerRadiusInDocument(documentModel, nodeId, vertexId, radius);
+  }, 'drag'),
+  setVertexModeCommand: (nodeId, vertexId, mode) => projectCommand('setVertexHandleMode', { nodeId, vertexId, mode }, `Set vertex ${mode}`),
+  toggleVertexSmooth: (nodeId, vertexId, mode) => projectCommand('setVertexHandleMode', { nodeId, vertexId, mode }, `Toggle vertex ${mode}`),
+  removeHandleCommand: (nodeId, vertexId, handle) => projectCommand('moveBezierHandle', { nodeId, vertexId, handle, x: 0, y: 0, options: { removeOnly: true } }, `Remove ${handle} handle`),
+  selectVertex: (_nodeId, vertexId) => { activePathVertexId = vertexId; renderInspector(); },
   moveControl: (controlId, next) => store.mutate((documentModel) => {
     writeProperty(documentModel, rigPropertyAddress('control', controlId, 'position.x'), next.x);
     writeProperty(documentModel, rigPropertyAddress('control', controlId, 'position.y'), next.y);
@@ -379,6 +410,46 @@ function setStatus(message) {
   statusText.textContent = message;
 }
 
+function selectionRefExists(ref) {
+  if (!ref?.kind || !ref?.id) return false;
+  if (ref.kind === 'node') return Boolean(nodeById(store.document, ref.id));
+  if (ref.kind === 'bone') return Boolean(boneById(store.document, ref.id));
+  if (ref.kind === 'mesh') return Boolean(meshById(store.document, ref.id));
+  if (ref.kind === 'control') return Boolean(controlById(store.document, ref.id));
+  if (ref.kind === 'constraint') return Boolean(constraintById(store.document, ref.id));
+  if (ref.kind === 'artboard') return store.document.artboards.some((item) => item.id === ref.id);
+  if (ref.kind === 'component') return store.document.components.some((item) => item.id === ref.id);
+  if (ref.kind === 'componentInstance') return store.document.componentInstances.some((item) => item.id === ref.id);
+  return true;
+}
+
+function syncStorePrimarySelection() {
+  const primary = editorSelection.primary;
+  const current = store.selectedRef;
+  if (!primary) {
+    if (current) store.select(null);
+    else renderAll('selection');
+    return;
+  }
+  if (!current || current.kind !== primary.kind || current.id !== primary.id) store.select(primary);
+  else renderAll('selection');
+}
+
+function selectEditorReference(reference, { toggle = false } = {}) {
+  if (!reference) editorSelection.clear();
+  else if (toggle) editorSelection.toggle(reference);
+  else editorSelection.set([reference], reference);
+  syncStorePrimarySelection();
+  return editorSelection.refs;
+}
+
+function applyEditorSelection(refs, { additive = false } = {}) {
+  if (!additive) editorSelection.set(refs);
+  else for (const ref of refs) editorSelection.add(ref);
+  syncStorePrimarySelection();
+  return editorSelection.refs;
+}
+
 function commit(label, mutation) {
   try {
     store.execute(label, mutation);
@@ -406,8 +477,8 @@ function nodeIcon(type) {
 
 const TOOL_HINTS = Object.freeze({
   select: 'Select artwork. Select a Path to reveal and drag its vertices.',
-  vertex: 'Select a Path, then drag its cyan vertices. Escape returns to Select.',
-  pencil: 'Click to place path points. Enter commits; Escape cancels.',
+  vertex: 'Drag vertices/handles. Alt-drag a straight point creates mirrored handles; Ctrl/Cmd-click toggles smooth; Ctrl/Cmd-click a handle removes it.',
+  pencil: 'Click for straight points; click-drag for Bezier handles. Esc, Done, tool switch, or first-point close commits 2+ points.',
   bone: 'Drag a bone end to pose it; drag its joint to translate. IK bones move their target.',
   mesh: 'Select a mesh, choose a vertex, and edit each bone influence in Properties.',
   control: 'Drag yellow controls to solve IK and other control-driven constraints.',
@@ -415,15 +486,18 @@ const TOOL_HINTS = Object.freeze({
   pan: 'Drag anywhere to pan the canvas. Alt+drag works from every tool.',
 });
 
-function setTool(tool, selectComponent = true) {
-  if (currentTool === 'pencil' && tool !== 'pencil') {
-    draftPathPoints = [];
-    renderer.setDraftPath([]);
+function setTool(tool, selectComponent = true, skipPenFinalize = false) {
+  if (!skipPenFinalize && currentTool === 'pencil' && tool !== 'pencil') {
+    finishPenDraft({ closed: false, enterVertex: false, reason: 'tool-switch' });
   }
   currentTool = tool;
   renderer.setTool(tool);
   stagePanel.dataset.tool = tool;
   toolHint.textContent = TOOL_HINTS[tool];
+  if (finishPathButton) {
+    finishPathButton.hidden = !['pencil', 'vertex'].includes(tool);
+    finishPathButton.querySelector('span').textContent = tool === 'pencil' ? 'Done Path' : 'Done Editing';
+  }
   document.querySelectorAll('[data-tool]').forEach((button) => {
     const active = button.dataset.tool === tool;
     button.classList.toggle('isActive', active);
@@ -455,21 +529,24 @@ function renderHierarchy() {
   const appendNode = (node, depth) => {
     const row = document.createElement('div');
     row.className = 'treeRow';
+    const nodeRef = createNodeRef(node.id);
+    const selectedInEditor = editorSelection.has(nodeRef);
     row.classList.toggle('isSelected', store.selectedKind === 'node' && node.id === store.selectedId);
+    row.classList.toggle('isMultiSelected', selectedInEditor);
     row.classList.toggle('isHidden', !node.visible);
 
     const select = document.createElement('button');
     select.className = 'treeSelect';
     select.style.paddingLeft = `${8 + depth * 15}px`;
     select.setAttribute('role', 'treeitem');
-    select.setAttribute('aria-selected', String(store.selectedKind === 'node' && node.id === store.selectedId));
+    select.setAttribute('aria-selected', String(selectedInEditor));
     select.title = `${node.name} · ${node.type}`;
     select.append(icon(nodeIcon(node.type), 'treeIcon'));
     const name = document.createElement('span');
     name.className = 'treeName';
     name.textContent = node.name;
     select.appendChild(name);
-    select.onclick = () => store.select({ kind: 'node', id: node.id });
+    select.onclick = (event) => selectEditorReference(nodeRef, { toggle: event.shiftKey });
 
     const visible = document.createElement('button');
     visible.className = 'treeUtility';
@@ -1161,6 +1238,19 @@ function renderNodeInspector(node) {
   appendNote(transform.fieldset, 'Angles display in degrees. Veyra stores radians and evaluates translate → rotate → skew X → skew Y → scale → pivot.');
   inspector.appendChild(transform.fieldset);
 
+  const evaluatedNode = evaluatedScene?.nodes.find((candidate) => candidate.id === node.id);
+  if (evaluatedNode) {
+    const worldPoint = transformPoint(evaluatedNode.worldMatrix, { x: 0, y: 0 });
+    const evaluatedPosition = section('Evaluated world position');
+    evaluatedPosition.grid.append(
+      field('World X', Number(worldPoint.x.toFixed(3)), () => {}, { type: 'number', number: true }),
+      field('World Y', Number(worldPoint.y.toFixed(3)), () => {}, { type: 'number', number: true }),
+    );
+    evaluatedPosition.grid.querySelectorAll('input').forEach((input) => { input.disabled = true; });
+    appendNote(evaluatedPosition.fieldset, 'Read-only evaluated world coordinates. Authored local X/Y remain in Transform above.');
+    inspector.appendChild(evaluatedPosition.fieldset);
+  }
+
   const appearance = section('Appearance');
   if (node.type !== 'group') {
     appendFillInspector(appearance, 'node', node);
@@ -1202,28 +1292,37 @@ function renderNodeInspector(node) {
     } else if (node.type === 'star') {
       geometry.grid.append(property('Outer radius', 'outerRadius', { min: 0.01 }), property('Inner radius', 'innerRadius', { min: 0 }), property('Points', 'points', { min: 2, max: 256 }));
     } else if (node.type === 'path') {
-      geometry.grid.append(checkbox('Closed path', node.geometry.closed, (value) => nodePropertyMutation(node, 'geometry.closed', `Set ${node.name} closed`, value)));
-      const summary = document.createElement('div');
-      summary.className = 'vertexSummary';
-      summary.innerHTML = `<span>Authored vertices</span><strong>${node.geometry.vertices.length}</strong>`;
-      const actions = document.createElement('div');
-      actions.className = 'pathVertexActions';
-      const addVertex = document.createElement('button');
-      addVertex.type = 'button';
-      addVertex.className = 'textButton';
-      addVertex.textContent = 'Add vertex';
-      addVertex.title = 'Add a vertex, then position it with the Vertices tool';
-      addVertex.onclick = () => addPathVertex(node);
-      const removeVertex = document.createElement('button');
-      removeVertex.type = 'button';
-      removeVertex.className = 'textButton danger';
-      removeVertex.textContent = 'Remove last';
-      removeVertex.disabled = node.geometry.vertices.length <= 2;
-      removeVertex.title = 'Remove the most recently added vertex';
-      removeVertex.onclick = () => removePathVertex(node);
-      actions.append(addVertex, removeVertex);
+      if (!node.geometry.vertices.some((vertex) => vertex.id === activePathVertexId)) activePathVertexId = node.geometry.vertices[0]?.id || null;
+      const activeVertex = node.geometry.vertices.find((vertex) => vertex.id === activePathVertexId) || node.geometry.vertices[0];
+      geometry.grid.append(
+        field('Path state', node.geometry.closed ? 'closed' : 'open', () => {}, { select: [{ value: 'open', label: 'Open' }, { value: 'closed', label: 'Closed' }] }),
+        field('Vertex', activeVertex?.id || '', (value) => { activePathVertexId = value; renderInspector(); }, {
+          select: node.geometry.vertices.map((vertex, index) => ({ value: vertex.id, label: `#${index + 1} · ${vertex.id}` })), full: true,
+        }),
+      );
+      geometry.grid.querySelector('select')?.setAttribute('disabled', '');
+      if (activeVertex) {
+        geometry.grid.append(
+          field('Vertex X', activeVertex.x, (value) => projectCommand('moveVertex', { nodeId: node.id, vertexId: activeVertex.id, x: value, y: activeVertex.y }, `Move ${node.name} vertex X`), { type: 'number', number: true, step: 1 }),
+          field('Vertex Y', activeVertex.y, (value) => projectCommand('moveVertex', { nodeId: node.id, vertexId: activeVertex.id, x: activeVertex.x, y: value }, `Move ${node.name} vertex Y`), { type: 'number', number: true, step: 1 }),
+          field('Handle mode', activeVertex.handleMode || 'straight', (value) => projectCommand('setVertexHandleMode', { nodeId: node.id, vertexId: activeVertex.id, mode: value }, `Set ${node.name} handle mode`), {
+            select: ['straight','mirrored','aligned','detached'].map((value) => ({ value, label: value })),
+          }),
+          field('Corner radius', activeVertex.cornerRadius || 0, (value) => projectCommand('setVertexCornerRadius', { nodeId: node.id, vertexId: activeVertex.id, radius: value }, `Set ${node.name} vertex radius`), { type: 'number', number: true, min: 0, step: 1 }),
+        );
+      }
+      const summary = document.createElement('div'); summary.className = 'vertexSummary';
+      summary.innerHTML = `<span>Stable pathVertex refs</span><strong>${node.geometry.vertices.length}</strong>`;
+      const actions = document.createElement('div'); actions.className = 'pathVertexActions';
+      actions.append(
+        inspectorAction('Add vertex', 'plus', () => addPathVertex(node)),
+        inspectorAction('Remove vertex', 'minus', () => removePathVertex(node)),
+        inspectorAction(node.geometry.closed ? 'Open path' : 'Close path', 'path', () => projectCommand(node.geometry.closed ? 'openPath' : 'closePath', { nodeId: node.id }, `${node.geometry.closed ? 'Open' : 'Close'} ${node.name}`)),
+        inspectorAction('Reverse', 'mirror', () => projectCommand('reversePath', { nodeId: node.id }, `Reverse ${node.name}`)),
+      );
+      actions.children[1].disabled = node.geometry.vertices.length <= 2 || !activeVertex;
       geometry.fieldset.append(summary, actions);
-      appendNote(geometry.fieldset, 'Use Vertices (E) to drag cyan points. Add/Remove is undoable; pale Bezier handles are display-only.');
+      appendNote(geometry.fieldset, 'Vertices are stable pathVertex refs. Alt-drag a straight vertex to create mirrored handles; Ctrl/Cmd-click vertex toggles straight/smooth; Ctrl/Cmd-click a handle removes only that handle.');
     }
     inspector.appendChild(geometry.fieldset);
   }
@@ -1483,8 +1582,31 @@ function renderConstraintInspector(constraint) {
   inspector.appendChild(settings.fieldset);
 }
 
+function renderMultiSelectionInspector() {
+  inspectorTitle.textContent = `${editorSelection.size} selected`;
+  selectedType.textContent = 'MULTI';
+  const selection = section('Selection bounds');
+  const refs = editorSelection.refs;
+  const bounds = selectionWorldBounds(evaluatedScene, refs);
+  if (bounds) {
+    selection.grid.append(
+      field('World X', Number(bounds.left.toFixed(3)), () => {}, { type: 'number', number: true }),
+      field('World Y', Number(bounds.top.toFixed(3)), () => {}, { type: 'number', number: true }),
+      field('Width', Number(bounds.width.toFixed(3)), () => {}, { type: 'number', number: true }),
+      field('Height', Number(bounds.height.toFixed(3)), () => {}, { type: 'number', number: true }),
+    );
+    selection.grid.querySelectorAll('input').forEach((input) => { input.disabled = true; });
+  }
+  appendNote(selection.fieldset, refs.map((ref) => `${ref.kind}:${ref.id}`).join(' · '));
+  const actions = document.createElement('div'); actions.className = 'inlineActions';
+  actions.append(inspectorAction('Group', 'group', () => dispatchEditorCommand('editor.selection.group')));
+  selection.fieldset.appendChild(actions);
+  inspector.appendChild(selection.fieldset);
+}
+
 function renderInspector() {
   inspector.replaceChildren();
+  if (editorSelection.size > 1) { renderMultiSelectionInspector(); return; }
   if (store.selectedArtboard) renderArtboardInspector(store.selectedArtboard);
   else if (store.selectedComponent) renderComponentInspector(store.selectedComponent);
   else if (store.selectedComponentInstance) renderComponentInstanceInspector(store.selectedComponentInstance);
@@ -1845,7 +1967,7 @@ function evaluateCurrentFrame() {
   evaluatedScene = evaluateDocument(store.document, layers, null, { artboardId: activeArtboard().id, componentRuntime: componentRuntimeRegistry });
   interactionBridge.updateDocument(store.document);
   interactionSceneRevision += 1;
-  renderer.render(evaluatedScene, store.selectedRef);
+  renderer.render(evaluatedScene, store.selectedRef, editorSelection.refs);
 }
 
 function setCurrentFrame(frame) {
@@ -2025,7 +2147,9 @@ function renderAll(reason = 'change') {
 
   const selected = store.selectedObject;
   const selectedLabel = store.selectedKind === 'constraint' ? selected?.type : store.selectedKind;
-  selectionStatus.textContent = selected ? `${selected.name} · ${selectedLabel}` : 'Artboard selected';
+  selectionStatus.textContent = editorSelection.size > 1
+    ? `${editorSelection.size} objects selected`
+    : selected ? `${selected.name} · ${selectedLabel}` : 'Artboard selected';
   if (!['selection', 'drag', 'validation-error'].includes(reason)) setStatus(reason.replace(/^./, (letter) => letter.toUpperCase()));
 }
 
@@ -2044,6 +2168,12 @@ function scheduleAutosave(reason) {
 
 store.subscribe((_current, reason) => {
   if (!store.document.artboards.some((item) => item.id === activeArtboardId)) activeArtboardId = store.document.artboards[0].id;
+  editorSelection.prune(selectionRefExists);
+  if (reason === 'selection') {
+    const primary = store.selectedRef;
+    if (primary && !editorSelection.has(primary)) editorSelection.set([primary], primary);
+    if (!primary && editorSelection.size) editorSelection.clear();
+  }
   componentRuntimeRegistry.prune();
   renderAll(reason);
   scheduleAutosave(reason);
@@ -2053,57 +2183,63 @@ function addPathVertex(node) {
   const vertices = node.geometry.vertices;
   const last = vertices.at(-1);
   const previous = vertices.at(-2) || last;
-  const next = {
-    id: createId('vertex'),
+  const vertex = {
     x: (last.x + previous.x) / 2 + 24,
     y: (last.y + previous.y) / 2 + 24,
     inX: 0, inY: 0, outX: 0, outY: 0,
+    handleMode: 'straight', cornerRadius: 0,
   };
-  store.execute(`Add ${node.name} vertex`, (documentModel) => {
-    nodeById(documentModel, node.id).geometry.vertices.push(next);
-  });
-  setTool('vertex', false);
+  const ref = projectCommand('addVertex', { nodeId: node.id, vertex }, `Add ${node.name} vertex`);
+  if (ref?.id) activePathVertexId = ref.id;
+  setTool('vertex', false, true);
 }
 
 function removePathVertex(node) {
-  if (node.geometry.vertices.length <= 2) {
+  const vertexId = activePathVertexId || node.geometry.vertices.at(-1)?.id;
+  if (!vertexId || node.geometry.vertices.length <= 2) {
     showToast('A path needs at least two vertices', true);
     return;
   }
-  store.execute(`Remove ${node.name} vertex`, (documentModel) => {
-    nodeById(documentModel, node.id).geometry.vertices.pop();
-  });
-  setTool('vertex', false);
+  const removed = projectCommand('removeVertex', { nodeId: node.id, vertexId }, `Remove ${node.name} vertex`);
+  if (removed) activePathVertexId = nodeById(store.document, node.id)?.geometry.vertices.at(-1)?.id || null;
 }
 
-function commitDraftPath() {
+function finishPenDraft({ closed = false, enterVertex = true, reason = 'finish' } = {}) {
   if (draftPathPoints.length < 2) {
-    showToast('Place at least two points before committing a path', true);
-    return;
+    const hadPoint = draftPathPoints.length > 0;
+    draftPathPoints = [];
+    renderer.setDraftPath([]);
+    if (hadPoint) setStatus('Single-point path draft cancelled cleanly');
+    return false;
   }
-  const node = createNode('path', {
-    artboard: activeArtboardRef(),
-    name: 'Drawn Path',
-    transform: { x: 0, y: 0 },
-    paint: { fill: 'none', stroke: '#ec4899', strokeWidth: 4 },
-    geometry: {
-      closed: false,
-      vertices: draftPathPoints.map((point) => ({ x: point.x, y: point.y, inX: 0, inY: 0, outX: 0, outY: 0 })),
+  const geometry = finalizePenDraftGeometry(createPenDraft(draftPathPoints), { closed });
+  const created = projectCommand('add', {
+    type: 'path',
+    options: {
+      artboard: activeArtboardRef(),
+      name: 'Drawn Path',
+      transform: { x: 0, y: 0 },
+      paint: { fill: 'none', stroke: '#ec4899', strokeWidth: 4 },
+      geometry,
     },
-  });
-  store.execute('Draw path', (documentModel) => documentModel.nodes.push(node));
-  store.select(createNodeRef(node.id));
+  }, `Draw path (${reason})`);
+  const nodeId = created?.id || created;
+  if (!nodeId || !nodeById(store.document, nodeId)) return false;
   draftPathPoints = [];
   renderer.setDraftPath([]);
-  setTool('vertex', false);
-  showToast('Path created — drag cyan vertices to edit');
+  const node = nodeById(store.document, nodeId);
+  activePathVertexId = node?.geometry.vertices.at(-1)?.id || null;
+  selectEditorReference(createNodeRef(nodeId));
+  if (enterVertex) setTool('vertex', false, true);
+  showToast(closed ? 'Closed path created' : 'Path created');
+  return true;
 }
 
 function cancelDraftPath() {
   if (!draftPathPoints.length) return false;
   draftPathPoints = [];
   renderer.setDraftPath([]);
-  showToast('Path drawing cancelled');
+  setStatus('Path draft cancelled');
   return true;
 }
 
@@ -2566,18 +2702,22 @@ function focusEditorReference(ref, { select = true, padding = 54 } = {}) {
     showToast(`Cannot locate ${ref.kind}:${ref.id}`, true);
     return false;
   }
-  if (select) store.select(ref);
+  if (select) selectEditorReference(ref);
   const next = fitBoundsViewport(bounds, activeArtboard(), editorScreenSize(), { padding });
   applyViewportState(next, `Focused ${ref.kind}`);
   return true;
 }
 
 function fitSelection() {
-  if (!store.selectedRef) {
+  if (!editorSelection.size) {
     showToast('Select an object to fit', true);
     return false;
   }
-  return focusEditorReference(store.selectedRef, { select: false, padding: 44 });
+  if (editorSelection.size === 1) return focusEditorReference(editorSelection.primary, { select: false, padding: 44 });
+  if (!evaluatedScene) evaluateCurrentFrame();
+  const bounds = selectionWorldBounds(evaluatedScene, editorSelection.refs);
+  if (!bounds) return false;
+  return applyViewportState(fitBoundsViewport(bounds, activeArtboard(), editorScreenSize(), { padding: 44 }), 'Focused selection');
 }
 
 $('zoomOut').onclick = () => setZoom(zoom / 1.2);
@@ -2585,7 +2725,7 @@ $('zoomIn').onclick = () => setZoom(zoom * 1.2);
 $('zoomFit').onclick = fitCanvas;
 $('zoom100').onclick = () => applyViewportState({ ...renderer.getViewport(), zoom: 1 }, 'Canvas 100% · 1 CSS px per world unit');
 $('fitSelection').onclick = fitSelection;
-$('focusSelection').onclick = () => store.selectedRef ? focusEditorReference(store.selectedRef) : showToast('Select an object to focus', true);
+$('focusSelection').onclick = () => editorSelection.size ? fitSelection() : showToast('Select an object to focus', true);
 
 stageViewport.addEventListener('wheel', (event) => {
   event.preventDefault();
@@ -2603,6 +2743,76 @@ stageViewport.addEventListener('wheel', (event) => {
   syncArtboardFrame();
   setStatus(event.shiftKey ? 'Canvas panned horizontally' : 'Canvas panned');
 }, { passive: false });
+
+function updateCoordinateHud(event) {
+  const point = renderer.clientPoint(event.clientX, event.clientY);
+  coordinateReadoutElement.value = formatCoordinateReadout(point, 2);
+  coordinateReadoutElement.textContent = coordinateReadoutElement.value;
+}
+stageViewport.addEventListener('pointermove', updateCoordinateHud);
+
+function tryBeginMarquee(event) {
+  if (event.button !== 0 || currentTool !== 'select' || spacePanHeld || activeArtboardResize) return false;
+  const target = event.target;
+  const emptySurface = target === canvas
+    || target?.classList?.contains('workspaceCatcher')
+    || target?.classList?.contains('artboardBackground');
+  if (!emptySurface) return false;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const start = { x: event.clientX, y: event.clientY };
+  const viewportRect = stageViewport.getBoundingClientRect();
+  const additive = event.shiftKey;
+  const mode = event.ctrlKey || event.metaKey ? 'contain' : 'intersect';
+  let moved = false;
+  marqueeGesture = { pointerId: event.pointerId, start, additive, mode };
+  stageViewport.setPointerCapture?.(event.pointerId);
+  stageViewport.classList.add('isMarqueeSelecting');
+  const cleanup = () => {
+    stageViewport.removeEventListener('pointermove', move);
+    stageViewport.removeEventListener('pointerup', end);
+    stageViewport.removeEventListener('pointercancel', cancel);
+    stageViewport.removeEventListener('lostpointercapture', cancel);
+    marqueeBox.hidden = true;
+    stageViewport.classList.remove('isMarqueeSelecting');
+    marqueeGesture = null;
+  };
+  const move = (nextEvent) => {
+    if (nextEvent.pointerId !== event.pointerId) return;
+    moved = moved || Math.hypot(nextEvent.clientX - start.x, nextEvent.clientY - start.y) >= 3;
+    if (!moved) return;
+    const left = Math.min(start.x, nextEvent.clientX) - viewportRect.left;
+    const top = Math.min(start.y, nextEvent.clientY) - viewportRect.top;
+    marqueeBox.style.left = `${left}px`;
+    marqueeBox.style.top = `${top}px`;
+    marqueeBox.style.width = `${Math.abs(nextEvent.clientX - start.x)}px`;
+    marqueeBox.style.height = `${Math.abs(nextEvent.clientY - start.y)}px`;
+    marqueeBox.hidden = false;
+  };
+  const end = (nextEvent) => {
+    if (nextEvent.pointerId !== event.pointerId) return;
+    cleanup();
+    try { stageViewport.releasePointerCapture?.(event.pointerId); } catch {}
+    if (!moved) {
+      if (!additive) selectEditorReference(null);
+      return;
+    }
+    const startWorld = renderer.clientPoint(start.x, start.y);
+    const endWorld = renderer.clientPoint(nextEvent.clientX, nextEvent.clientY);
+    const refs = marqueeNodeRefs(evaluatedScene, worldRectFromPoints(startWorld, endWorld), { mode, deep: false });
+    applyEditorSelection(refs, { additive });
+    setStatus(`${mode === 'contain' ? 'Contained' : 'Marquee'} selection · ${refs.length} matched`);
+  };
+  const cancel = (nextEvent) => {
+    if (nextEvent.pointerId != null && nextEvent.pointerId !== event.pointerId) return;
+    cleanup();
+  };
+  stageViewport.addEventListener('pointermove', move);
+  stageViewport.addEventListener('pointerup', end);
+  stageViewport.addEventListener('pointercancel', cancel);
+  stageViewport.addEventListener('lostpointercapture', cancel);
+  return true;
+}
 
 let panGesture = null;
 let activeArtboardResize = null;
@@ -2693,6 +2903,7 @@ stageViewport.addEventListener('pointerdown', (event) => {
     beginArtboardResize(event, resizeDirection);
     return;
   }
+  if (tryBeginMarquee(event)) return;
   const kind = navigationPanKind(event, { tool: currentTool, spaceHeld: spacePanHeld });
   if (!kind) return;
   if (kind === 'right') suppressNextCanvasContextMenu = false;
@@ -2850,6 +3061,72 @@ toggleHierarchyButton.onclick = () => {
   applyWorkspaceLayout(true, cameraAnchor);
 };
 
+function groupEditorSelection() {
+  const refs = editorSelection.refs.filter((ref) => ref.kind === 'node');
+  if (!refs.length) { showToast('Select artwork to group', true); return false; }
+  const result = projectCommand('groupNodes', { refs, options: { name: 'Group' } }, 'Group selection');
+  if (!result?.groupId) return false;
+  selectEditorReference(createNodeRef(result.groupId));
+  return result;
+}
+
+function ungroupEditorSelection() {
+  const primary = editorSelection.primary;
+  const group = primary?.kind === 'node' ? nodeById(store.document, primary.id) : null;
+  if (!group || group.type !== 'group') { showToast('Select a group to ungroup', true); return false; }
+  const result = projectCommand('ungroupNode', { groupId: group.id }, `Ungroup ${group.name}`);
+  if (!result?.childIds) return false;
+  applyEditorSelection(result.childIds.map(createNodeRef));
+  return result;
+}
+
+function selectAllArtwork() {
+  const refs = store.document.nodes
+    .filter((node) => onActiveArtboard(node) && !node.parent && node.visible && !node.locked)
+    .map((node) => createNodeRef(node.id));
+  applyEditorSelection(refs);
+  setStatus(`Selected ${refs.length} top-level visible unlocked object${refs.length === 1 ? '' : 's'}`);
+  return refs;
+}
+
+function toggleCleanPreview(force = null) {
+  cleanPreviewActive = force == null ? !cleanPreviewActive : Boolean(force);
+  renderer.setOverlayVisibility(normalizeOverlayVisibility(cleanPreviewActive
+    ? { selection: false, vertices: false, rig: false, guides: false }
+    : { selection: true, vertices: true, rig: true, guides: true }));
+  cleanPreviewButton.classList.toggle('isActive', cleanPreviewActive);
+  cleanPreviewButton.setAttribute('aria-pressed', String(cleanPreviewActive));
+  setStatus(cleanPreviewActive ? 'Clean artwork preview' : 'Editor overlays restored');
+  return cleanPreviewActive;
+}
+
+const editorCommandDispatcher = createEditorCommandDispatcher({
+  'editor.path.pen': () => setTool('pencil'),
+  'editor.path.finish': () => {
+    if (currentTool === 'pencil') return finishPenDraft({ closed: false, enterVertex: true, reason: 'editor.path.finish' });
+    if (currentTool === 'vertex') { setTool('select', false, true); return true; }
+    return false;
+  },
+  'editor.path.editVertices': () => {
+    const node = editorSelection.primary?.kind === 'node' ? nodeById(store.document, editorSelection.primary.id) : null;
+    if (!node || node.type !== 'path') return false;
+    activePathVertexId = node.geometry.vertices[0]?.id || null;
+    setTool('vertex', false, true);
+    return true;
+  },
+  'editor.selection.group': () => groupEditorSelection(),
+  'editor.selection.ungroup': () => ungroupEditorSelection(),
+  'editor.selection.selectAll': () => selectAllArtwork(),
+  'editor.view.cleanPreview': () => toggleCleanPreview(),
+});
+
+function dispatchEditorCommand(commandId, payload = {}) {
+  return editorCommandDispatcher.dispatch(commandId, payload);
+}
+
+finishPathButton.onclick = () => dispatchEditorCommand('editor.path.finish', { source: 'button' });
+cleanPreviewButton.onclick = () => dispatchEditorCommand('editor.view.cleanPreview', { source: 'button' });
+
 window.addEventListener('keydown', (event) => {
   const target = event.target;
   const editing = target instanceof HTMLInputElement
@@ -2858,6 +3135,13 @@ window.addEventListener('keydown', (event) => {
     || target?.isContentEditable;
   const commandKey = event.ctrlKey || event.metaKey;
   const key = event.key.toLowerCase();
+  const primaryPath = editorSelection.primary?.kind === 'node' ? nodeById(store.document, editorSelection.primary.id) : null;
+  const editorCommand = !editing ? editorCommandForKeyEvent(event, { tool: currentTool, primaryIsPath: primaryPath?.type === 'path' }) : null;
+  if (editorCommand) {
+    event.preventDefault();
+    dispatchEditorCommand(editorCommand, { key: event.key, source: 'keyboard' });
+    return;
+  }
   if (commandKey && (['+', '='].includes(event.key) || event.code === 'NumpadAdd')) {
     event.preventDefault();
     setZoom(zoom * 1.2);
@@ -2885,12 +3169,9 @@ window.addEventListener('keydown', (event) => {
       if (store.selectedRef) focusEditorReference(store.selectedRef);
       else showToast('Select an object to focus', true);
     } else fitSelection();
-  } else if (!editing && !commandKey && !event.altKey && ['v', 'e', 'p', 'b', 'm', 'c', 'k', 'h'].includes(key)) {
+  } else if (!editing && !commandKey && !event.altKey && ['v', 'e', 'b', 'm', 'c', 'k', 'h'].includes(key)) {
     event.preventDefault();
-    setTool({ v: 'select', e: 'vertex', p: 'pencil', b: 'bone', m: 'mesh', c: 'control', k: 'constraint', h: 'pan' }[key]);
-  } else if (!editing && currentTool === 'pencil' && event.key === 'Enter') {
-    event.preventDefault();
-    commitDraftPath();
+    setTool({ v: 'select', e: 'vertex', b: 'bone', m: 'mesh', c: 'control', k: 'constraint', h: 'pan' }[key]);
   } else if (!editing && event.key === ' ') {
     event.preventDefault();
     if (!event.repeat) {
@@ -2914,17 +3195,11 @@ window.addEventListener('keydown', (event) => {
       setStatus('Authoring gesture cancelled');
       return;
     }
-    if (currentTool === 'pencil') {
-      cancelDraftPath();
-      setTool('select', false);
-      return;
-    }
-    if (currentTool === 'vertex') setTool('select', false);
     if (selectedKeyframe) {
       selectedKeyframe = null;
       renderTimeline();
     } else {
-      store.select(null);
+      selectEditorReference(null);
     }
   }
 });
@@ -2991,6 +3266,27 @@ globalThis.veyra = Object.freeze({
   fireComponentMachineInput: (scope, machineId, inputId) => { const result = componentRuntimeRegistry.fireMachineInput(scope, machineId, inputId); evaluateCurrentFrame(); return result; },
   stepComponentMachine: (scope, machineId, deltaSeconds) => { const result = componentRuntimeRegistry.stepMachine(scope, machineId, deltaSeconds); evaluateCurrentFrame(); return result; },
   resetComponentRuntime: (scope) => { const result = componentRuntimeRegistry.resetInstance(scope); evaluateCurrentFrame(); return result; },
+  addVertex: (nodeId, vertex, index = null) => dispatchCompatibilityCommand('addVertex', { nodeId, vertex, ...(index == null ? {} : { index }) }, { label: `Add vertex ${nodeId}`, source: 'script' }),
+  removeVertex: (nodeId, vertexId) => dispatchCompatibilityCommand('removeVertex', { nodeId, vertexId }, { label: `Remove vertex ${vertexId}`, source: 'script' }),
+  moveVertex: (nodeId, vertexId, x, y) => dispatchCompatibilityCommand('moveVertex', { nodeId, vertexId, x, y }, { label: `Move vertex ${vertexId}`, source: 'script' }),
+  moveBezierHandle: (nodeId, vertexId, handle, x, y, options = {}) => dispatchCompatibilityCommand('moveBezierHandle', { nodeId, vertexId, handle, x, y, options }, { label: `Move ${handle} handle ${vertexId}`, source: 'script' }),
+  setVertexHandleMode: (nodeId, vertexId, mode) => dispatchCompatibilityCommand('setVertexHandleMode', { nodeId, vertexId, mode }, { label: `Set vertex mode ${vertexId}`, source: 'script' }),
+  setVertexCornerRadius: (nodeId, vertexId, radius) => dispatchCompatibilityCommand('setVertexCornerRadius', { nodeId, vertexId, radius }, { label: `Set vertex radius ${vertexId}`, source: 'script' }),
+  openPath: (nodeId) => dispatchCompatibilityCommand('openPath', { nodeId }, { label: `Open path ${nodeId}`, source: 'script' }),
+  closePath: (nodeId) => dispatchCompatibilityCommand('closePath', { nodeId }, { label: `Close path ${nodeId}`, source: 'script' }),
+  reversePath: (nodeId) => dispatchCompatibilityCommand('reversePath', { nodeId }, { label: `Reverse path ${nodeId}`, source: 'script' }),
+  groupNodes: (refs, options = {}) => dispatchCompatibilityCommand('groupNodes', { refs, options }, { label: 'Group nodes', source: 'script' }),
+  ungroupNode: (groupId) => dispatchCompatibilityCommand('ungroupNode', { groupId }, { label: `Ungroup ${groupId}`, source: 'script' }),
+  dispatchEditorCommand: (commandId, payload = {}) => dispatchEditorCommand(commandId, payload),
+  getEditorState: () => ({
+    tool: currentTool,
+    selection: editorSelection.refs,
+    primarySelection: editorSelection.primary,
+    pointerWorld: coordinateReadoutElement.value,
+    cleanPreview: cleanPreviewActive,
+    draftVertexCount: draftPathPoints.length,
+    overlayVisibility: renderer.getOverlayVisibility(),
+  }),
   getViewportState: () => ({ ...renderer.getViewport(), activeArtboardId, layout: { ...workspaceLayout }, theme: document.documentElement.dataset.theme }),
   setViewport: (viewport) => applyViewportState(viewport, 'Viewport updated'),
   fitArtboard: () => fitCanvas(),

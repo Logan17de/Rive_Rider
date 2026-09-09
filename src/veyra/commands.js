@@ -434,6 +434,58 @@ const COMMAND_TABLE = {
     summary: 'Remove a Component instance by stable id.', params: [param('instanceId','string',true)],
     run: (store,args,command) => store.removeComponentInstance(args.instanceId,command ?? {}),
   },
+  addVertex: {
+    summary: 'Add a stable pathVertex to an authored path.',
+    params: [param('nodeId','string',true), param('vertex','object',true), param('index','number',false)],
+    run: (store,args,command) => store.addVertex(args.nodeId,args.vertex,args.index ?? null,command ?? {}),
+  },
+  removeVertex: {
+    summary: 'Remove a stable pathVertex; dependency-bound removals fail closed.',
+    params: [param('nodeId','string',true), param('vertexId','string',true)],
+    run: (store,args,command) => store.removeVertex(args.nodeId,args.vertexId,command ?? {}),
+  },
+  moveVertex: {
+    summary: 'Move a pathVertex by stable id.',
+    params: [param('nodeId','string',true), param('vertexId','string',true), param('x','number',true), param('y','number',true)],
+    run: (store,args,command) => store.moveVertex(args.nodeId,args.vertexId,args.x,args.y,command ?? {}),
+  },
+  moveBezierHandle: {
+    summary: 'Move or remove one Bezier handle by stable pathVertex id.',
+    params: [param('nodeId','string',true), param('vertexId','string',true), param('handle','string',true), param('x','number',true), param('y','number',true), param('options','object',false)],
+    run: (store,args,command) => store.moveBezierHandle(args.nodeId,args.vertexId,args.handle,args.x,args.y,args.options ?? {},command ?? {}),
+  },
+  setVertexHandleMode: {
+    summary: 'Set straight/mirrored/aligned/detached handle semantics for a stable pathVertex.',
+    params: [param('nodeId','string',true), param('vertexId','string',true), param('mode','string',true)],
+    run: (store,args,command) => store.setVertexHandleMode(args.nodeId,args.vertexId,args.mode,command ?? {}),
+  },
+  setVertexCornerRadius: {
+    summary: 'Set deterministic straight-corner radius for a stable pathVertex.',
+    params: [param('nodeId','string',true), param('vertexId','string',true), param('radius','number',true)],
+    run: (store,args,command) => store.setVertexCornerRadius(args.nodeId,args.vertexId,args.radius,command ?? {}),
+  },
+  openPath: {
+    summary: 'Open an authored path without changing vertex identity.', params: [param('nodeId','string',true)],
+    run: (store,args,command) => store.openPath(args.nodeId,command ?? {}),
+  },
+  closePath: {
+    summary: 'Close an authored path without changing vertex identity.', params: [param('nodeId','string',true)],
+    run: (store,args,command) => store.closePath(args.nodeId,command ?? {}),
+  },
+  reversePath: {
+    summary: 'Reverse path direction while preserving stable vertex ids.', params: [param('nodeId','string',true)],
+    run: (store,args,command) => store.reversePath(args.nodeId,command ?? {}),
+  },
+  groupNodes: {
+    summary: 'Create a real group around stable sibling node refs while preserving world transforms/order.',
+    params: [param('refs','array',true), param('options','object',false)],
+    run: (store,args,command) => store.groupNodes(args.refs,args.options ?? {},command ?? {}),
+  },
+  ungroupNode: {
+    summary: 'Remove a group while preserving direct-child world transforms and ordering.',
+    params: [param('groupId','string',true)],
+    run: (store,args,command) => store.ungroupNode(args.groupId,command ?? {}),
+  },
   setComponentOverride: {
     summary: 'Set one bounded source-property override on a Component instance.',
     params: [param('instanceId','string',true), param('override','object',true)],
@@ -453,6 +505,17 @@ function manifestParameter(name, type, required, description, extras = {}) {
 const bounds = (key) => ({ bounds: { ...VEYRA_PROPERTY_BOUNDS[key] } });
 
 const COMMAND_MANIFEST_OVERRIDES = {
+  addVertex: { targetKind: 'pathVertex', capabilities: ['stable-id','path-topology','transactional','undoable','returns-ref'] },
+  removeVertex: { targetKind: 'pathVertex', capabilities: ['stable-id','dependency-checked','path-topology','transactional','undoable'] },
+  moveVertex: { targetKind: 'pathVertex', capabilities: ['stable-id','geometry-write','transactional','undoable'] },
+  moveBezierHandle: { targetKind: 'pathVertex', capabilities: ['stable-id','bezier-handle','transactional','undoable'] },
+  setVertexHandleMode: { targetKind: 'pathVertex', capabilities: ['straight','mirrored','aligned','detached','transactional','undoable'] },
+  setVertexCornerRadius: { targetKind: 'pathVertex', capabilities: ['corner-radius','deterministic-compile','transactional','undoable'] },
+  openPath: { targetKind: 'node', capabilities: ['path-topology','identity-preserving','transactional','undoable'] },
+  closePath: { targetKind: 'node', capabilities: ['path-topology','identity-preserving','transactional','undoable'] },
+  reversePath: { targetKind: 'node', capabilities: ['path-topology','stable-vertex-ids','transactional','undoable'] },
+  groupNodes: { targetKind: 'node', capabilities: ['grouping','stable-child-ids','world-transform-preserving','draw-order-preserving','transactional','undoable','returns-id'] },
+  ungroupNode: { targetKind: 'node', capabilities: ['grouping','dependency-checked','world-transform-preserving','draw-order-preserving','transactional','undoable'] },
   addArtboard: { targetKind: 'artboard', capabilities: ['project-graph-write','transactional','undoable','returns-id'] },
   updateArtboard: { targetKind: 'artboard', capabilities: ['project-graph-write','transactional','undoable'] },
   reorderArtboard: { targetKind: 'artboard', capabilities: ['presentation-order','identity-preserving','transactional','undoable'] },

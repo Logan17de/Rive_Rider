@@ -93,3 +93,39 @@ export {
 export {
   VEYRA_COMPONENT_RUNTIME_SCOPE_KIND, ComponentRuntimeRegistry, createComponentRuntimeRegistry, createComponentRuntimeScope, componentRuntimeScopeKey, componentInstanceSourceMatrix, evaluateComponentContent, evaluateComponentInstances,
 } from './veyra/components.js';
+
+
+// M7 editor-authoring primitives are DOM-free. Draft/selection/marquee state is
+// editor-only; persistent topology/grouping mutations are shared by Store commands.
+export {
+  VEYRA_EDITOR_COMMAND_IDS,
+  VEYRA_MARQUEE_MODES,
+  VEYRA_DEFAULT_OVERLAY_VISIBILITY,
+  EditorSelectionState,
+  createPenDraft,
+  penVertexFromGesture,
+  appendPenDraftVertex,
+  penDraftCanFinish,
+  finalizePenDraftGeometry,
+  pathVertexById,
+  pathVertexDependencyEvidence,
+  addVertexToDocument,
+  removeVertexFromDocument,
+  moveVertexInDocument,
+  moveBezierHandleInDocument,
+  setVertexHandleModeInDocument,
+  setVertexCornerRadiusInDocument,
+  setPathClosedInDocument,
+  reversePathInDocument,
+  nodeWorldMatrix,
+  affineMatrixToTransform,
+  groupNodesInDocument,
+  ungroupNodeInDocument,
+  marqueeNodeRefs,
+  selectionWorldBounds,
+  worldRectFromPoints,
+  normalizeOverlayVisibility,
+  createEditorCommandDispatcher,
+  editorCommandForKeyEvent,
+  coordinateReadout,
+} from './veyra/editorAuthoring.js';

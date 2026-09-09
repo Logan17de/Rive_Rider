@@ -298,7 +298,7 @@ assert.deepEqual(
 
 // --- Action schema --------------------------------------------------------------
 const actions = manifest.actions;
-assert.equal(actions.length, 65, 'Action catalog grows additively with the 12 canonical M6 project/Component mutations.');
+assert.equal(actions.length, 76, 'Action catalog grows additively with the 12 canonical M6 and 11 canonical M7 path/group mutations.');
 const actionIds = actions.map((item) => item.ref.id);
 assert.equal(new Set(actionIds).size, actionIds.length, 'Action ids must be unique.');
 for (const item of actions) {

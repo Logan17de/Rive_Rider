@@ -41,6 +41,18 @@ import {
   duplicateArtboardIntoDocument, entityArtboardId,
 } from './projectGraph.js';
 import {
+  addVertexToDocument,
+  groupNodesInDocument,
+  moveBezierHandleInDocument,
+  moveVertexInDocument,
+  removeVertexFromDocument,
+  reversePathInDocument,
+  setPathClosedInDocument,
+  setVertexCornerRadiusInDocument,
+  setVertexHandleModeInDocument,
+  ungroupNodeInDocument,
+} from './editorAuthoring.js';
+import {
   createSemanticRecord,
   updateSemanticRecordInDocument,
   deleteSemanticRecordInDocument,
@@ -594,6 +606,92 @@ export class VeyraStore {
     if (reference.kind === 'control') return this.removeControl(reference.id, commandDescriptor);
     if (reference.kind === 'constraint') return this.removeConstraint(reference.id, commandDescriptor);
     return false;
+  }
+
+  // --- M7 vector authoring / grouping canonical commands ----------------------
+  addVertex(nodeId, vertex, index = null, commandDescriptor = {}) {
+    let result = null;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add path vertex`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => { result = addVertexToDocument(document, nodeId, vertex, index); });
+    return result;
+  }
+
+  removeVertex(nodeId, vertexId, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Remove path vertex`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => removeVertexFromDocument(document, nodeId, vertexId));
+    return true;
+  }
+
+  moveVertex(nodeId, vertexId, x, y, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Move path vertex`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => moveVertexInDocument(document, nodeId, vertexId, { x, y }));
+    return true;
+  }
+
+  moveBezierHandle(nodeId, vertexId, handle, x, y, options = {}, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Move Bezier handle`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => moveBezierHandleInDocument(document, nodeId, vertexId, handle, { x, y }, options));
+    return true;
+  }
+
+  setVertexHandleMode(nodeId, vertexId, mode, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Set vertex handle mode`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => setVertexHandleModeInDocument(document, nodeId, vertexId, mode));
+    return true;
+  }
+
+  setVertexCornerRadius(nodeId, vertexId, radius, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Set vertex corner radius`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => setVertexCornerRadiusInDocument(document, nodeId, vertexId, radius));
+    return true;
+  }
+
+  openPath(nodeId, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Open path`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => setPathClosedInDocument(document, nodeId, false));
+    return true;
+  }
+
+  closePath(nodeId, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Close path`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => setPathClosedInDocument(document, nodeId, true));
+    return true;
+  }
+
+  reversePath(nodeId, commandDescriptor = {}) {
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Reverse path`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => reversePathInDocument(document, nodeId));
+    return true;
+  }
+
+  groupNodes(refs, options = {}, commandDescriptor = {}) {
+    let result = null;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Group selection`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => { result = groupNodesInDocument(document, refs, options); });
+    this.select({ kind: 'node', id: result.groupId });
+    return result;
+  }
+
+  ungroupNode(groupId, commandDescriptor = {}) {
+    let result = null;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Ungroup selection`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => { result = ungroupNodeInDocument(document, groupId); });
+    const primary = result.childIds.at(-1);
+    if (primary) this.select({ kind: 'node', id: primary });
+    else this.#clearSelection();
+    return result;
   }
 
   // --- Rig and asset CRUD (UI/AI parity) --------------------------------------

@@ -65,6 +65,7 @@ export const VEYRA_NODE_TYPES = Object.freeze([
   'polygon',
   'star',
 ]);
+export const VEYRA_VERTEX_HANDLE_MODES = Object.freeze(['straight', 'mirrored', 'aligned', 'detached']);
 export const VEYRA_EASING_TYPES = Object.freeze([
   'linear',
   'ease-in',
@@ -207,9 +208,9 @@ function defaultGeometry(type) {
       return {
         closed: true,
         vertices: [
-          { id: createId('vertex'), x: -80, y: 55, inX: 0, inY: 0, outX: 0, outY: 0 },
-          { id: createId('vertex'), x: 0, y: -70, inX: 0, inY: 0, outX: 0, outY: 0 },
-          { id: createId('vertex'), x: 80, y: 55, inX: 0, inY: 0, outX: 0, outY: 0 },
+          { id: createId('vertex'), x: -80, y: 55, inX: 0, inY: 0, outX: 0, outY: 0, handleMode: 'straight', cornerRadius: 0 },
+          { id: createId('vertex'), x: 0, y: -70, inX: 0, inY: 0, outX: 0, outY: 0, handleMode: 'straight', cornerRadius: 0 },
+          { id: createId('vertex'), x: 80, y: 55, inX: 0, inY: 0, outX: 0, outY: 0, handleMode: 'straight', cornerRadius: 0 },
         ],
       };
     default:
@@ -726,14 +727,27 @@ function normalizeGeometry(type, geometry, path) {
         const id = String(vertex.id || `pathVertex_${legacyPrefix}_${index}`);
         if (ids.has(id)) throw new TypeError(`${path}.vertices contains duplicate id ${id}.`);
         ids.add(id);
-        return {
-          id,
-          x: finite(vertex.x, `${path}.vertices[${index}].x`),
-          y: finite(vertex.y, `${path}.vertices[${index}].y`),
+        const explicitMode = vertex.handleMode == null ? null : String(vertex.handleMode);
+        if (explicitMode != null && !VEYRA_VERTEX_HANDLE_MODES.includes(explicitMode)) {
+          throw new TypeError(`${path}.vertices[${index}].handleMode must be one of ${VEYRA_VERTEX_HANDLE_MODES.join(', ')}.`);
+        }
+        const rawHandles = {
           inX: finite(vertex.inX ?? 0, `${path}.vertices[${index}].inX`),
           inY: finite(vertex.inY ?? 0, `${path}.vertices[${index}].inY`),
           outX: finite(vertex.outX ?? 0, `${path}.vertices[${index}].outX`),
           outY: finite(vertex.outY ?? 0, `${path}.vertices[${index}].outY`),
+        };
+        const handleMode = explicitMode || Object.values(rawHandles).some((value) => Math.abs(value) > 0.0001)
+          ? (explicitMode || 'detached')
+          : 'straight';
+        const handles = handleMode === 'straight' ? { inX: 0, inY: 0, outX: 0, outY: 0 } : rawHandles;
+        return {
+          id,
+          x: finite(vertex.x, `${path}.vertices[${index}].x`),
+          y: finite(vertex.y, `${path}.vertices[${index}].y`),
+          ...handles,
+          handleMode,
+          cornerRadius: bounded(vertex.cornerRadius ?? 0, `${path}.vertices[${index}].cornerRadius`, 0, 100000),
         };
       });
       return { closed: Boolean(geometry.closed), vertices };

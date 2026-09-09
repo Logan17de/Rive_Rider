@@ -47,15 +47,57 @@ function segmentCommand(from, to) {
   return `L ${to.x} ${to.y}`;
 }
 
+function roundedCorner(vertices, index, closed) {
+  const vertex = vertices[index];
+  const radius = Math.max(0, number(vertex.cornerRadius));
+  if (!radius || hasHandle(vertex, 'in') || hasHandle(vertex, 'out')) return null;
+  if (!closed && (index === 0 || index === vertices.length - 1)) return null;
+  const previous = index > 0 ? vertices[index - 1] : vertices.at(-1);
+  const next = index < vertices.length - 1 ? vertices[index + 1] : vertices[0];
+  if (!previous || !next || hasHandle(previous, 'out') || hasHandle(next, 'in')) return null;
+  const prevDx = previous.x - vertex.x;
+  const prevDy = previous.y - vertex.y;
+  const nextDx = next.x - vertex.x;
+  const nextDy = next.y - vertex.y;
+  const prevLength = Math.hypot(prevDx, prevDy);
+  const nextLength = Math.hypot(nextDx, nextDy);
+  if (prevLength < 1e-9 || nextLength < 1e-9) return null;
+  const distance = Math.min(radius, prevLength / 2, nextLength / 2);
+  return {
+    entry: { x: vertex.x + prevDx / prevLength * distance, y: vertex.y + prevDy / prevLength * distance },
+    exit: { x: vertex.x + nextDx / nextLength * distance, y: vertex.y + nextDy / nextLength * distance },
+  };
+}
+
+function lineTo(point) { return `L ${point.x} ${point.y}`; }
+
 export function pathData(geometry) {
   const vertices = geometry?.vertices || [];
   if (!vertices.length) return '';
-  const commands = [`M ${vertices[0].x} ${vertices[0].y}`];
-  for (let index = 1; index < vertices.length; index += 1) {
-    commands.push(segmentCommand(vertices[index - 1], vertices[index]));
+  const closed = Boolean(geometry.closed);
+  const corners = vertices.map((_, index) => roundedCorner(vertices, index, closed));
+  if (!corners.some(Boolean)) {
+    const commands = [`M ${vertices[0].x} ${vertices[0].y}`];
+    for (let index = 1; index < vertices.length; index += 1) commands.push(segmentCommand(vertices[index - 1], vertices[index]));
+    if (closed && vertices.length > 1) commands.push(segmentCommand(vertices.at(-1), vertices[0]), 'Z');
+    return commands.join(' ');
   }
-  if (geometry.closed && vertices.length > 1) {
-    commands.push(segmentCommand(vertices[vertices.length - 1], vertices[0]), 'Z');
+
+  const start = closed && corners[0] ? corners[0].exit : vertices[0];
+  const commands = [`M ${start.x} ${start.y}`];
+  for (let index = 1; index < vertices.length; index += 1) {
+    const previousCorner = corners[index - 1];
+    const currentCorner = corners[index];
+    if (previousCorner || currentCorner) commands.push(lineTo(currentCorner?.entry || vertices[index]));
+    else commands.push(segmentCommand(vertices[index - 1], vertices[index]));
+    if (currentCorner) commands.push(`Q ${vertices[index].x} ${vertices[index].y} ${currentCorner.exit.x} ${currentCorner.exit.y}`);
+  }
+  if (closed && vertices.length > 1) {
+    const lastCorner = corners.at(-1);
+    if (lastCorner || corners[0]) commands.push(lineTo(corners[0]?.entry || vertices[0]));
+    else commands.push(segmentCommand(vertices.at(-1), vertices[0]));
+    if (corners[0]) commands.push(`Q ${vertices[0].x} ${vertices[0].y} ${corners[0].exit.x} ${corners[0].exit.y}`);
+    commands.push('Z');
   }
   return commands.join(' ');
 }

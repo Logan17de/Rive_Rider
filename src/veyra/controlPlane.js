@@ -109,7 +109,14 @@ function prepareCommandDescriptor(document, descriptor, salt = '0') {
   delete identityDescriptor.command;
   const seed = stableString({ documentId: document.id, generation: stableIdGeneration(document), descriptor: identityDescriptor, salt });
 
-  if (next.action === 'add') next.args.options = withId(next.args.options, next.args.type || 'node', seed, 'node');
+  if (next.action === 'add') {
+    next.args.options = withId(next.args.options, next.args.type || 'node', seed, 'node');
+    if (next.args.type === 'path' && Array.isArray(next.args.options.geometry?.vertices)) {
+      next.args.options.geometry.vertices = next.args.options.geometry.vertices.map((vertex, index) => withId(vertex, 'pathVertex', seed, `pathVertex:${index}`));
+    }
+  }
+  if (next.action === 'addVertex') next.args.vertex = withId(next.args.vertex, 'pathVertex', seed, 'pathVertex');
+  if (next.action === 'groupNodes') next.args.options = withId(next.args.options, 'group', seed, 'group');
   if (next.action === 'addSemantic') next.args.overrides = withId(next.args.overrides, 'semantic', seed, 'semantic');
   if (next.action === 'addTimeline') next.args.overrides = withId(next.args.overrides, 'timeline', seed, 'timeline');
   if (next.action === 'addListener') next.args.overrides = withId(next.args.overrides, 'listener', seed, 'listener');

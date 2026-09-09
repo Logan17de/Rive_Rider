@@ -129,6 +129,7 @@
               <button class="toolButton isActive" data-tool="select" aria-label="Select" aria-pressed="true" title="Select and move artwork (V)"><svg><use href="#i-select"/></svg><span>Select</span></button>
               <button class="toolButton" data-tool="vertex" aria-label="Edit path vertices" aria-pressed="false" title="Edit Path vertices (E)"><svg><use href="#i-path"/></svg><span>Vertices</span></button>
               <button class="toolButton" data-tool="pencil" aria-label="Draw path" aria-pressed="false" title="Draw Path (P)"><svg><use href="#i-path"/></svg><span>Draw Path</span></button>
+              <button class="toolButton m7DoneButton" id="finishPath" aria-label="Finish path editing" title="Finish current path/edit operation" hidden><svg><use href="#i-close"/></svg><span>Done</span></button>
               <button class="toolButton" data-tool="bone" aria-label="Bones" aria-pressed="false" title="Pose bones (B)"><svg><use href="#i-bone"/></svg><span>Bones</span></button>
               <button class="toolButton" data-tool="mesh" aria-label="Weights" aria-pressed="false" title="Edit mesh weights (M)"><svg><use href="#i-mesh"/></svg><span>Weights</span></button>
               <button class="toolButton" data-tool="control" aria-label="Controls" aria-pressed="false" title="Move rig controls (C)"><svg><use href="#i-control"/></svg><span>Controls</span></button>
@@ -145,6 +146,7 @@
             <button id="zoom100" class="zoomTextButton" aria-label="Zoom to 100%" title="100% · 1 CSS pixel per world unit">1:1</button>
             <button id="fitSelection" class="zoomTextButton" aria-label="Fit selection" title="Fit Selection (F)">Fit Sel</button>
             <button id="focusSelection" class="zoomTextButton" aria-label="Focus selection" title="Focus Selection (Shift+F)">Focus</button>
+            <button id="cleanPreview" class="zoomTextButton" aria-label="Toggle clean artwork preview" title="Clean Preview — hide editor overlays">Clean</button>
           </div>
         </div>
         <div class="canvasShortcutBar" aria-label="Canvas navigation shortcuts">
@@ -159,9 +161,11 @@
           <div class="artboardFrame" id="artboardFrame">
             <span class="artboardLabel" aria-hidden="true">Artboard</span>
           </div>
+          <div id="marqueeBox" class="marqueeBox" hidden aria-hidden="true"></div>
         </div>
         <div class="statusbar">
           <span><span class="statusDot"></span><span id="statusText">Veyra document ready</span></span>
+          <output id="coordinateReadout" class="coordinateReadout" aria-live="off">X 0 · Y 0</output>
           <span id="selectionStatus">No selection</span>
         </div>
 

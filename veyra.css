@@ -866,3 +866,16 @@ html { transition: background-color 180ms ease, color 180ms ease; }
 
 /* M5 collapsed-panel recovery controls */
 @media (min-width: 901px) { .mobileInspector { display: inline-grid; } }
+
+
+/* M7 editor-authoring overlays: excluded from authored/runtime serialization. */
+.coordinateReadout { margin-left: auto; margin-right: 12px; font-variant-numeric: tabular-nums; color: var(--ui-accent-soft); min-width: 118px; text-align: right; }
+.marqueeBox { position: absolute; z-index: 30; pointer-events: none; border: 1px solid var(--ui-accent); background: color-mix(in srgb, var(--ui-accent) 14%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-accent) 22%, transparent) inset; }
+.stageViewport.isMarqueeSelecting, .stageViewport.isMarqueeSelecting * { cursor: crosshair !important; user-select: none; }
+.cornerRadiusLine { stroke: var(--ui-warning); opacity: .7; vector-effect: non-scaling-stroke; pointer-events: none; }
+.cornerRadiusHandle { fill: var(--ui-surface); stroke: var(--ui-warning); cursor: ew-resize; vector-effect: non-scaling-stroke; }
+.cornerRadiusHandle:hover { fill: var(--ui-warning); }
+.penGesturePreview { stroke: var(--ui-accent); opacity: .85; pointer-events: none; }
+#cleanPreview.isActive { border-color: var(--ui-accent); color: var(--ui-accent-soft); background: color-mix(in srgb, var(--ui-accent) 14%, transparent); }
+.m7DoneButton { border-color: color-mix(in srgb, var(--ui-accent) 48%, var(--ui-border)); }
+.treeRow.isMultiSelected .treeSelect { box-shadow: inset 3px 0 0 var(--ui-accent); background: color-mix(in srgb, var(--ui-accent) 11%, var(--ui-surface-2)); }

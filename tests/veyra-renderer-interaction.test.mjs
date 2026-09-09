@@ -51,10 +51,10 @@ try {
   // and :scope > vertexControls. The callback is the document command seam.
   const moved = [];
   const dragRenderer = new VeyraRenderer(surface, {
-    moveVertex(nodeId, index, next) {
+    moveVertex(nodeId, vertexId, next) {
       const node = documentModel.nodes.find((candidate) => candidate.id === nodeId);
-      Object.assign(node.geometry.vertices[index], next);
-      moved.push({ nodeId, index, next });
+      Object.assign(node.geometry.vertices.find((candidate) => candidate.id === vertexId), next);
+      moved.push({ nodeId, vertexId, next });
     },
   });
   dragRenderer.setTool('vertex');
@@ -90,15 +90,15 @@ try {
   surface.dispatchEvent(pointerEvent('pointermove', { clientX: 20, clientY: 20 }));
   assert.equal(cancelledMoves, movesBeforeCancel, 'cancel removes the live pointermove handler');
 
-  // KD-1 fix: zero-offset handles are suppressed, so a corner path exposes no
-  // invisible targets. Corner → smooth from the canvas remains a named gap
-  // until a vertex-type/curve affordance ships; AI can still author offsets.
+  // Zero-offset handles stay suppressed, but M7 now provides a visible
+  // straight-vertex affordance (Ctrl/Cmd-click or Alt-drag) to create curves.
   // Positive control: authored bezier handles remain visible and draggable.
   const handleRenderer = new VeyraRenderer(surface, {
-    moveHandle(nodeId, index, prefix, next) {
+    moveHandle(nodeId, vertexId, prefix, next) {
       const node = documentModel.nodes.find((candidate) => candidate.id === nodeId);
-      node.geometry.vertices[index][`${prefix}X`] = next.x;
-      node.geometry.vertices[index][`${prefix}Y`] = next.y;
+      const vertex = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+      vertex[`${prefix}X`] = next.x;
+      vertex[`${prefix}Y`] = next.y;
     },
   });
   handleRenderer.setTool('vertex');
@@ -119,10 +119,11 @@ try {
   const straightDoc = structuredClone(documentModel);
   straightDoc.nodes = straightDoc.nodes.map((node) => node.id === smile.id ? straight : node);
   const straightRenderer = new VeyraRenderer(surface, {
-    moveHandle(nodeId, index, prefix, next) {
+    moveHandle(nodeId, vertexId, prefix, next) {
       const node = straightDoc.nodes.find((candidate) => candidate.id === nodeId);
-      node.geometry.vertices[index][`${prefix}X`] = next.x;
-      node.geometry.vertices[index][`${prefix}Y`] = next.y;
+      const vertex = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+      vertex[`${prefix}X`] = next.x;
+      vertex[`${prefix}Y`] = next.y;
     },
   });
   straightRenderer.render(evaluateDocument(straightDoc), straight.id);

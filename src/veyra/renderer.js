@@ -4,6 +4,7 @@ import {
   gradientDescriptor,
   localBounds,
   paintServerId,
+  pathData,
   transformAttribute,
 } from './geometry.js';
 import { referenceId } from './references.js';
@@ -50,6 +51,8 @@ export class VeyraRenderer {
     this.zoom = 1;
     this.scene = null;
     this.selectedRef = null;
+    this.selectedRefs = [];
+    this.overlayVisibility = { selection: true, vertices: true, rig: true, guides: true };
     this.dragging = false;
     this.dragKind = null;
     this.tool = 'select';
@@ -64,9 +67,24 @@ export class VeyraRenderer {
   }
 
   setDraftPath(points = []) {
-    this.draftPath = points.map((point) => ({ x: Number(point.x), y: Number(point.y) }));
-    if (this.scene && !this.dragging) this.render(this.scene, this.selectedRef);
+    this.draftPath = points.map((point) => ({
+      ...point,
+      x: Number(point.x), y: Number(point.y),
+      inX: Number(point.inX || 0), inY: Number(point.inY || 0),
+      outX: Number(point.outX || 0), outY: Number(point.outY || 0),
+      handleMode: point.handleMode || 'straight',
+      cornerRadius: Math.max(0, Number(point.cornerRadius || 0)),
+    }));
+    if (this.scene && !this.dragging) this.render(this.scene, this.selectedRef, this.selectedRefs);
   }
+
+  setOverlayVisibility(next = {}) {
+    this.overlayVisibility = { ...this.overlayVisibility, ...Object.fromEntries(Object.entries(next).map(([key, value]) => [key, Boolean(value)])) };
+    if (this.scene && !this.dragging) this.render(this.scene, this.selectedRef, this.selectedRefs);
+    return { ...this.overlayVisibility };
+  }
+
+  getOverlayVisibility() { return { ...this.overlayVisibility }; }
 
   setZoom(value, anchor = null) {
     const nextZoom = Math.min(8, Math.max(0.1, Number(value) || 1));
@@ -177,7 +195,7 @@ export class VeyraRenderer {
     this.svg.setAttribute('viewBox', [viewBox.x, viewBox.y, viewBox.width, viewBox.height].join(' '));
   }
 
-  render(scene, selectedRef = null) {
+  render(scene, selectedRef = null, selectedRefs = null) {
     if (scene?.kind !== 'veyra-evaluated-scene') {
       throw new TypeError('VeyraRenderer requires an evaluated scene.');
     }
@@ -193,6 +211,15 @@ export class VeyraRenderer {
     this.selectedRef = typeof selectedRef === 'string'
       ? { kind: 'node', id: selectedRef }
       : selectedRef;
+    const supplied = Array.isArray(selectedRefs) ? selectedRefs : (this.selectedRef ? [this.selectedRef] : []);
+    const seen = new Set();
+    this.selectedRefs = supplied.filter((ref) => {
+      if (!ref?.kind || !ref?.id) return false;
+      const key = `${ref.kind}:${ref.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).map((ref) => ({ kind: ref.kind, id: ref.id }));
     this.#applyViewBox();
     if (this.dragging) {
       if (['bone', 'control'].includes(this.dragKind)) {
@@ -214,7 +241,7 @@ export class VeyraRenderer {
     background.addEventListener('pointerdown', (event) => {
       if (this.tool === 'pencil') {
         event.stopPropagation();
-        this.callbacks.drawPoint?.(this.#screenPoint(event, this.svg));
+        this.#startPenPoint(event);
         return;
       }
       this.callbacks.select?.(null);
@@ -243,7 +270,7 @@ export class VeyraRenderer {
     workspace.addEventListener('pointerdown', (event) => {
       if (this.tool === 'pencil') {
         event.stopPropagation();
-        this.callbacks.drawPoint?.(this.#screenPoint(event, this.svg));
+        this.#startPenPoint(event);
         return;
       }
       this.callbacks.select?.(null);
@@ -270,14 +297,22 @@ export class VeyraRenderer {
 
   #renderDraftPath() {
     const group = svgElement('g', { class: 'draftPath', 'pointer-events': 'none' });
+    if (!this.overlayVisibility.guides) return group;
     if (this.draftPath.length > 1) {
-      group.appendChild(svgElement('polyline', {
-        points: this.draftPath.map((point) => `${point.x},${point.y}`).join(' '),
+      group.appendChild(svgElement('path', {
+        d: pathData({ closed: false, vertices: this.draftPath }),
         fill: 'none', stroke: 'currentColor', 'stroke-width': 2 / this.zoom,
         'vector-effect': 'non-scaling-stroke',
       }));
     }
     for (const point of this.draftPath) {
+      if (Math.hypot(point.inX || 0, point.inY || 0) > 0.0001 || Math.hypot(point.outX || 0, point.outY || 0) > 0.0001) {
+        group.appendChild(svgElement('line', {
+          x1: point.x + (point.inX || 0), y1: point.y + (point.inY || 0),
+          x2: point.x + (point.outX || 0), y2: point.y + (point.outY || 0),
+          class: 'handleLine', 'stroke-width': 1 / this.zoom,
+        }));
+      }
       group.appendChild(svgElement('circle', { cx: point.x, cy: point.y, r: 4 / this.zoom, fill: 'currentColor' }));
     }
     return group;
@@ -311,7 +346,9 @@ export class VeyraRenderer {
       group.appendChild(this.#renderNode(child, children));
     }
 
-    if (this.selectedRef?.kind === 'node' && node.id === this.selectedRef.id) this.#appendSelection(group, node, children);
+    const selected = this.selectedRefs.some((ref) => ref.kind === 'node' && ref.id === node.id);
+    const primary = this.selectedRef?.kind === 'node' && node.id === this.selectedRef.id;
+    if (selected && this.overlayVisibility.selection) this.#appendSelection(group, node, children, primary);
     return group;
   }
 
@@ -362,6 +399,10 @@ export class VeyraRenderer {
 
   #renderRigOverlay() {
     const overlay = svgElement('g', { class: 'rigOverlay' });
+    if (!this.overlayVisibility.rig) {
+      overlay.setAttribute('data-overlay-policy', 'hidden-clean-preview');
+      return overlay;
+    }
     if (!shouldShowDetailedRigOverlay(this.zoom)) {
       overlay.setAttribute('data-overlay-policy', 'hidden-low-zoom');
       return overlay;
@@ -451,7 +492,7 @@ export class VeyraRenderer {
     return isFinite(minX) ? { minX, minY, maxX, maxY } : null;
   }
 
-  #appendSelection(group, node, children) {
+  #appendSelection(group, node, children, primary = true) {
     const bounds = node.type === 'group' ? this.#groupBounds(node, children) : localBounds(node);
     if (bounds) {
       const pad = 7 / this.zoom;
@@ -463,7 +504,7 @@ export class VeyraRenderer {
         height: bounds.maxY - bounds.minY + pad * 2,
         'stroke-width': 1.5 / this.zoom,
       }));
-      if (node.type === 'group' && !node.locked && this.tool === 'select') {
+      if (primary && node.type === 'group' && !node.locked && this.tool === 'select') {
         const hit = svgElement('rect', {
           class: 'groupHit',
           x: bounds.minX - pad,
@@ -474,7 +515,7 @@ export class VeyraRenderer {
         hit.addEventListener('pointerdown', (event) => this.#startGroupDrag(event, node, group));
         group.appendChild(hit);
       }
-      if (node.type !== 'group' && !node.locked && this.tool === 'select') {
+      if (primary && node.type !== 'group' && !node.locked && this.tool === 'select') {
         const centerX = (bounds.minX + bounds.maxX) / 2;
         const centerY = (bounds.minY + bounds.maxY) / 2;
         const positions = {
@@ -494,7 +535,7 @@ export class VeyraRenderer {
           group.appendChild(resizeHandle);
         }
       }
-      group.appendChild(svgElement('circle', {
+      if (primary) group.appendChild(svgElement('circle', {
         class: 'originPoint',
         cx: 0,
         cy: 0,
@@ -503,7 +544,7 @@ export class VeyraRenderer {
       }));
     }
 
-    if (node.type !== 'path' || node.locked || !['select', 'vertex'].includes(this.tool)) return;
+    if (!primary || !this.overlayVisibility.vertices || node.type !== 'path' || node.locked || !['select', 'vertex'].includes(this.tool)) return;
     this.#appendPathControls(group, node);
   }
 
@@ -513,51 +554,97 @@ export class VeyraRenderer {
       for (const prefix of ['in', 'out']) {
         const offsetX = Number(vertex[`${prefix}X`]);
         const offsetY = Number(vertex[`${prefix}Y`]);
-        // KD-1 (ratified 2026-09-04, contract doc): a zero-offset handle sits at
-        // exactly the vertex position, painted under the larger vertex point, so
-        // it is invisible AND ungrabbable — a control that can never receive a
-        // click. The model decides, the presenter reports: emit only handles for
-        // offsets that actually exist in the document. Corner-to-smooth from the
-        // canvas is a NAMED GAP until a vertex-type affordance ships; AI reaches
-        // the capability today via veyra.moveHandle (veyra.js:168).
         if (Math.abs(offsetX) < 0.0001 && Math.abs(offsetY) < 0.0001) continue;
         const handleX = vertex.x + offsetX;
         const handleY = vertex.y + offsetY;
         controls.appendChild(svgElement('line', {
-          class: 'handleLine',
-          x1: vertex.x,
-          y1: vertex.y,
-          x2: handleX,
-          y2: handleY,
+          class: 'handleLine', x1: vertex.x, y1: vertex.y, x2: handleX, y2: handleY,
           'stroke-width': 1 / this.zoom,
         }));
         const handle = svgElement('circle', {
-          class: 'bezierHandle',
-          'data-handle': prefix,
-          'data-vertex-index': index,
-          cx: handleX,
-          cy: handleY,
-          r: 4 / this.zoom,
-          'stroke-width': 1 / this.zoom,
+          class: 'bezierHandle', 'data-handle': prefix, 'data-vertex-id': vertex.id,
+          cx: handleX, cy: handleY, r: 4 / this.zoom, 'stroke-width': 1 / this.zoom,
         });
-        handle.addEventListener('pointerdown', (event) =>
-          this.#startHandleDrag(event, node, index, prefix, group));
+        handle.addEventListener('pointerdown', (event) => this.#startHandleDrag(event, node, vertex.id, prefix, group));
         controls.appendChild(handle);
       }
+      if ((vertex.handleMode || 'straight') === 'straight') {
+        const radiusX = vertex.x + Math.max(Number(vertex.cornerRadius || 0), 14 / this.zoom);
+        controls.appendChild(svgElement('line', {
+          class: 'cornerRadiusLine', x1: vertex.x, y1: vertex.y, x2: radiusX, y2: vertex.y,
+          'stroke-width': 1 / this.zoom,
+        }));
+        const radiusHandle = svgElement('circle', {
+          class: 'cornerRadiusHandle', 'data-vertex-id': vertex.id,
+          cx: radiusX, cy: vertex.y, r: 3.5 / this.zoom, 'stroke-width': 1 / this.zoom,
+        });
+        radiusHandle.addEventListener('pointerdown', (event) => this.#startCornerRadiusDrag(event, node, vertex.id, group));
+        controls.appendChild(radiusHandle);
+      }
       const point = svgElement('circle', {
-        class: 'vertexPoint',
-        'data-vertex-index': index,
-        cx: vertex.x,
-        cy: vertex.y,
-        r: 5 / this.zoom,
-        'stroke-width': 2 / this.zoom,
+        class: 'vertexPoint', 'data-vertex-id': vertex.id, 'data-vertex-index': index,
+        cx: vertex.x, cy: vertex.y, r: 5 / this.zoom, 'stroke-width': 2 / this.zoom,
       });
-      point.addEventListener('pointerdown', (event) =>
-        this.#startVertexDrag(event, node, index, group));
+      point.addEventListener('pointerdown', (event) => this.#startVertexDrag(event, node, vertex.id, group));
       controls.appendChild(point);
     });
     group.appendChild(controls);
   }
+  #startPenPoint(event) {
+    if (event.button !== 0 || this.tool !== 'pencil') return;
+    event.preventDefault();
+    event.stopPropagation();
+    const start = this.#screenPoint(event, this.svg);
+    const first = this.draftPath[0];
+    if (first && this.draftPath.length >= 2) {
+      const client = this.worldToClient(first.x, first.y);
+      if (client && Math.hypot(client.x - event.clientX, client.y - event.clientY) <= 8) {
+        this.callbacks.finishPath?.({ closed: true });
+        return;
+      }
+    }
+    const startClient = { x: event.clientX, y: event.clientY };
+    let last = start;
+    const guide = svgElement('line', {
+      class: 'penGesturePreview', x1: start.x, y1: start.y, x2: start.x, y2: start.y,
+      'stroke-width': 1.5 / this.zoom,
+    });
+    this.svg.querySelector(':scope > .draftPath')?.appendChild(guide);
+    this.svg.setPointerCapture?.(event.pointerId);
+    const cleanup = () => {
+      this.svg.removeEventListener('pointermove', move);
+      this.svg.removeEventListener('pointerup', end);
+      this.svg.removeEventListener('pointercancel', cancel);
+      this.svg.removeEventListener('lostpointercapture', cancel);
+      guide.remove();
+    };
+    const move = (nextEvent) => {
+      if (nextEvent.pointerId !== event.pointerId) return;
+      last = this.#screenPoint(nextEvent, this.svg);
+      applyAttributes(guide, { x2: last.x, y2: last.y });
+    };
+    const end = (nextEvent) => {
+      if (nextEvent.pointerId !== event.pointerId) return;
+      last = this.#screenPoint(nextEvent, this.svg);
+      const dragged = Math.hypot(nextEvent.clientX - startClient.x, nextEvent.clientY - startClient.y) >= 3;
+      cleanup();
+      try { this.svg.releasePointerCapture?.(event.pointerId); } catch {}
+      const dx = last.x - start.x;
+      const dy = last.y - start.y;
+      this.callbacks.drawVertex?.(dragged
+        ? { x: start.x, y: start.y, inX: -dx, inY: -dy, outX: dx, outY: dy, handleMode: 'mirrored', cornerRadius: 0 }
+        : { x: start.x, y: start.y, inX: 0, inY: 0, outX: 0, outY: 0, handleMode: 'straight', cornerRadius: 0 });
+    };
+    const cancel = (nextEvent) => {
+      if (nextEvent.pointerId != null && nextEvent.pointerId !== event.pointerId) return;
+      cleanup();
+    };
+    this.svg.addEventListener('pointermove', move);
+    this.svg.addEventListener('pointerup', end);
+    this.svg.addEventListener('pointercancel', cancel);
+    this.svg.addEventListener('lostpointercapture', cancel);
+  }
+
   #clientPoint(clientX, clientY, coordinateElement) {
     const matrix = coordinateElement.getScreenCTM();
     if (!matrix) return { x: 0, y: 0 };
@@ -634,23 +721,46 @@ export class VeyraRenderer {
     );
   }
 
+  #selectionTargetNode(node, deep = false) {
+    if (deep) return node;
+    let target = node;
+    const byId = new Map((this.scene?.nodes || []).map((candidate) => [candidate.id, candidate]));
+    let parentId = referenceId(target.parent, 'node');
+    while (parentId && byId.has(parentId)) {
+      target = byId.get(parentId);
+      parentId = referenceId(target.parent, 'node');
+    }
+    return target;
+  }
+
   #startNodeDrag(event, node, group) {
     if (event.button !== 0) return;
     event.stopPropagation();
     if (this.tool === 'pencil') {
-      this.callbacks.drawPoint?.(this.#screenPoint(event, this.svg));
+      this.#startPenPoint(event);
       return;
     }
+    const deep = Number(event.detail || 0) > 1;
+    const target = this.#selectionTargetNode(node, deep);
+    const targetRef = { kind: 'node', id: target.id };
     if (this.tool === 'vertex') {
-      this.callbacks.select?.({ kind: 'node', id: node.id });
+      this.callbacks.select?.({ kind: 'node', id: node.id }, { toggle: event.shiftKey, deep: true });
       return;
     }
     if (this.tool !== 'select') {
-      this.callbacks.select?.({ kind: 'node', id: node.id });
+      this.callbacks.select?.(targetRef, { toggle: event.shiftKey, deep });
+      return;
+    }
+    if (event.shiftKey) {
+      this.callbacks.select?.(targetRef, { toggle: true, deep });
+      return;
+    }
+    if (target.id !== node.id) {
+      this.callbacks.select?.(targetRef, { deep });
       return;
     }
     if (node.locked) {
-      this.callbacks.select?.({ kind: 'node', id: node.id });
+      this.callbacks.select?.(targetRef, { deep });
       return;
     }
 
@@ -686,6 +796,10 @@ export class VeyraRenderer {
       this.callbacks.select?.({ kind: 'node', id: node.id });
       return;
     }
+    if (event.shiftKey) {
+      this.callbacks.select?.({ kind: 'node', id: node.id }, { toggle: true });
+      return;
+    }
     if (node.locked) {
       this.callbacks.select?.({ kind: 'node', id: node.id });
       return;
@@ -709,8 +823,9 @@ export class VeyraRenderer {
     );
   }
 
-  #startHandlePairDrag(event, node, vertexIndex, group) {
-    const vertex = node.geometry.vertices[vertexIndex];
+  #startHandlePairDrag(event, node, vertexId, group) {
+    const vertex = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+    if (!vertex) return;
     this.dragKind = 'handle';
     this.callbacks.begin?.(`Create ${node.name} curve handles`);
     this.#captureDrag(
@@ -723,66 +838,98 @@ export class VeyraRenderer {
           const angle = Math.round(Math.atan2(offset.y, offset.x) / (Math.PI / 4)) * (Math.PI / 4);
           offset = { x: Math.cos(angle) * distance, y: Math.sin(angle) * distance };
         }
-        this.callbacks.moveHandle?.(node.id, vertexIndex, 'out', offset);
-        this.callbacks.moveHandle?.(node.id, vertexIndex, 'in', { x: -offset.x, y: -offset.y });
-        Object.assign(vertex, { outX: offset.x, outY: offset.y, inX: -offset.x, inY: -offset.y });
+        this.callbacks.setVertexModePreview?.(node.id, vertexId, 'mirrored');
+        this.callbacks.moveHandle?.(node.id, vertexId, 'out', offset);
+        Object.assign(vertex, { outX: offset.x, outY: offset.y, inX: -offset.x, inY: -offset.y, handleMode: 'mirrored' });
         this.#updateLiveGeometry(node.id);
       },
       () => this.callbacks.commit?.(),
     );
   }
 
-  #startHandleDrag(event, node, vertexIndex, prefix, group) {
+  #startHandleDrag(event, node, vertexId, prefix, group) {
     if (event.button !== 0) return;
     event.stopPropagation();
     if (!['select', 'vertex'].includes(this.tool)) return;
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      this.callbacks.removeHandleCommand?.(node.id, vertexId, prefix);
+      return;
+    }
     this.dragKind = 'handle';
-    const vertex = node.geometry.vertices[vertexIndex];
+    const vertex = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+    if (!vertex) return;
     const startPoint = this.#screenPoint(event, group);
     const start = { x: Number(vertex[`${prefix}X`]), y: Number(vertex[`${prefix}Y`]) };
     this.callbacks.begin?.(`Move ${node.name} ${prefix} handle`);
+    if (event.altKey) {
+      this.callbacks.setVertexModePreview?.(node.id, vertexId, 'detached');
+      vertex.handleMode = 'detached';
+    }
     this.#captureDrag(
       event,
       (nextEvent) => {
         const point = this.#screenPoint(nextEvent, group);
-        const next = {
-          x: start.x + point.x - startPoint.x,
-          y: start.y + point.y - startPoint.y,
-        };
-        this.callbacks.moveHandle?.(node.id, vertexIndex, prefix, next);
+        const next = { x: start.x + point.x - startPoint.x, y: start.y + point.y - startPoint.y };
+        this.callbacks.moveHandle?.(node.id, vertexId, prefix, next);
+        const target = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+        if (target) Object.assign(vertex, target);
         this.#updateLiveGeometry(node.id);
       },
       () => this.callbacks.commit?.(),
     );
   }
 
-  #startVertexDrag(event, node, vertexIndex, group) {
+  #startCornerRadiusDrag(event, node, vertexId, group) {
+    if (event.button !== 0 || !['select', 'vertex'].includes(this.tool)) return;
+    event.stopPropagation();
+    const vertex = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+    if (!vertex) return;
+    const startPoint = this.#screenPoint(event, group);
+    const startRadius = Number(vertex.cornerRadius || 0);
+    this.dragKind = 'corner-radius';
+    this.callbacks.begin?.(`Set ${node.name} corner radius`);
+    this.#captureDrag(event, (nextEvent) => {
+      const point = this.#screenPoint(nextEvent, group);
+      const radius = Math.max(0, startRadius + point.x - startPoint.x);
+      this.callbacks.setCornerRadiusPreview?.(node.id, vertexId, radius);
+      vertex.cornerRadius = radius;
+      this.#updateLiveGeometry(node.id);
+    }, () => this.callbacks.commit?.());
+  }
+
+  #startVertexDrag(event, node, vertexId, group) {
     if (event.button !== 0) return;
     event.stopPropagation();
     if (!['select', 'vertex'].includes(this.tool)) return;
+    const vertex = node.geometry.vertices.find((candidate) => candidate.id === vertexId);
+    if (!vertex) return;
+    this.callbacks.selectVertex?.(node.id, vertexId);
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      this.callbacks.toggleVertexSmooth?.(node.id, vertexId, (vertex.handleMode || 'straight') === 'straight' ? 'mirrored' : 'straight');
+      return;
+    }
+    const hasHandle = Math.hypot(vertex.inX || 0, vertex.inY || 0) > 0.0001 || Math.hypot(vertex.outX || 0, vertex.outY || 0) > 0.0001;
     if (event.altKey) {
-      this.#startHandlePairDrag(event, node, vertexIndex, group);
+      if (hasHandle) {
+        this.callbacks.setVertexModeCommand?.(node.id, vertexId, 'detached');
+        return;
+      }
+      this.#startHandlePairDrag(event, node, vertexId, group);
       return;
     }
     this.dragKind = 'vertex';
-    const vertex = node.geometry.vertices[vertexIndex];
     const startPoint = this.#screenPoint(event, group);
     const start = { x: vertex.x, y: vertex.y };
     this.callbacks.begin?.(`Move ${node.name} vertex`);
-    this.#captureDrag(
-      event,
-      (nextEvent) => {
-        const point = this.#screenPoint(nextEvent, group);
-        const next = {
-          x: start.x + point.x - startPoint.x,
-          y: start.y + point.y - startPoint.y,
-        };
-        Object.assign(node.geometry.vertices[vertexIndex], next);
-        this.callbacks.moveVertex?.(node.id, vertexIndex, next);
-        this.#updateLiveGeometry(node.id);
-      },
-      () => this.callbacks.commit?.(),
-    );
+    this.#captureDrag(event, (nextEvent) => {
+      const point = this.#screenPoint(nextEvent, group);
+      const next = { x: start.x + point.x - startPoint.x, y: start.y + point.y - startPoint.y };
+      Object.assign(vertex, next);
+      this.callbacks.moveVertex?.(node.id, vertexId, next);
+      this.#updateLiveGeometry(node.id);
+    }, () => this.callbacks.commit?.());
   }
 
   #startControlDrag(event, control) {

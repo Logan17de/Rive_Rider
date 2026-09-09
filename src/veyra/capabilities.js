@@ -73,6 +73,8 @@ const GEOMETRY_PROPERTIES = Object.freeze({
     'geometry.vertices.*.inY',
     'geometry.vertices.*.outX',
     'geometry.vertices.*.outY',
+    'geometry.vertices.*.handleMode',
+    'geometry.vertices.*.cornerRadius',
   ],
 });
 
@@ -85,6 +87,7 @@ export function nodeCapabilities(node) {
     ? COMMON_ANIMATABLE.filter((path) => !path.startsWith('paint.'))
     : COMMON_ANIMATABLE;
   const fill = node.type === 'group' ? [] : fillProperties(node.paint?.fill);
+  const animatableGeometry = geometry.filter((path) => path !== 'geometry.vertices.*.handleMode');
   return {
     transform: true,
     style: node.type !== 'group',
@@ -92,7 +95,7 @@ export function nodeCapabilities(node) {
     editVertices: node.type === 'path',
     groupChildren: node.type === 'group',
     writable: [...commonWritable, ...fill, ...geometry],
-    animatable: [...commonAnimatable, ...fill, ...geometry],
+    animatable: [...commonAnimatable, ...fill, ...animatableGeometry],
   };
 }
 
