@@ -19,6 +19,8 @@ jobs:
         run: python scripts/apply-m7-live-safety-fix.py
       - name: Apply canonical path hit-test fix
         run: python scripts/apply-m7-canonical-path-hit-fix.py
+      - name: Correct rounded-path hit-test fixture
+        run: python scripts/apply-m7-hit-test-fixture-fix.py
       - name: Syntax gate
         run: npm run check
       - name: Full test battery
@@ -27,7 +29,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -f scripts/apply-m7-live-safety-fix.py scripts/apply-m7-canonical-path-hit-fix.py
+          git rm -f scripts/apply-m7-live-safety-fix.py scripts/apply-m7-canonical-path-hit-fix.py scripts/apply-m7-hit-test-fixture-fix.py
           git rm -f .github/workflows/apply-m7-path-hit-fix.yml
           git add src/veyra/editorAuthoring.js src/veyra/geometry.js src/veyra/hitTest.js tests/veyra-m7-authoring.test.mjs
           git commit -m "Fix M7 final path safety and hit-test parity [m7]"
