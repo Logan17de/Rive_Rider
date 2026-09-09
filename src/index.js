@@ -136,6 +136,8 @@ export {
 // M8 View Models/Data Binding keeps authored definitions separate from runtime values.
 // Binding validation/evaluation share one capability contract; trigger queues,
 // subscriptions, dirty caches and reverse-write scope stay DOM-free runtime state.
+// M8-C2 keeps warm caches generation-aware, nested invalidation stable-ref based,
+// and two-way Property Group interaction scoped/ephemeral unless persistence is explicit.
 export {
   VEYRA_DATA_VERSION, VEYRA_DATA_PROPERTY_TYPES, VEYRA_BINDING_MODES, VEYRA_CONVERTER_TYPES,
   VEYRA_DATA_RUNTIME_SCOPE_KIND, VEYRA_BINDING_CONFLICT_POLICY, VEYRA_DATA_EVALUATION_COMPLEXITY,
