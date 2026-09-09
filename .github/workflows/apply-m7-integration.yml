@@ -57,8 +57,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm scripts/apply-m7-core.py scripts/apply-m7-ui.py scripts/apply-m7-shell.py scripts/apply-m7-safety-fixes.py scripts/apply-m7-legacy-gate-fixes.py
-          git rm .github/workflows/apply-m7-integration.yml
+          git rm -f scripts/apply-m7-core.py scripts/apply-m7-ui.py scripts/apply-m7-shell.py scripts/apply-m7-safety-fixes.py scripts/apply-m7-legacy-gate-fixes.py
+          git rm -f .github/workflows/apply-m7-integration.yml
           git add src/veyra/model.js src/veyra/capabilities.js src/veyra/geometry.js src/veyra/store.js src/veyra/commands.js src/veyra/controlPlane.js src/veyra/serviceRegistry.js src/veyra/renderer.js src/index.js veyra.js veyra.html veyra.css tests/veyra-m7-authoring.test.mjs tests/veyra-manifest.test.mjs tests/veyra-renderer-interaction.test.mjs
           git commit -m "Implement M7 vector authoring and grouping [m7]"
           git push origin HEAD:main
