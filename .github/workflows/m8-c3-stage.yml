@@ -27,10 +27,11 @@ jobs:
           git fetch origin main
           test "$(git rev-parse origin/main)" = "61e463de42ac3e005953808c00a1ad8359c93aca"
           git diff --exit-code 61e463de42ac3e005953808c00a1ad8359c93aca -- src tests veyra.js package.json package-lock.json scripts .github/workflows/test.yml
-      - name: Apply exact locally tested production diff
+      - name: Apply locally tested production diff and EOF formatting
         run: |
           cp .veyra-staging/m8-c3/publish.py /tmp/m8-c3-publish.py
           python /tmp/m8-c3-publish.py
+          python -c "from pathlib import Path; p=Path('src/veyra/propertyAddress.js'); p.write_text(p.read_text().rstrip()+'\n')"
       - name: Install dependencies
         run: npm ci
       - name: Syntax check
