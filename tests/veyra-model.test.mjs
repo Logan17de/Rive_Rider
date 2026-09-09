@@ -220,9 +220,9 @@ assert.throws(() => parseVeyra('{broken'), /Invalid Veyra JSON/);
   assert.equal(workStore.document.timelines[0].workEnd, 60);
 }
 
-// Test: every accepted historical/project format is loadable and canonicalizes to v5.
+// Test: every accepted historical/project/data format is loadable; v6 is the M8 data generation.
 {
-  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5]);
+  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5, 6]);
   const target = createNode('rectangle', { id: 'version_target', name: 'Version target' });
   const timeline = createTimeline({ id: 'version_timeline', name: 'Version timeline' });
   const machine = createStateMachine({
@@ -238,9 +238,9 @@ assert.throws(() => parseVeyra('{broken'), /Invalid Veyra JSON/);
     const withListener = parseVeyra(JSON.stringify({ ...fixture, version, listeners: [listener] }));
     assert.equal(withListener.version, 5, `canonical project output stamp for listener-bearing v${version}`);
   }
-  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 6 })), /Unsupported Veyra version/);
+  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 7 })), /Unsupported Veyra version/);
   assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 99 })), /Unsupported Veyra version/);
-  console.log('✓ every accepted historical/project version loads and canonicalizes to v5');
+  console.log('✓ every accepted historical/project/data version loads; data-free documents canonicalize to v5');
 }
 
 console.log('veyra model tests passed');

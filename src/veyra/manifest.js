@@ -65,6 +65,12 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'components.instance-overrides',
   'components.independent-runtime',
   'components.name-independent',
+  'data.view-models',
+  'data.bindings',
+  'data.property-groups',
+  'data.enums-converters-lists',
+  'data.runtime-isolated',
+  'data.incremental-dirty-evaluation',
 ]);
 
 function projectCapabilities(document) {
@@ -204,6 +210,16 @@ function semanticActionRefs() {
 
 function authoringContract() {
   return {
+    dataGraph: {
+      identity: 'viewModel/viewModelInstance/dataProperty/enum/enumValue/binding/converter/propertyGroup/propertyGroupProperty/list/listItem stable refs; names advisory only',
+      propertyTypes: ['number','boolean','trigger','string','enum','color','viewModel','list','image','artboard'],
+      bindingModes: ['oneWay','twoWay'],
+      evaluationOrder: ['authored','animation','playback','data-binding','constraints','interactive'],
+      runtimeState: 'ephemeral and scope-isolated; never serialized',
+      conflictPolicy: { priority: 'higher-wins', tieBreak: 'lexicographically-lower-binding-id-wins' },
+      cyclePolicy: 'direct and multi-hop forward binding cycles fail normalization atomically',
+      performance: 'zero bindings take O(1) fast path; dirty sources invalidate reachable binding branches only',
+    },
     projectGraph: {
       ...projectGraphCapabilities(),
       identity: 'artboard/component/componentInstance stable refs; human names are advisory only',
@@ -296,6 +312,9 @@ function action(id, name, description, targetKind, parameters, capabilities, met
 }
 
 const NON_COMMAND_ACTIONS = Object.freeze([
+  action('set-data-runtime-value', 'Set data runtime value', 'Set one writable View Model runtime value without changing authored defaults.', 'dataProperty', [parameter('instanceId','string',true,'Stable View Model instance id.'),parameter('propertyId','string',true,'Stable dataProperty id.'),parameter('value','any',true,'Runtime value.')], ['runtime-only','ephemeral','scope-aware'], { transport: 'runtime', hostAvailability: 'runtime-only' }),
+  action('fire-data-trigger', 'Fire data trigger', 'Fire one trigger edge in a View Model runtime scope.', 'dataProperty', [parameter('instanceId','string',true,'Stable View Model instance id.'),parameter('propertyId','string',true,'Stable trigger dataProperty id.')], ['runtime-only','ephemeral','one-shot'], { transport: 'runtime', hostAvailability: 'runtime-only' }),
+  action('reset-data-runtime', 'Reset data runtime', 'Reset runtime values to authored initial/default values without document mutation.', 'viewModelInstance', [], ['runtime-only','ephemeral','deterministic'], { transport: 'runtime', hostAvailability: 'runtime-only' }),
   action('read-property', 'Read property', 'Read the authored value of a property by address.', 'propertyAddress', [
     parameter('address', 'propertyAddress', true, 'A property address such as node:<id>/transform/x.'),
   ], ['non-mutating'], { transport: 'read', hostAvailability: 'available' }),

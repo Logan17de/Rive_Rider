@@ -251,6 +251,12 @@ function ownerMap(document) {
 
 export function entityArtboardId(document, reference) {
   if (!reference) return null;
+  if (reference.kind === 'viewModelInstance') return document.viewModelInstances?.find((item) => item.id === reference.id)?.artboard?.id || null;
+  if (reference.kind === 'binding') return document.bindings?.find((item) => item.id === reference.id)?.artboard?.id || null;
+  if (reference.kind === 'propertyGroup') return document.propertyGroups?.find((item) => item.id === reference.id)?.artboard?.id || null;
+  if (reference.kind === 'propertyGroupProperty') return document.propertyGroups?.find((group) => group.properties?.some((item) => item.id === reference.id))?.artboard?.id || null;
+  if (reference.kind === 'list') { const list = document.lists?.find((item) => item.id === reference.id); return list ? document.viewModelInstances?.find((item) => item.id === list.owner?.id)?.artboard?.id || null : null; }
+  if (reference.kind === 'listItem') { const list = document.lists?.find((item) => item.items?.some((child) => child.id === reference.id)); return list ? document.viewModelInstances?.find((item) => item.id === list.owner?.id)?.artboard?.id || null : null; }
   if (reference.kind === 'artboard') return reference.id;
   if (reference.kind === 'component') return referenceId(componentById(document, reference.id)?.source, 'artboard');
   if (reference.kind === 'componentOverride') {
@@ -550,6 +556,17 @@ function idsForScopedEntity(document, artboardId) {
     push('componentInstance', instance.id);
     for (const override of instance.overrides) push('componentOverride', override.id);
   }
+  const dataInstanceIds = new Set((document.viewModelInstances || []).filter((item) => item.artboard.id === artboardId).map((item) => item.id));
+  for (const instance of document.viewModelInstances || []) if (dataInstanceIds.has(instance.id)) push('viewModelInstance', instance.id);
+  for (const group of (document.propertyGroups || []).filter((item) => item.artboard.id === artboardId)) {
+    push('propertyGroup', group.id);
+    for (const property of group.properties || []) push('propertyGroupProperty', property.id);
+  }
+  for (const binding of (document.bindings || []).filter((item) => item.artboard.id === artboardId)) push('binding', binding.id);
+  for (const list of (document.lists || []).filter((item) => dataInstanceIds.has(item.owner.id))) {
+    push('list', list.id);
+    for (const item of list.items || []) push('listItem', item.id);
+  }
   for (const semantic of document.semantics) {
     if (entityArtboardId(document, semantic.target) === artboardId) push('semanticRecord', semantic.id, 'semantic');
   }
@@ -605,6 +622,10 @@ export function duplicateArtboardIntoDocument(document, sourceArtboardId, option
       });
     } else if (kind === 'componentInstance') {
       source.overrides.forEach((item, index) => { copy.overrides[index].id = mapped('componentOverride', item.id); });
+    } else if (kind === 'propertyGroup') {
+      source.properties.forEach((item, index) => { copy.properties[index].id = mapped('propertyGroupProperty', item.id); });
+    } else if (kind === 'list') {
+      source.items.forEach((item, index) => { copy.items[index].id = mapped('listItem', item.id); });
     }
   };
 
@@ -628,6 +649,19 @@ export function duplicateArtboardIntoDocument(document, sourceArtboardId, option
   duplicateCollection('stateMachine', 'stateMachines');
   duplicateCollection('listener', 'listeners');
   duplicateCollection('componentInstance', 'componentInstances');
+  duplicateCollection('viewModelInstance', 'viewModelInstances');
+  duplicateCollection('propertyGroup', 'propertyGroups');
+  duplicateCollection('binding', 'bindings');
+
+  const sourceDataInstanceIds = new Set((document.viewModelInstances || []).filter((item) => item.artboard?.id === sourceArtboardId).map((item) => item.id));
+  const listCopies = [];
+  for (const item of (document.lists || []).filter((entry) => sourceDataInstanceIds.has(entry.owner.id))) {
+    const copy = deepRemap(cloneValue(item), idMap);
+    copy.id = idMap.get(`list:${item.id}`);
+    rewriteNestedIds('list', item, copy);
+    listCopies.push(copy);
+  }
+  document.lists.push(...listCopies);
 
   const semanticCopies = [];
   for (const semantic of document.semantics) {

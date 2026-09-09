@@ -5,11 +5,13 @@ import { referenceId } from './references.js';
 import { evaluateRig } from './rigging.js';
 import { artboardById } from './projectGraph.js';
 import { evaluateComponentContent } from './components.js';
+import { createVeyraDataRuntime } from './dataGraph.js';
 
 export const VEYRA_EVALUATION_ORDER = Object.freeze([
   'authored',
   'animation',
   'playback',
+  'data-binding',
   'constraints',
   'interactive',
 ]);
@@ -82,6 +84,13 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
 
   applyLayer(evaluatedDocument, animationLayer, 'animation', sources);
   applyLayer(evaluatedDocument, playbackOverrides, 'playback', sources);
+  evaluatedDocument = normalizeDocument(evaluatedDocument);
+  const dataRuntime = options.dataRuntime || createVeyraDataRuntime(evaluatedDocument);
+  const dataResult = dataRuntime.evaluateBindings(evaluatedDocument, {
+    artboardId: String(options.artboardId || evaluatedDocument.artboards[0]?.id || ''),
+    scopePath: options.runtimeScopePath || [],
+  });
+  applyLayer(evaluatedDocument, dataResult.overrides, 'data-binding', sources);
   applyLayer(evaluatedDocument, layers.constraints, 'constraints', sources);
   // Position controls need to reach the solver before it runs. The same
   // interactive layer is reapplied after solving so direct bone overrides win.
@@ -133,6 +142,13 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     }),
     evaluationOrder: [...VEYRA_EVALUATION_ORDER],
     sources,
+    data: cloneValue({
+      bindingOwnership: dataResult.ownership,
+      virtualValues: dataResult.virtualValues || {},
+      diagnostics: dataResult.diagnostics,
+      stats: dataResult.stats,
+      runtimeScopePath: options.runtimeScopePath || [],
+    }),
   };
   if (options.includeComponents === false) return {
     ...baseScene,

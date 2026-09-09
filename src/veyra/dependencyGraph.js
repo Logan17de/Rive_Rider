@@ -154,6 +154,15 @@ function graphData(input, explicitAddress = null) {
         addPair('references', 'referencedBy', from, to, detail, 'semantic-lifecycle');
         continue;
       }
+      if (entity.kind === 'binding') {
+        if (relationship.relation === 'binding_reads') { addPair('reads', 'usedBy', from, to, detail, 'data-binding'); continue; }
+        if (relationship.relation === 'binding_writes') {
+          if (relationship.detail?.address) { addAddressNode(relationship.detail.address); addPair('writes', 'usedBy', from, { address: relationship.detail.address }, detail, 'data-binding'); }
+          else addPair('writes', 'usedBy', from, to, detail, 'data-binding');
+          continue;
+        }
+        if (relationship.relation === 'uses_converter') { addPair('dependsOn', 'usedBy', from, to, detail, 'data-binding'); continue; }
+      }
       if (entity.kind === 'component' && relationship.relation === 'source_artboard') {
         addPair('dependsOn', 'usedBy', from, to, detail, 'component');
         continue;

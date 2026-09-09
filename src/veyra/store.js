@@ -40,6 +40,7 @@ import {
   createComponent as createProjectComponent, createComponentInstance as createProjectComponentInstance,
   duplicateArtboardIntoDocument, entityArtboardId,
 } from './projectGraph.js';
+import { installVeyraDataStoreMethods } from './dataStore.js';
 import {
   addVertexToDocument,
   groupNodesInDocument,
@@ -395,6 +396,26 @@ export class VeyraStore {
       if (options.cascade) document.componentInstances = document.componentInstances.filter((item) => !sourceComponentIds.has(item.component.id));
       document.componentInstances = document.componentInstances.filter((item) => item.artboard.id !== artboardId);
       document.components = document.components.filter((item) => item.source.id !== artboardId);
+      const removedDataInstanceIds = new Set((document.viewModelInstances || []).filter((item) => item.artboard.id === artboardId).map((item) => item.id));
+      const removedGroupPropertyIds = new Set((document.propertyGroups || []).filter((item) => item.artboard.id === artboardId).flatMap((item) => (item.properties || []).map((property) => property.id)));
+      const removedListIds = new Set((document.lists || []).filter((item) => removedDataInstanceIds.has(item.owner.id)).map((item) => item.id));
+      const endpointOwnedByDeletedArtboard = (endpoint) => {
+        if (!endpoint) return false;
+        if (endpoint.kind === 'data') return removedDataInstanceIds.has(endpoint.instance?.id);
+        if (endpoint.kind === 'propertyGroupProperty') return removedGroupPropertyIds.has(endpoint.property?.id);
+        if (endpoint.kind === 'property') {
+          const match = /^([^:]+):([^/]+)\//.exec(String(endpoint.address || ''));
+          return Boolean(match && entityArtboardId(document, { kind: match[1], id: match[2] }) === artboardId);
+        }
+        return false;
+      };
+      document.bindings = (document.bindings || []).filter((binding) => binding.artboard.id !== artboardId && !endpointOwnedByDeletedArtboard(binding.source) && !endpointOwnedByDeletedArtboard(binding.target));
+      document.lists = (document.lists || []).filter((item) => !removedDataInstanceIds.has(item.owner.id));
+      document.viewModelInstances = (document.viewModelInstances || []).filter((item) => item.artboard.id !== artboardId);
+      for (const instance of document.viewModelInstances || []) {
+        instance.initialValues = (instance.initialValues || []).filter((entry) => !(entry.value?.kind === 'viewModelInstance' && removedDataInstanceIds.has(entry.value.id)) && !(entry.value?.kind === 'list' && removedListIds.has(entry.value.id)));
+      }
+      document.propertyGroups = (document.propertyGroups || []).filter((item) => item.artboard.id !== artboardId);
       for (const key of ['nodes','bones','meshes','controls','constraints','timelines','stateMachines','listeners']) {
         document[key] = document[key].filter((item) => item.artboard?.id !== artboardId);
       }
@@ -1218,3 +1239,6 @@ export class VeyraStore {
     return cloneValue(this.#activity);
   }
 }
+
+
+installVeyraDataStoreMethods(VeyraStore);

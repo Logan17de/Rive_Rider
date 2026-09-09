@@ -207,7 +207,7 @@ assert.equal(fit.centerX, 1250); assert.equal(fit.centerY, 170, 'Fit Artboard us
 
 const browser = readFileSync(new URL('../veyra.js', import.meta.url), 'utf8');
 assert.match(browser, /let activeArtboardId = null/);
-assert.match(browser, /evaluateDocument\(store\.document, layers, null, \{ artboardId: activeArtboard\(\)\.id, componentRuntime: componentRuntimeRegistry \}\)/);
+assert.match(browser, /evaluateDocument\(store\.document, layers, null, \{[\s\S]*artboardId: activeArtboard\(\)\.id,[\s\S]*componentRuntime: componentRuntimeRegistry,[\s\S]*dataRuntime,[\s\S]*\}\);/);
 for (const action of ['addArtboard','updateArtboard','duplicateArtboard','removeArtboard','createComponent','removeComponent','addComponentInstance','updateComponentInstance','removeComponentInstance','setComponentOverride','removeComponentOverride']) {
   assert.match(browser, new RegExp(`dispatchCompatibilityCommand\\('${action}'`), `${action} human/script mutation must route through canonical dispatcher`);
 }
