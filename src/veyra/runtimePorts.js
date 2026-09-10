@@ -16,7 +16,10 @@ export const VEYRA_DATA_RUNTIME_PORTS = Object.freeze({
 
 export const VEYRA_DATA_RUNTIME_CONTRACT = Object.freeze({
   scopeIdentity: 'exact JSON array of ordered [kind,id] tuples; opaque IDs; structural reset/subtree matching',
-  endpointIdentity: 'canonical property-address parser; equivalent Property Group endpoints share conflict/cycle identity',
+  endpointIdentity: 'authored root/path retained; direct/nested data aliases resolve to one effective terminal per runtime scope; equivalent Property Group addresses share identity',
+  runtimeRetarget: 'affected path re-resolution; higher priority/stable ID conflict winners; cycles suppress the cycle and its consumers; reference settling is bounded to enabled bindings + 2 passes',
+  bindingTypes: 'nominal enum/View Model identity and recursive list/converter descriptors; incompatible authoring rejects before commit; stale runtime values are diagnosed and suppressed',
+  scopedObservation: 'source-local scene captured through canonical host Component traversal with actual override/timeline/machine/remap/mix state; wrapper opacity/matrix and traversal work reported separately',
   observation: 'read/ownership/scene inspection evaluate a live-state snapshot with the same evaluator and do not consume events',
   advancement: 'advanceDataRuntime explicitly evaluates one artboard/scope; each terminal trigger pulse is consumed once, independently of binding fan-out',
   generation: 'replace authored document snapshots (Store default), or call VeyraDataRuntime.invalidateAuthoredDocument() after mutable-host edits',

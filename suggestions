@@ -38,3 +38,7 @@ Guardrails
 - Stable IDs and human display names remain separate contracts.
 - UI convenience must not introduce a second mutation model or bypass the canonical control plane/Store validation boundary.
 - No interchange exporter may silently drop unsupported Veyra features.
+
+C4 handoff follow-up (not started)
+----------------------------------
+- After independent M8 acceptance, investigate narrower immutable runtime snapshots and path-targeted canonical Component observation. C4 intentionally captures the real full-host evaluator context for correctness; retain its nested/remap/mix/clock/event/ownership tests before optimizing away traversal or copies. Report actual work/latency, not only live-cache counters.

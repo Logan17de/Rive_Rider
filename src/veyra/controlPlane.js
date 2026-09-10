@@ -4,8 +4,8 @@ import {
   normalizeDocument,
   timelineById,
 } from './model.js';
-import { evaluateDocument, propertySource } from './evaluation.js';
-import { evaluateTimeline } from './animation.js';
+import { evaluateDocument, propertySource, OBSERVED_EVALUATION_CONTEXT } from './evaluation.js';
+import { evaluateTimeline, normalizeFrame } from './animation.js';
 import {
   parsePropertyAddress,
   formatPropertyAddress,
@@ -234,19 +234,23 @@ function runtimeTimelineContext(document, runtimeContext) {
   return {
     timelineId,
     timeSeconds,
+    loop: runtimeContext.loop ?? timeline.loop,
     overrides: evaluateTimeline(timeline, timeSeconds, runtimeContext.loop === undefined ? {} : { loop: runtimeContext.loop }),
     evidence,
   };
 }
 
-function evaluatedContext(document, options = {}) {
+export function evaluateVeyraObservation(document, options = {}) {
+  const observed = options[OBSERVED_EVALUATION_CONTEXT];
+  if (observed) return { scene: observed.scene, runtime: null, component: observed.componentContext,
+    layers: observed.layers, dataRuntime: observed.dataRuntime, observationWork: observed.observationWork };
   const layers = cloneValue(options.evaluationLayers || {});
   const runtime = runtimeTimelineContext(document, options.runtimeContext);
   if (runtime?.error) return { error: runtime.error, runtime, scene: null };
   if (runtime?.overrides) layers.animation = { ...(layers.animation || {}), ...runtime.overrides };
   const dataRuntime = options.dataRuntime?.fork() || createVeyraDataRuntime(document);
   const componentRuntime = options.componentRuntime?.fork() || null;
-  const scene = evaluateDocument(document, layers, null, { dataRuntime, componentRuntime, artboardId: options.artboardId, runtimeScopePath: options.runtimeScopePath || [] });
+  const scene = evaluateDocument(document, layers, null, { ...options, dataRuntime, componentRuntime, observe: false, runtimeScopePath: options.runtimeScopePath || [] });
   return { scene, runtime, layers, dataRuntime };
 }
 
@@ -268,6 +272,43 @@ function trackControllers(document, address) {
     }
   }
   return controllers.sort((left, right) => left.ref.id.localeCompare(right.ref.id));
+}
+
+function effectiveAnimationController(document, address, evaluation) {
+  const component = evaluation.component?.runtime?.controllers?.[address];
+  if (component) return cloneValue(component);
+  const runtime = evaluation.runtime;
+  if (runtime?.overrides && Object.prototype.hasOwnProperty.call(runtime.overrides, address)) {
+    const controller = trackControllers(document, address).find(item => item.timeline.id === runtime.timelineId);
+    if (controller) return { ...controller, source: 'animation', timeSeconds: runtime.timeSeconds, loop: runtime.loop,
+      evidence: [...controller.evidence, { kind: 'evaluated-timeline', timelineId: runtime.timelineId, timeSeconds: runtime.timeSeconds }] };
+  }
+  if (Object.prototype.hasOwnProperty.call(evaluation.layers?.animation || {}, address)) return {
+    kind: 'runtime-animation-layer', address, source: 'animation', evidence: [{ kind: 'explicit-evaluation-layer', layer: 'animation', controllerIdentity: 'not-supplied' }] };
+  const override = evaluation.component?.instanceOverrides?.find(item => item.address === address);
+  if (override) return { kind: 'component-instance-override', ref: { kind: 'componentOverride', id: override.id },
+    instance: cloneValue(evaluation.component.instance), override: cloneValue(override), address,
+    source: 'component-instance-override', evidence: [{ kind: 'authored-component-override', ref: { kind: 'componentOverride', id: override.id }, instance: cloneValue(evaluation.component.instance) }] };
+  return null;
+}
+function animationEdit(document, controller, address) {
+  if (controller?.kind === 'component-instance-override') return {
+    transport: 'command', action: 'setComponentOverride', args: { instanceId: controller.instance.id, override: { ...cloneValue(controller.override), value: null } }, valuePath: ['override', 'value'] };
+  // During a machine blend, select a track that really contributes; modifying
+  // an overwritten outgoing track (incoming weight one) is not an effective edit.
+  if (controller?.kind === 'state-machine-animation') {
+    const track = [...(controller.tracks || [])].reverse().find(item => item.contribution > 0);
+    if (!track) return null;
+    controller = { ...controller, ...track };
+  }
+  if (controller?.mix === 0) return { transport: 'command', action: 'setProperty', args: { address, value: null }, valuePath: ['value'] };
+
+  const timeline = controller?.timeline && timelineById(document, controller.timeline.id);
+  if (!timeline || !controller.ref || !Number.isFinite(controller.timeSeconds)) return null;
+  const sampleFrame = normalizeFrame(controller.timeSeconds * timeline.fps, timeline.duration, controller.loop ?? timeline.loop, timeline.workStart ?? 0, timeline.workEnd ?? timeline.duration);
+  // Authored keyframes use integer frames, even when the observed clock is between frames.
+  const frame = Math.floor(sampleFrame);
+  return { transport: 'command', action: 'setKeyframe', args: { timelineId: timeline.id, trackId: controller.ref.id, address, frame, value: null }, valuePath: ['value'], sampleFrame, frameSnap: 'preceding integer frame', valueDomain: 'controller keyframe before Component mix and binding conversion' };
 }
 
 function constraintControllers(document, ref) {
@@ -321,7 +362,7 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
     return { status: 'notFound', target: { address }, reason: String(error?.message || error) };
   }
 
-  const evaluation = evaluatedContext(document, options);
+  const evaluation = evaluateVeyraObservation(document, options);
   if (evaluation.error) return { status: 'runtime-context-required', target: { address }, reason: evaluation.error };
   let evaluatedValue;
   try {
@@ -354,9 +395,9 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
         stages: cloneValue(stages), target: cloneValue(activeBinding.target), mode: activeBinding.mode, runtimeScope: cloneValue(runtimeOwner?.runtimeScope || null) },
     } : { kind: 'data-binding', source: 'data-binding', evidence: [{ kind: 'binding-owner-missing' }] };
   } else if (source === 'animation' || source === 'playback') {
-    const activeTrack = tracks.find((controller) => controller.timeline.id === evaluation.runtime?.timelineId) || (tracks.length === 1 ? tracks[0] : null);
+    const activeTrack = effectiveAnimationController(document, address, evaluation) || (tracks.length === 1 ? tracks[0] : null);
     activeOwner = activeTrack
-      ? { kind: 'animation-track', ref: cloneValue(activeTrack.ref), source, evidence: cloneValue(activeTrack.evidence) }
+      ? { ...cloneValue(activeTrack), source, evidence: cloneValue(activeTrack.evidence) }
       : { kind: 'runtime-context-required', source, evidence: [{ kind: 'multiple-or-unknown-animation-controller', count: tracks.length }] };
   } else if (source === 'constraints') {
     activeOwner = {
@@ -377,7 +418,7 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
       };
       warnings.push('A state machine can activate an animation track for this property; runtime context is required to identify current ownership.');
     } else {
-      activeOwner = { kind: 'authored-property', source: 'authored', address, evidence: [{ kind: 'authored-source' }] };
+      activeOwner = effectiveAnimationController(document, address, evaluation) || { kind: 'authored-property', source: 'authored', address, evidence: [{ kind: 'authored-source' }] };
     }
   }
 
@@ -388,7 +429,7 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
     const sourceBinding = activeOwner.chain?.sourceBinding || activeOwner.ref;
     const sourceMode = activeOwner.chain?.sourceMode || activeOwner.mode;
     if (endpoint?.kind === 'data') {
-      const terminal = evaluation.dataRuntime.resolveDataEndpoint(endpoint, runtimeOptions);
+      const terminal = evaluation.dataRuntime.resolveDataEndpoint(endpoint, { ...runtimeOptions, virtualValues: evaluation.scene.data?.virtualValues });
       writableSource = {
         kind: 'data-runtime-property',
         binding: cloneValue(activeOwner.ref),
@@ -412,24 +453,31 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
       const runtimeOverride = typeof evaluation.dataRuntime?.hasPropertyGroupOverride === 'function'
           ? evaluation.dataRuntime.hasPropertyGroupOverride(endpoint.property.id, { scopePath: activeOwner.runtimeScope?.path || options.runtimeScopePath || [] })
           : false;
-      if (sourceMode === 'twoWay' || runtimeOverride) {
+      const controller = !runtimeOverride && effectiveAnimationController(document, sourceAddress, evaluation);
+      if (controller) { activeOwner.chain.controller = controller; potentialControllers.push({ ...cloneValue(controller), controlsBindingSource: sourceAddress }); }
+      if (sourceMode === 'twoWay' || runtimeOverride || controller) {
         const edit = sourceMode === 'twoWay'
           ? { transport: 'runtime', port: 'setTwoWayBindingTarget', arguments: [sourceBinding.id, null, runtimeOptions], valueIndex: 1 }
           : { transport: 'runtime', port: 'setPropertyGroupRuntimeValue', arguments: [endpoint.property.id, null, runtimeOptions], valueIndex: 1 };
-        writableSource = { kind: 'property-group-runtime-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), authoredAddress: sourceAddress, mode: activeOwner.mode, authored: false, runtimeOverride, runtimeScope: cloneValue(activeOwner.runtimeScope), edit, targetEditsPropagate: activeOwner.mode === 'twoWay' };
+        writableSource = { kind: 'property-group-runtime-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), authoredAddress: sourceAddress, mode: activeOwner.mode, authored: false, runtimeOverride, controller: cloneValue(controller), precedence: 'scoped Property Group runtime override is read after animation and before binding conversion', runtimeScope: cloneValue(activeOwner.runtimeScope), edit, targetEditsPropagate: activeOwner.mode === 'twoWay' };
         warnings.push('The visible value is controlled by a scoped Property Group runtime value. Runtime interaction writes the scoped evaluated Property Group value; use the canonical Property Group command only for intentional persistence.');
       } else {
         writableSource = { kind: 'property-group-property', binding: cloneValue(activeOwner.ref), ref: cloneValue(endpoint.property), address: sourceAddress, mode: activeOwner.mode, authored: true, targetEditsPropagate: false, edit: { transport: 'command', action: 'updatePropertyGroupProperty', args: { groupId: propertyGroupPropertyOwner(document, endpoint.property.id)?.id, propertyId: endpoint.property.id, changes: { value: null } }, valuePath: ['changes', 'value'] } };
         warnings.push('The visible value is data-bound from an authored Property Group property; edit that source property rather than the visual target.');
       }
     } else if (endpoint?.kind === 'property') {
-      writableSource = { kind: 'authored-property', binding: cloneValue(activeOwner.ref), address: endpoint.address, mode: activeOwner.mode, authored: true, targetEditsPropagate: activeOwner.mode === 'twoWay' };
-      warnings.push('The visible value is data-bound from another authored property; edit the binding source rather than the visual target.');
+      const controller = effectiveAnimationController(document, endpoint.address, evaluation);
+      const edit = controller && animationEdit(document, controller, endpoint.address);
+      if (controller) activeOwner.chain.controller = controller;
+      writableSource = controller ? { kind: controller.kind, controller, address: endpoint.address, authored: !!edit, writable: !!edit, edit }
+        : { kind: 'authored-property', binding: cloneValue(activeOwner.ref), address: endpoint.address, mode: activeOwner.mode, authored: true, targetEditsPropagate: activeOwner.mode === 'twoWay' };
+      warnings.push(controller ? 'The binding source is itself controlled. Edit the effective controller identified in the chain rather than the overwritten authored source value.' : 'The visible value is data-bound from another authored property; edit the binding source rather than the visual target.');
     } else {
       writableSource = { kind: 'data-binding-source', binding: cloneValue(activeOwner.ref), endpoint: cloneValue(endpoint), writable: false };
     }
-  } else if (activeOwner.kind === 'animation-track') {
-    writableSource = { kind: 'animation-track', ref: cloneValue(activeOwner.ref), address, edit: 'keyframes' };
+  } else if (['animation-track', 'state-machine-animation', 'runtime-animation-layer', 'component-instance-override'].includes(activeOwner.kind)) {
+    const edit = animationEdit(document, activeOwner, address);
+    writableSource = { kind: activeOwner.kind, ref: cloneValue(activeOwner.ref), timeline: cloneValue(activeOwner.timeline), address, authored: !!edit, writable: !!edit, edit };
     warnings.push('Direct authored edits may be overwritten while this animation track is active; edit the track/keyframes for the visible animated value.');
   } else if (activeOwner.kind === 'constraint-system') {
     writableSource = { kind: 'constraint-inputs', refs: activeOwner.refs, edit: 'controller-or-constraint-authored-properties' };
@@ -448,6 +496,7 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
     authoredValue: cloneValue(authoredValue),
     evaluatedValue: cloneValue(evaluatedValue),
     evaluatedSource: source,
+    ...(evaluation.component ? { componentContext: cloneValue(evaluation.component), valueSpace: 'source-local', observationWork: cloneValue(evaluation.observationWork) } : {}),
     activeOwner,
     ownerStack: [
       { kind: 'authored-property', address, active: activeOwner.kind === 'authored-property' },
@@ -501,6 +550,7 @@ export function readVeyra(documentInput, refOrAddress, options = {}) {
     authoredValue: cloneValue(ownership.authoredValue),
     evaluatedValue: cloneValue(ownership.evaluatedValue),
     evaluatedSource: ownership.evaluatedSource,
+    ...(ownership.componentContext ? { componentContext: cloneValue(ownership.componentContext), valueSpace: ownership.valueSpace, observationWork: cloneValue(ownership.observationWork) } : {}),
     capabilities: {
       readable: true,
       writable: true,
@@ -553,6 +603,12 @@ function commandAddresses(descriptor) {
 }
 
 export function previewVeyraCommand(store, descriptor, options = {}) {
+  try { return previewVeyraCommandUnchecked(store, descriptor, options); }
+  catch (error) { return { ok: false, action: descriptor?.action || null, sideEffects: false,
+    error: String(error?.message || error), validation: { ok: false, errors: [{ code: error.code || 'preview-failed', message: String(error?.message || error), ...(error.details ? { evidence: cloneValue(error.details) } : {}) }] },
+    changes: { added: [], removed: [], changed: [], properties: [] } }; }
+}
+function previewVeyraCommandUnchecked(store, descriptor, options = {}) {
   if (!store || typeof store !== 'object' || !store.document) {
     return { ok: false, error: 'previewCommand requires a VeyraStore.' };
   }
@@ -569,7 +625,7 @@ export function previewVeyraCommand(store, descriptor, options = {}) {
       error: dispatch.error,
       preparedCommand,
       sideEffects: false,
-      validation: validationResult(before),
+      validation: { ok: false, errors: [{ code: dispatch.errorCode || 'command-rejected', message: dispatch.error, ...(dispatch.errorEvidence ? { evidence: cloneValue(dispatch.errorEvidence) } : {}) }] },
       changes: { added: [], removed: [], changed: [], properties: [] },
     };
   }

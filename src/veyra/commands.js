@@ -1,4 +1,5 @@
 import {
+  cloneValue,
   VEYRA_EASING_TYPES,
   VEYRA_LOOP_MODES,
   VEYRA_LISTENER_ACTIONS,
@@ -1072,9 +1073,9 @@ export const VEYRA_COMMAND_PROVENANCE_AUDIT = Object.freeze(Object.fromEntries(
 export const VEYRA_NON_DISPATCHABLE_ACTIONS = Object.freeze(['execute', 'mutate', 'subscribe']);
 
 function fail(action, message) {
-  const error = String(message);
+  const error = String(message?.message ?? message);
   const match = /^\[([^\]]+)\]/.exec(error);
-  return { ok: false, action, error, ...(match ? { errorCode: match[1] } : {}) };
+  return { ok: false, action, error, ...(match ? { errorCode: match[1] } : {}), ...(message?.details ? { errorEvidence: cloneValue(message.details) } : {}) };
 }
 
 /**
@@ -1123,13 +1124,13 @@ export function dispatchVeyraCommand(store, descriptor) {
       if (value !== undefined) CHECKS[spec.type](value, `args.${spec.name}`);
     }
   } catch (error) {
-    return fail(action, error.message);
+    return fail(action, error);
   }
 
   try {
     const result = entry.run(store, args, command);
     return { ok: true, action, result: result === undefined ? null : result };
   } catch (error) {
-    return fail(action, String(error?.message ?? error));
+    return fail(action, error);
   }
 }

@@ -7,6 +7,9 @@ import { artboardById } from './projectGraph.js';
 import { evaluateComponentContent } from './components.js';
 import { createVeyraDataRuntime } from './dataGraph.js';
 
+// Internal observation handoff. JSON options cannot spoof an evaluated context.
+export const OBSERVED_EVALUATION_CONTEXT = Symbol('veyra-observed-evaluation-context');
+
 export const VEYRA_EVALUATION_ORDER = Object.freeze([
   'authored',
   'animation',
@@ -148,6 +151,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
       ],
     }),
     evaluationOrder: [...VEYRA_EVALUATION_ORDER],
+    ...(options.componentContext ? { componentContext: cloneValue(options.componentContext) } : {}),
     sources,
     data: cloneValue({
       bindingOwnership: dataResult.ownership,
@@ -157,14 +161,19 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
       runtimeScopePath: options.runtimeScopePath || [],
     }),
   };
-  if (options.includeComponents === false) return {
+  const finish = scene => {
+    options.onEvaluatedScope?.({ scene, sourceDocument: authoredDocument, layers, componentContext: options.componentContext || null,
+      runtimeScopePath: options.runtimeScopePath || [], dataRuntime, componentRuntime: options.componentRuntime || null });
+    return scene;
+  };
+  if (options.includeComponents === false) return finish({
     ...baseScene,
     componentEvaluatedNodes: [],
     componentEvaluatedBones: [],
     componentEvaluatedMeshes: [],
     componentEvaluatedControls: [],
     componentEvaluatedConstraints: [],
-  };
+  });
   const componentContent = evaluateComponentContent({
     document: evaluatedDocument,
     artboardId,
@@ -183,7 +192,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
       },
     ),
   });
-  return {
+  return finish({
     ...baseScene,
     nodes: [...baseNodes, ...componentContent.nodes],
     bones: [...baseScene.bones, ...componentContent.bones],
@@ -195,7 +204,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     componentEvaluatedMeshes: componentContent.meshes,
     componentEvaluatedControls: componentContent.controls,
     componentEvaluatedConstraints: componentContent.constraints,
-  };
+  });
 }
 
 export function propertySource(scene, address) {

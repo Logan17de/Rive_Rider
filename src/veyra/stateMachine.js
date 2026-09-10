@@ -398,6 +398,7 @@ export class MachineRuntime {
       transition: this.transition,
       inputs: cloneValue(this.inputs),
       overrides: {},
+      evaluatedTimelines: [],
     };
     if (!machine || !machine.states.length) return result;
 
@@ -432,6 +433,9 @@ export class MachineRuntime {
         });
       }
     }
+    // The exact controllers/times used by this evaluation are also exposed to
+    // Component ownership. Observers do not reconstruct clocks from progress.
+    result.evaluatedTimelines = cloneValue(timelineStates);
     result.overrides = evaluateTimelines(this.#document, timelineStates);
     return result;
   }

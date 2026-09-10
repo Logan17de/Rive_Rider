@@ -1,3 +1,4 @@
+import { dataTypeDescriptor, dataTypeAccepts, bindingTypeError, converterTypeContract } from './dataTypeContracts.js';
 import { createReference, normalizeReference, referenceId } from './references.js';
 import { canonicalPropertyBindingCapabilities } from './propertyBinding.js';
 import { parsePropertyAddress, formatPropertyAddress } from './propertyAddress.js';
@@ -17,7 +18,9 @@ export const VEYRA_BINDING_CONFLICT_POLICY = Object.freeze({
   tieBreak: 'lexicographically-lower-binding-id-wins',
 });
 export const VEYRA_DATA_EVALUATION_COMPLEXITY = Object.freeze({
-  graphBuild: 'O(bindings + endpoint edges)',
+  graphBuild: 'retained per-artboard authored catalog; sorted effective dependency graph per scope, rebuilt only on topology/definition changes',
+  aliasResolution: 'only affected nested paths are re-resolved; settled revisits do zero endpoint resolution',
+  runtimeRetarget: 'at most enabled bindings + 2 deterministic passes; provisional work counted separately',
   dirtyPropagation: 'O(reachable binding edges)',
   settledEvaluation: 'O(binding output application) with zero converter/source recomputation for clean bindings',
   zeroBinding: 'O(1) early return; no graph/index construction',
@@ -173,6 +176,8 @@ export function createConverter(overrides = {}) {
     inputType: String(overrides.inputType ?? signature[0]),
     outputType: String(overrides.outputType ?? overrides.config?.outputType ?? signature[1]),
     config: clone(overrides.config || {}),
+    ...(overrides.inputDescriptor ? { inputDescriptor: normalizeTypeDescriptor(overrides.inputDescriptor, 'converter.inputDescriptor') } : {}),
+    ...(overrides.outputDescriptor ? { outputDescriptor: normalizeTypeDescriptor(overrides.outputDescriptor, 'converter.outputDescriptor') } : {}),
     futureHook: 'script-converter',
   };
 }
@@ -463,6 +468,36 @@ function endpointAddress(endpoint) {
     ? formatPropertyAddress(canonical.property, ['value']) : null;
 }
 
+// Authored and runtime graph compilation use this same terminal/path resolver.
+// The caller supplies value lookup (authored defaults or scoped live/derived
+// values); roots and paths are never rewritten in the persistent document.
+function resolveEffectiveEndpoint(endpointInput, getProperty, readValue, visit = () => {}) {
+  const endpoint = normalizeBindingEndpoint(endpointInput);
+  if (endpoint.kind !== 'data') return { endpoint, key: bindingEndpointKey(endpoint), reads: [bindingEndpointKey(endpoint)], prefixes: [], property: null };
+  let instanceId = endpoint.instance.id;
+  const reads = [], prefixes = [];
+  for (let i = 0; i < endpoint.path.length; i += 1) {
+    const { instance, property } = getProperty(instanceId, endpoint.path[i].id);
+    const direct = { kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] };
+    const key = bindingEndpointKey(direct), terminal = i === endpoint.path.length - 1;
+    reads.push(key); visit(instance, property, terminal, key);
+    if (terminal) return { endpoint: direct, key, reads, prefixes, property };
+    prefixes.push(key);
+    const value = readValue(instance, property, key);
+    if (property.type !== 'viewModel' || value?.kind !== 'viewModelInstance') throw new TypeError(`[binding-runtime-path] ${property.id} does not resolve a nested View Model instance.`);
+    instanceId = value.id;
+  }
+}
+function authoredEndpointResolution(document, endpoint) {
+  return resolveEffectiveEndpoint(endpoint, (instanceId, propertyId) => {
+    const instance = viewModelInstanceById(document, instanceId);
+    const property = instance && viewModelById(document, instance.viewModel.id)?.properties.find(item => item.id === propertyId);
+    if (!property) throw new TypeError(`[binding-missing-endpoint] ${instanceId}/${propertyId} does not exist.`);
+    return { instance, property };
+  }, (instance, property) => initialValueFor(document, instance, property));
+}
+export function resolvedBindingEndpointKey(document, endpoint) { return authoredEndpointResolution(document, endpoint).key; }
+
 function endpointDataProperty(document, endpoint) {
   let instance = viewModelInstanceById(document, endpoint.instance.id);
   if (!instance) return null;
@@ -554,6 +589,8 @@ function validateTypedValueTarget(document, property, value, path) {
   } else if (property.type === 'list') {
     const list = listById(document, normalized.id);
     if (!list) throw new TypeError(`${path} references missing list ${normalized.id}.`);
+    const declared = dataPropertyById(document, list.property.id);
+    if (!dataTypeAccepts(property, declared)) throw new TypeError(`[list-definition-mismatch] ${path} list ${normalized.id} has incompatible item definitions.`);
   } else if (property.type === 'image') {
     const asset = (document.assets || []).find((item) => item.id === normalized.id);
     if (!asset || asset.type !== 'image') throw new TypeError(`${path} must reference an image asset.`);
@@ -567,6 +604,10 @@ function validateConverters(document) {
   uniqueIds(document.converters, 'converter', 'converters');
   for (const [index, converter] of document.converters.entries()) {
     const signature = CONVERTER_SIGNATURES[converter.type];
+    for (const key of ['inputDescriptor', 'outputDescriptor']) if (converter[key]) {
+      validateTypeDescriptorReferences(document, converter[key], `converters[${index}].${key}`);
+      if (converter[key].type !== converter[key === 'inputDescriptor' ? 'inputType' : 'outputType']) throw new TypeError(`[converter-descriptor-type] ${converter.id} ${key} disagrees with its broad label.`);
+    }
     if (signature[0] !== 'any' && converter.inputType !== signature[0]) {
       throw new TypeError(`converters[${index}] inputType must be ${signature[0]} for ${converter.type}.`);
     }
@@ -606,22 +647,16 @@ function requireForwardTargetCapabilities(document, binding) {
 }
 function validateBindingTypes(document, binding, index) {
   const sourceCaps = requireForwardSourceCapabilities(document, binding);
-  let type = sourceCaps.type ?? bindingEndpointType(document, binding.source);
-  if (!type) throw new TypeError(`[binding-missing-source] bindings[${index}] source does not resolve.`);
+  const sourceType = dataTypeDescriptor(sourceCaps.property) || { type: sourceCaps.type };
+  let outputType = sourceType;
   for (const ref of binding.converterChain) {
     const converter = converterById(document, ref.id);
     if (!converter) throw new TypeError(`[binding-missing-converter] binding ${binding.id} references missing converter ${ref.id}.`);
-    if (!typeAccepts(converter.inputType, type)) {
-      throw new TypeError(`[binding-converter-type-mismatch] binding ${binding.id} sends ${type} to converter ${ref.id} expecting ${converter.inputType}.`);
-    }
-    type = converter.outputType;
+    outputType = converterTypeContract(document, converter, outputType, binding);
   }
   const targetCaps = requireForwardTargetCapabilities(document, binding);
-  const targetType = targetCaps.type ?? bindingEndpointType(document, binding.target);
-  if (!targetType) throw new TypeError(`[binding-missing-target] bindings[${index}] target does not resolve.`);
-  if (!typeAccepts(targetType, type)) {
-    throw new TypeError(`[binding-type-mismatch] binding ${binding.id} produces ${type} for ${targetType} target ${bindingEndpointKey(binding.target)}.`);
-  }
+  const targetType = dataTypeDescriptor(targetCaps.property) || { type: targetCaps.type };
+  if (!dataTypeAccepts(targetType, outputType)) bindingTypeError('binding-type-mismatch', binding, outputType, targetType, 'Incompatible complete endpoint definitions.');
   if (binding.mode === 'twoWay') {
     if (binding.converterChain.length) {
       throw new TypeError(`[binding-two-way-converter] binding ${binding.id} cannot be two-way while converters are present without an inverse converter contract.`);
@@ -630,33 +665,52 @@ function validateBindingTypes(document, binding, index) {
     if (!targetCaps.bindable) bindingCapabilityError('binding-target-unbindable', binding, binding.target, 'two-way target is not bindable');
     if (!sourceCaps.writable) bindingCapabilityError('binding-two-way-source-readonly', binding, binding.source, 'two-way source is not writable');
     if (!sourceCaps.reverseWritable) bindingCapabilityError('binding-two-way-source-unsupported', binding, binding.source, 'two-way source has no deterministic reverse-write port');
-    if (!typeAccepts(type, targetType) || !typeAccepts(targetType, type)) throw new TypeError(`[binding-two-way-type-mismatch] binding ${binding.id} reverse direction is incompatible.`);
+    if (!dataTypeAccepts(sourceType, targetType) || !dataTypeAccepts(targetType, sourceType)) bindingTypeError('binding-two-way-type-mismatch', binding, sourceType, targetType, 'Reverse direction is incompatible.');
   }
 }
-function validateBindingCycles(bindings) {
-  const adjacency = new Map();
-  for (const binding of bindings.filter((item) => item.enabled)) {
-    const from = bindingEndpointKey(binding.source);
-    const to = bindingEndpointKey(binding.target);
-    if (from === to) throw new TypeError(`[binding-cycle] direct cycle at ${from} via ${binding.id}.`);
-    if (!adjacency.has(from)) adjacency.set(from, []);
-    adjacency.get(from).push({ to, id: binding.id });
+function validateBindingCycles(bindings, document) {
+  const boards = new Map();
+  for (const binding of bindings.filter(item => item.enabled)) {
+    if (!boards.has(binding.artboard.id)) boards.set(binding.artboard.id, []);
+    boards.get(binding.artboard.id).push(binding);
   }
-  for (const edges of adjacency.values()) edges.sort((a, b) => a.id.localeCompare(b.id) || a.to.localeCompare(b.to));
-  const visiting = new Set();
-  const visited = new Set();
-  const stack = [];
-  const visit = (node) => {
-    if (visiting.has(node)) {
-      const start = stack.indexOf(node);
-      throw new TypeError(`[binding-cycle] ${[...stack.slice(start), node].join(' -> ')}.`);
+  for (const [artboardId, boardBindings] of boards) {
+    const adjacency = new Map();
+    for (const binding of boardBindings) {
+      const source = authoredEndpointResolution(document, binding.source), target = authoredEndpointResolution(document, binding.target);
+      for (const from of new Set([...source.reads, ...target.prefixes])) {
+        if (from === target.key) throw new TypeError(`[binding-cycle] self-cycle at ${from} via binding ${binding.id}; authored source=${bindingEndpointKey(binding.source)} target=${bindingEndpointKey(binding.target)}.`);
+        if (!adjacency.has(from)) adjacency.set(from, []);
+        adjacency.get(from).push({ to: target.key, id: binding.id });
+      }
     }
-    if (visited.has(node)) return;
-    visiting.add(node); stack.push(node);
-    for (const edge of adjacency.get(node) || []) visit(edge.to);
-    stack.pop(); visiting.delete(node); visited.add(node);
-  };
-  for (const node of [...adjacency.keys()].sort()) visit(node);
+    for (const edges of adjacency.values()) edges.sort((a, b) => a.id.localeCompare(b.id) || a.to.localeCompare(b.to));
+    const visiting = new Set(), visited = new Set(), stack = [], bindingsOnPath = [];
+    const visit = node => {
+      if (visiting.has(node)) {
+        const start = stack.indexOf(node);
+        throw new TypeError(`[binding-cycle] endpoints=${JSON.stringify([...stack.slice(start), node])} bindings=${JSON.stringify(bindingsOnPath.slice(start))}.`);
+      }
+      if (visited.has(node)) return;
+      visiting.add(node); stack.push(node);
+      for (const edge of adjacency.get(node) || []) { bindingsOnPath.push(edge.id); visit(edge.to); bindingsOnPath.pop(); }
+      stack.pop(); visiting.delete(node); visited.add(node);
+    };
+    for (const node of [...adjacency.keys()].sort()) visit(node);
+    // A reference writer can make a cycle demonstrable even though each
+    // authored path resolves acyclically before that writer runs. Validate its
+    // default behavior with the SAME bounded evaluator, on a private runtime.
+    // No second converter/controller interpreter, Store mutation, or live event.
+    if (boardBindings.some(binding => authoredEndpointResolution(document, binding.target).property?.type === 'viewModel')) {
+      const output = new VeyraDataRuntime(document).evaluateBindings(document, { artboardId });
+      const errors = output.diagnostics.errors.filter(error => ['binding-runtime-cycle', 'binding-runtime-retarget-limit'].includes(error.code));
+      if (errors.length) {
+        const error = new TypeError(`[binding-cycle] authored reference evaluation is cyclic: ${JSON.stringify(errors)}`);
+        error.code = 'binding-cycle'; error.details = { artboard: createReference('artboard', artboardId), diagnostics: errors };
+        throw error;
+      }
+    }
+  }
 }
 
 export function validateDataGraphDocument(document) {
@@ -724,7 +778,7 @@ export function validateDataGraphDocument(document) {
     if (!(document.artboards || []).some((item) => item.id === binding.artboard.id)) throw new TypeError(`bindings[${bindingIndex}] references missing artboard ${binding.artboard.id}.`);
     validateBindingTypes(document, binding, bindingIndex);
   }
-  validateBindingCycles(document.bindings || []);
+  validateBindingCycles(document.bindings || [], document);
   return document;
 }
 
@@ -939,57 +993,59 @@ function bindingSignature(binding, converters) {
     target: normalizeBindingEndpoint(binding.target), mode: binding.mode, enabled: binding.enabled, priority: binding.priority,
     converters: binding.converterChain.map(ref => {
       const c = converters.get(ref.id);
-      return c ? { id: c.id, type: c.type, inputType: c.inputType, outputType: c.outputType, config: c.config } : ref;
+      return c ? { id: c.id, type: c.type, inputType: c.inputType, outputType: c.outputType, inputDescriptor: c.inputDescriptor, outputDescriptor: c.outputDescriptor, config: c.config } : ref;
     }),
   });
 }
 
 function bindingOrder(left, right) { return right.priority - left.priority || left.id.localeCompare(right.id); }
-function buildRuntimeIndex(bindings) {
+function buildRuntimeIndex(bindings, resolutions) {
   const all = bindings.filter(item => item.enabled).sort((a, b) => a.id.localeCompare(b.id));
-  const contenders = new Map();
+  const contenders = new Map(), byPath = new Map();
   for (const binding of all) {
-    const key = bindingEndpointKey(binding.target);
+    const resolved = resolutions.get(binding.id);
+    const key = resolved.target.key || bindingEndpointKey(binding.target);
     if (!contenders.has(key)) contenders.set(key, []);
     contenders.get(key).push(binding);
-  }
-  const winnerIds = new Set();
-  const conflicts = [];
-  for (const [target, items] of contenders) {
-    items.sort(bindingOrder);
-    winnerIds.add(items[0].id);
-    if (items.length > 1) conflicts.push({ target, winner: createReference('binding', items[0].id), losers: items.slice(1).map((item) => createReference('binding', item.id)), policy: clone(VEYRA_BINDING_CONFLICT_POLICY) });
-  }
-  const winners = all.filter((item) => winnerIds.has(item.id));
-  const bySource = new Map();
-  const downstream = new Map();
-  const byTarget = new Map(winners.map((item) => [bindingEndpointKey(item.target), item]));
-  for (const binding of winners) {
-    const source = bindingEndpointKey(binding.source);
-    if (!bySource.has(source)) bySource.set(source, []);
-    bySource.get(source).push(binding.id);
-  }
-  for (const binding of winners) {
-    const next = bySource.get(bindingEndpointKey(binding.target)) || [];
-    downstream.set(binding.id, [...next].sort());
-  }
-  const byId = new Map(winners.map(item => [item.id, item]));
-  const indegree = new Map(winners.map((item) => [item.id, 0]));
-  for (const ids of downstream.values()) for (const next of ids) indegree.set(next, (indegree.get(next) || 0) + 1);
-  const queue = winners.filter((item) => indegree.get(item.id) === 0).sort((a, b) => a.id.localeCompare(b.id));
-  const ordered = [];
-  while (queue.length) {
-    const current = queue.shift(); ordered.push(current);
-    for (const nextId of downstream.get(current.id) || []) {
-      indegree.set(nextId, indegree.get(nextId) - 1);
-      if (indegree.get(nextId) === 0) {
-        const item = byId.get(nextId);
-        queue.push(item); queue.sort((a, b) => a.id.localeCompare(b.id));
-      }
+    for (const prefix of new Set([...resolved.source.prefixes, ...resolved.target.prefixes])) {
+      if (!byPath.has(prefix)) byPath.set(prefix, new Set());
+      byPath.get(prefix).add(binding.id);
     }
   }
-  if (ordered.length !== winners.length) throw new TypeError('[binding-cycle] runtime index found a cycle after normalization.');
-  return { all, winners, ordered, conflicts, bySource, downstream, byTarget, byId };
+  const winnerIds = new Set(), conflicts = [];
+  for (const [target, items] of contenders) {
+    items.sort(bindingOrder); winnerIds.add(items[0].id);
+    if (items.length > 1) conflicts.push({ target, winner: createReference('binding', items[0].id), losers: items.slice(1).map(item => createReference('binding', item.id)), policy: clone(VEYRA_BINDING_CONFLICT_POLICY) });
+  }
+  const winners = all.filter(item => winnerIds.has(item.id));
+  const bySource = new Map(), downstream = new Map();
+  const byTarget = new Map(winners.map(item => [resolutions.get(item.id).target.key, item]).filter(([key]) => key));
+  for (const binding of winners) {
+    const resolved = resolutions.get(binding.id);
+    for (const key of new Set([...resolved.source.reads, ...resolved.target.prefixes])) {
+      if (!bySource.has(key)) bySource.set(key, []);
+      bySource.get(key).push(binding.id);
+    }
+  }
+  for (const binding of winners) downstream.set(binding.id, [...new Set(bySource.get(resolutions.get(binding.id).target.key) || [])].sort());
+  const byId = new Map(winners.map(item => [item.id, item])), indegree = new Map(winners.map(item => [item.id, 0]));
+  for (const ids of downstream.values()) for (const next of ids) indegree.set(next, indegree.get(next) + 1);
+  const queue = winners.filter(item => indegree.get(item.id) === 0).sort((a, b) => a.id.localeCompare(b.id)), ordered = [];
+  while (queue.length) {
+    const current = queue.shift(); ordered.push(current);
+    for (const next of downstream.get(current.id) || []) {
+      indegree.set(next, indegree.get(next) - 1);
+      if (indegree.get(next) === 0) { queue.push(byId.get(next)); queue.sort((a, b) => a.id.localeCompare(b.id)); }
+    }
+  }
+  // Runtime retargeting may introduce cycles absent from the authored graph.
+  // Suppress cyclic bindings AND their dependent consumers; independent branches
+  // still run. Kahn's residual is deterministic and includes that exact closure.
+  const blocked = winners.filter(item => indegree.get(item.id) > 0).map(item => item.id);
+  const errors = blocked.length ? [{ code: 'binding-runtime-cycle', bindings: blocked.map(id => createReference('binding', id)),
+    endpoints: blocked.map(id => ({ binding: id, source: resolutions.get(id).source.key, target: resolutions.get(id).target.key })),
+    policy: 'suppress-cycle-and-dependent-consumers-until-retargeted' }] : [];
+  return { all, winners, ordered, conflicts, errors, blocked, bySource, downstream, byTarget, byId, byPath, resolutions };
 }
 
 // Runtime identity is an exact typed tuple. No delimiter parsing, hashes, or
@@ -1007,6 +1063,7 @@ export class VeyraDataRuntime {
   #values = new Map();
   #triggers = new Map();
   #lists = new Map();
+  #listChecks = new Map();
   #listSequences = new Map();
   #propertyGroupValues = new Map();
   #indexes = new Map();
@@ -1015,7 +1072,7 @@ export class VeyraDataRuntime {
   #subscribers = new Set();
   #batchDepth = 0;
   #pending = [];
-  #stats = { graphBuilds: 0, catalogBuilds: 0, signatureBuilds: 0, bindingsExamined: 0,
+  #stats = { resolvedGraphBuilds: 0, endpointResolutions: 0, resolutionSegmentsVisited: 0, retargetPasses: 0, runtimeErrors: 0, runtimeListItemsValidated: 0, graphBuilds: 0, catalogBuilds: 0, signatureBuilds: 0, bindingsExamined: 0,
     dependencyEdgesVisited: 0, pathSegmentsVisited: 0, converterEvaluations: 0, outputApplications: 0,
     evaluations: 0, bindingEvaluations: 0, cacheHits: 0, dirtyInvalidations: 0, authoredInvalidations: 0,
     sourceChecks: 0, sourceInvalidations: 0, triggerPulsesConsumed: 0, notifications: 0, zeroBindingFastPaths: 0 };
@@ -1033,7 +1090,7 @@ export class VeyraDataRuntime {
     const document = this.#document();
     if (this.#catalog?.document === document && this.#catalog.epoch === this.#authoredEpoch) return this.#catalog;
     if (this.#catalog && this.#catalog.document.id !== document.id) {
-      for (const map of [this.#values, this.#triggers, this.#lists, this.#listSequences, this.#propertyGroupValues, this.#indexes, this.#buckets, this.#dependents]) map.clear();
+      for (const map of [this.#values, this.#triggers, this.#lists, this.#listChecks, this.#listSequences, this.#propertyGroupValues, this.#indexes, this.#buckets, this.#dependents]) map.clear();
     }
     const map = items => new Map((items || []).map(item => [item.id, item]));
     const byArtboard = new Map(), enabledArtboards = new Set();
@@ -1078,7 +1135,8 @@ export class VeyraDataRuntime {
   #value(instance, property, scope) {
     const key = runtimePropertyKey(scope, instance.id, property.id);
     if (property.type === 'trigger') return (this.#triggers.get(key) || 0) > 0;
-    return clone(this.#values.has(key) ? this.#values.get(key) : initialValueFor(this.#document(), instance, property));
+    if (this.#values.has(key)) return validateTypedValueTarget(this.#document(), property, this.#values.get(key), `[runtime-value-definition] ${instance.id}/${property.id}`);
+    return clone(initialValueFor(this.#document(), instance, property));
   }
   getValue(instanceId, propertyId, options = {}) {
     const { instance, property } = this.#instanceProperty(instanceId, propertyId);
@@ -1088,7 +1146,8 @@ export class VeyraDataRuntime {
     const property = propertyGroupPropertyById(document, propertyId);
     if (!property) throw new TypeError(`Runtime Property Group target ${propertyId} does not exist.`);
     const key = runtimePropertyGroupKey(scope, propertyId);
-    return clone(this.#propertyGroupValues.has(key) ? this.#propertyGroupValues.get(key) : property.value);
+    if (this.#propertyGroupValues.has(key)) return validateTypedValueTarget(this.#document(), property, this.#propertyGroupValues.get(key), `[runtime-value-definition] Property Group ${propertyId}`);
+    return clone(property.value);
   }
   getPropertyGroupValue(propertyId, options = {}) { return this.#propertyGroupValue(this.#document(), propertyId, scopeKey(options.scopePath)); }
   hasPropertyGroupOverride(propertyId, options = {}) { return this.#propertyGroupValues.has(runtimePropertyGroupKey(scopeKey(options.scopePath), propertyId)); }
@@ -1099,7 +1158,10 @@ export class VeyraDataRuntime {
     if (property.type === 'trigger') throw new TypeError(`[data-trigger-set] ${propertyId} is a trigger; use fire().`);
     const normalized = validateTypedValueTarget(this.#document(), property, value, 'runtime value');
     const scope = scopeKey(options.scopePath), key = runtimePropertyKey(scope, instance.id, property.id);
-    const oldValue = this.#value(instance, property, scope);
+    // The replacement is already validated against the current definition. The
+    // previous scoped value may have become invalid after an authored schema
+    // change; report its raw prior value without preventing a valid repair.
+    const oldValue = this.#values.has(key) ? clone(this.#values.get(key)) : this.#value(instance, property, scope);
     if (this.#values.has(key) && stableString(oldValue) === stableString(normalized)) return false;
     this.#values.set(key, clone(normalized));
     if (stableString(oldValue) !== stableString(normalized)) this.#invalidateDependency(key);
@@ -1126,7 +1188,7 @@ export class VeyraDataRuntime {
       const candidate = scopeFromKey(key);
       return candidate.length >= path.length && path.every((ref, i) => candidate[i].kind === ref.kind && candidate[i].id === ref.id);
     };
-    for (const map of [this.#values, this.#triggers, this.#lists, this.#listSequences, this.#propertyGroupValues]) {
+    for (const map of [this.#values, this.#triggers, this.#lists, this.#listChecks, this.#listSequences, this.#propertyGroupValues]) {
       for (const key of map.keys()) if (matches(JSON.parse(key)[0])) map.delete(key);
     }
     for (const [key, bucket] of this.#buckets) if (matches(bucket.scope)) { this.#dropBucket(bucket); this.#buckets.delete(key); }
@@ -1143,28 +1205,30 @@ export class VeyraDataRuntime {
     this.#stats.signatureBuilds += 1; this.#stats.bindingsExamined += bindings.length;
     const signature = stableString([...signatures].sort(([a], [b]) => a.localeCompare(b)));
     if (!entry || entry.signature !== signature) {
-      const index = { ...buildRuntimeIndex(bindings), signatures };
+      const all = bindings.filter(item => item.enabled).sort((a, b) => a.id.localeCompare(b.id));
+      const index = { all, byId: new Map(all.map(item => [item.id, item])), signatures };
       this.#stats.graphBuilds += 1; this.#stats.bindingsExamined += bindings.length;
       entry = { signature, catalog, index };
     } else entry = { ...entry, catalog };
     this.#indexes.set(artboardId, entry);
     return entry.index;
   }
-  #cascadeDirty(bucket, ids) {
+  #cascadeDirty(bucket, ids, countInvalidations = true) {
     const queue = [...ids], seen = new Set(); let added = 0;
     for (let i = 0; i < queue.length; i += 1) {
       const id = queue[i]; if (seen.has(id)) continue;
       seen.add(id);
       if (!bucket.dirty.has(id)) { bucket.dirty.add(id); added += 1; }
-      for (const next of bucket.index.downstream.get(id) || []) { this.#stats.dependencyEdgesVisited += 1; queue.push(next); }
+      for (const next of bucket.index?.downstream.get(id) || []) { this.#stats.dependencyEdgesVisited += 1; queue.push(next); }
     }
-    this.#stats.dirtyInvalidations += added;
+    if (countInvalidations) this.#stats.dirtyInvalidations += added;
     return added;
   }
   #invalidateDependency(key) {
     for (const [bucketKey, ids] of this.#dependents.get(key) || []) {
       const bucket = this.#buckets.get(bucketKey); if (!bucket) continue;
       this.#stats.dependencyEdgesVisited += ids.size;
+      for (const id of ids) if (bucket.resolutions.get(id)?.dependencies.has(key)) bucket.resolutionDirty.add(id);
       this.#cascadeDirty(bucket, ids);
     }
   }
@@ -1188,18 +1252,82 @@ export class VeyraDataRuntime {
     }
   }
   #dropBucket(bucket) { for (const id of bucket.dependencies.keys()) this.#unregister(bucket, id); }
-  #bucket(scope, artboardId, index) {
+  #bucket(scope, artboardId, compiled) {
     const key = runtimeBucketKey(scope, artboardId);
     let bucket = this.#buckets.get(key);
     if (!bucket) {
-      bucket = { key, scope, artboardId, index, catalog: null, cache: new Map(), dirty: new Set(), dependencies: new Map() };
+      bucket = { key, scope, artboardId, compiled: null, index: null, catalog: null, cache: new Map(), dirty: new Set(), dependencies: new Map(),
+        resolutions: new Map(), resolutionDirty: new Set(), referenceValues: new Map(), rebuild: true };
       this.#buckets.set(key, bucket);
     }
-    if (bucket.index !== index) {
-      bucket.index = index;
-      for (const id of bucket.cache.keys()) if (!index.byId.has(id)) { this.#unregister(bucket, id); bucket.cache.delete(id); bucket.dirty.delete(id); }
+    if (bucket.compiled !== compiled) {
+      const allIds = new Set(compiled.all.map(item => item.id));
+      for (const id of bucket.resolutions.keys()) if (!allIds.has(id)) {
+        this.#unregister(bucket, id); bucket.resolutions.delete(id); bucket.cache.delete(id); bucket.dirty.delete(id); bucket.resolutionDirty.delete(id);
+      }
+      for (const binding of compiled.all) if (!bucket.compiled || bucket.compiled.signatures.get(binding.id) !== compiled.signatures.get(binding.id)) bucket.resolutionDirty.add(binding.id);
+      bucket.compiled = compiled; bucket.referenceValues.clear(); bucket.rebuild = true;
     }
+    if (bucket.catalog !== this.#catalog) for (const binding of compiled.all) bucket.resolutionDirty.add(binding.id);
     return bucket;
+  }
+
+  #resolveGraph(bucket, document, referenceValues) {
+    const changed = new Set();
+    for (const id of [...bucket.resolutionDirty].sort()) {
+      const binding = bucket.compiled.byId.get(id);
+      if (!binding) continue;
+      this.#stats.bindingsExamined += 1;
+      const dependencies = new Set();
+      const resolve = endpoint => {
+        const reads = [], prefixes = [];
+        try {
+          this.#stats.endpointResolutions += 1;
+          const result = resolveEffectiveEndpoint(endpoint, (instance, property) => this.#instanceProperty(instance, property),
+            (instance, property, key) => referenceValues.has(key) ? clone(referenceValues.get(key)) : this.#value(instance, property, bucket.scope),
+            (instance, property, terminal, key) => {
+              this.#stats.resolutionSegmentsVisited += 1; reads.push(key);
+              if (!terminal) { prefixes.push(key); dependencies.add(runtimePropertyKey(bucket.scope, instance.id, property.id)); }
+            });
+          if (result.endpoint.kind !== 'data') result.property = bindingEndpointCapabilities(document, result.endpoint).property || { type: bindingEndpointType(document, result.endpoint) };
+          return result;
+        } catch (error) { return { endpoint: clone(endpoint), key: null, reads, prefixes,
+          error: { code: 'binding-runtime-path', binding: createReference('binding', binding.id), endpoint: clone(endpoint), message: String(error.message) } }; }
+      };
+      const source = resolve(binding.source), target = resolve(binding.target);
+      const resolution = { source, target, dependencies };
+      const token = item => stableString({ source: item.source.key, target: item.target.key, reads: item.source.reads, prefixes: item.target.prefixes,
+        sourceType: dataTypeDescriptor(item.source.property), targetType: dataTypeDescriptor(item.target.property), errors: [item.source.error, item.target.error] });
+      const old = bucket.resolutions.get(binding.id);
+      const differs = !old || token(old) !== token(resolution);
+      if (differs) { changed.add(binding.id); bucket.rebuild = true; }
+      bucket.resolutions.set(binding.id, resolution);
+      this.#register(bucket, binding.id, new Set([...dependencies, ...(!differs ? bucket.cache.get(binding.id)?.dependencies || [] : [])]));
+    }
+    bucket.resolutionDirty.clear();
+    this.#cascadeDirty(bucket, changed, !!bucket.catalog);
+    if (bucket.rebuild || !bucket.index) {
+      const old = bucket.index;
+      bucket.index = buildRuntimeIndex(bucket.compiled.all, bucket.resolutions);
+      this.#stats.resolvedGraphBuilds += 1; this.#stats.bindingsExamined += bucket.compiled.all.length;
+      for (const binding of bucket.index.winners) {
+        const resolved = bucket.resolutions.get(binding.id);
+        const previousWinner = old?.byTarget.get(resolved.target.key);
+        if (previousWinner?.id !== binding.id || old?.blocked.includes(binding.id) !== bucket.index.blocked.includes(binding.id)) changed.add(binding.id);
+      }
+      this.#cascadeDirty(bucket, changed, !!bucket.catalog);
+      const winners = new Set(bucket.index.winners.map(binding => binding.id));
+      for (const binding of bucket.compiled.all) if (!winners.has(binding.id) || bucket.index.blocked.includes(binding.id)) {
+        this.#register(bucket, binding.id, new Set(bucket.resolutions.get(binding.id)?.dependencies || []));
+      }
+      bucket.rebuild = false;
+      // A removed/retargeted/losing reference writer must not leave ghost aliases.
+      for (const key of referenceValues.keys()) {
+        const winner = bucket.index.byTarget.get(key);
+        if (!winner || bucket.resolutions.get(winner.id).target.property?.type !== 'viewModel') referenceValues.delete(key);
+      }
+    }
+    return bucket.index;
   }
 
   #dataEndpointValue(endpoint, scope, virtual, triggerReads, dependencies) {
@@ -1210,8 +1338,7 @@ export class VeyraDataRuntime {
       const key = runtimePropertyKey(scope, instance.id, property.id);
       dependencies?.add(key);
       const direct = { kind: 'data', instance: createReference('viewModelInstance', instance.id), path: [createReference('dataProperty', property.id)] };
-      const prefix = { ...endpoint, path: endpoint.path.slice(0, i + 1) };
-      const virtualKey = virtual.has(bindingEndpointKey(prefix)) ? bindingEndpointKey(prefix) : bindingEndpointKey(direct);
+      const virtualKey = bindingEndpointKey(direct);
       if (virtual.has(virtualKey)) value = clone(virtual.get(virtualKey));
       else {
         value = this.#value(instance, property, scope);
@@ -1228,18 +1355,15 @@ export class VeyraDataRuntime {
   resolveDataEndpoint(endpointInput, options = {}) {
     const endpoint = normalizeBindingEndpoint(endpointInput);
     if (endpoint.kind !== 'data') throw new TypeError('resolveDataEndpoint requires a data endpoint.');
-    let instanceId = endpoint.instance.id;
-    for (let i = 0; i < endpoint.path.length; i += 1) {
-      const { instance, property } = this.#instanceProperty(instanceId, endpoint.path[i].id);
-      if (i === endpoint.path.length - 1) return { instance: createReference('viewModelInstance', instance.id), property: createReference('dataProperty', property.id), type: property.type, writable: property.writable !== false, runtimeScope: createDataRuntimeScope(options.scopePath || []) };
-      const next = this.#value(instance, property, scopeKey(options.scopePath));
-      if (property.type !== 'viewModel' || next?.kind !== 'viewModelInstance') throw new TypeError(`[binding-runtime-path] ${property.id} does not resolve a nested View Model instance.`);
-      instanceId = next.id;
-    }
+    const scope = scopeKey(options.scopePath), virtual = new Map(Object.entries(options.virtualValues || {}));
+    const result = resolveEffectiveEndpoint(endpoint, (instance, property) => this.#instanceProperty(instance, property),
+      (instance, property, key) => virtual.has(key) ? virtual.get(key) : this.#value(instance, property, scope));
+    return { instance: clone(result.endpoint.instance), property: clone(result.endpoint.path[0]), type: result.property.type,
+      writable: result.property.writable !== false, runtimeScope: createDataRuntimeScope(options.scopePath || []), authoredEndpoint: clone(endpoint), effectiveKey: result.key };
   }
   #endpointValue(document, endpointInput, scope, virtual, triggerReads = null, dependencies = null) {
     const endpoint = normalizeBindingEndpoint(endpointInput), key = bindingEndpointKey(endpoint);
-    if (virtual.has(key)) return clone(virtual.get(key));
+    if (endpoint.kind !== 'data' && virtual.has(key)) return clone(virtual.get(key));
     if (endpoint.kind === 'data') return this.#dataEndpointValue(endpoint, scope, virtual, triggerReads, dependencies);
     if (endpoint.kind === 'propertyGroupProperty') {
       dependencies?.add(runtimePropertyGroupKey(scope, endpoint.property.id));
@@ -1248,100 +1372,168 @@ export class VeyraDataRuntime {
     return readDataAwareAddress(document, endpoint.address);
   }
   #list(document, listId, scope) {
-    const authored = listById(document, listId);
+    const catalog = this.#authored(), authored = catalog.lists.get(listId);
     if (!authored) throw new TypeError(`Unknown list ${listId}.`);
-    return this.#lists.get(runtimeListKey(scope, listId)) || authored.items;
+    const key = runtimeListKey(scope, listId), items = this.#lists.get(key);
+    if (!items) return authored.items;
+    let checked = this.#listChecks.get(key);
+    if (checked?.catalog !== catalog || checked.items !== items) {
+      checked = { catalog, items, error: null };
+      try {
+        const { property } = this.#instanceProperty(authored.owner.id, authored.property.id);
+        for (const item of items) {
+          this.#stats.runtimeListItemsValidated += 1;
+          validateTypedValueTarget(document, property.itemType, item.value, `[runtime-list-definition] ${listId}/${item.id}`);
+        }
+      } catch (error) { checked.error = String(error.message); }
+      this.#listChecks.set(key, checked);
+    }
+    if (checked.error) throw new TypeError(checked.error);
+    return items;
   }
-  #sourceToken(document, binding, scope, derived) {
+
+  #sourceToken(document, binding, scope, derived, virtual = new Map()) {
+    try {
     const lists = binding.converterChain.map(ref => this.#authored().converters.get(ref.id))
       .filter(converter => converter?.type === 'numberToListIndex')
       .map(converter => [converter.config.list.id, this.#list(document, converter.config.list.id, scope)]);
-    const value = derived ? undefined : this.#endpointValue(document, binding.source, scope, new Map());
+    const value = derived ? undefined : this.#endpointValue(document, binding.source, scope, virtual);
     if (!derived && value?.kind === 'list') lists.push([value.id, this.#list(document, value.id, scope)]);
     return stableString({ value, lists });
+    } catch (error) { return stableString({ error: String(error.message) }); }
   }
 
-  // Explicit binding advancement consumes at most one pulse per terminal trigger
-  // in this (artboard, scope) advance, irrespective of direct/nested fan-out.
+  #validateRuntimeEndpoint(document, resolution, value, label) {
+    const property = resolution.property;
+    if (property?.type === 'trigger') {
+      if (typeof value !== 'boolean') throw new TypeError(`[binding-runtime-type] ${label} trigger pulse must be boolean.`);
+      return value;
+    }
+    // Null list-index output is an existing nullable converter contract. Keep it
+    // for ordinary visual targets (whose canonical writer defines coercion), but
+    // never let it bypass a non-null data/Property Group definition.
+    if (resolution.endpoint.kind === 'property') return value;
+    return validateTypedValueTarget(document, property, value, `[binding-runtime-type] ${label}`);
+  }
+
+  // Explicit advancement. The graph is resolved per scope and only recompiled
+  // after topology invalidation; scalar writes use the retained dependency map.
   evaluateBindings(document, options = {}) {
     if (options.observe) return this.peekBindings(document, options);
     this.#stats.evaluations += 1;
     const empty = () => { this.#stats.zeroBindingFastPaths += 1; return { overrides: {}, ownership: {}, virtualValues: {}, diagnostics: { conflicts: [], errors: [] }, stats: { evaluatedBindings: 0, cacheHits: 0, sourceInvalidations: 0, graphBuilt: false, zeroBindingFastPath: true } }; };
     if (!(this.#document().bindings || []).length) return empty();
-    const catalog = this.#authored();
-    const artboardId = String(options.artboardId || document.artboards?.[0]?.id || '');
+    const catalog = this.#authored(), artboardId = String(options.artboardId || document.artboards?.[0]?.id || '');
     if (!catalog.enabledArtboards.has(artboardId)) return empty();
-    const buildsBefore = this.#stats.graphBuilds, index = this.#index(artboardId), scope = scopeKey(options.scopePath);
-    const bucket = this.#bucket(scope, artboardId, index), authoredChanged = bucket.catalog !== catalog;
-    let sourceInvalidations = 0;
-    for (const binding of index.ordered) {
-      this.#stats.bindingsExamined += 1;
-      const entry = bucket.cache.get(binding.id), derived = index.byTarget.has(bindingEndpointKey(binding.source));
-      if (!entry || entry.signature !== index.signatures.get(binding.id) || entry.derived !== derived) {
-        if (!bucket.catalog) bucket.dirty.add(binding.id); // cold work is not invalidation
-        else this.#cascadeDirty(bucket, [binding.id]);
-      } else if (authoredChanged || (!derived && binding.source.kind !== 'data')) {
-        this.#stats.sourceChecks += 1;
-        const token = this.#sourceToken(document, binding, scope, derived);
-        if (entry.sourceToken !== token) {
-          const added = this.#cascadeDirty(bucket, [binding.id]); sourceInvalidations += added;
-          if (authoredChanged) this.#stats.authoredInvalidations += added;
+    const buildsBefore = this.#stats.graphBuilds, resolvedBuildsBefore = this.#stats.resolvedGraphBuilds;
+    const compiled = this.#index(artboardId), scope = scopeKey(options.scopePath), bucket = this.#bucket(scope, artboardId, compiled);
+    const authoredChanged = bucket.catalog !== catalog, referenceValues = new Map(bucket.referenceValues);
+    let sourceInvalidations = 0, evaluatedBindings = 0, cacheHits = 0, final = null;
+    // Acyclic derived reference chains settle in at most one pass per writer.
+    // The extra pass is for applying consumers; unstable retargeting is bounded.
+    const passLimit = compiled.all.length + 2;
+    for (let pass = 0; pass < passLimit; pass += 1) {
+      const index = this.#resolveGraph(bucket, document, referenceValues);
+      for (const binding of index.ordered) {
+        this.#stats.bindingsExamined += 1;
+        const resolved = bucket.resolutions.get(binding.id), entry = bucket.cache.get(binding.id), derived = index.byTarget.has(resolved.source.key);
+        if (!entry || entry.signature !== compiled.signatures.get(binding.id) || entry.derived !== derived) {
+          if (!bucket.catalog) bucket.dirty.add(binding.id); else this.#cascadeDirty(bucket, [binding.id]);
+        } else if (authoredChanged || (!derived && binding.source.kind !== 'data')) {
+          this.#stats.sourceChecks += 1;
+          const token = this.#sourceToken(document, binding, scope, derived, referenceValues);
+          if (entry.sourceToken !== token) {
+            const added = this.#cascadeDirty(bucket, [binding.id]); sourceInvalidations += added;
+            if (authoredChanged) this.#stats.authoredInvalidations += added;
+          }
         }
       }
+      const virtual = new Map(), chains = new Map(), overrides = {}, ownership = {}, triggerReads = new Set();
+      const errors = clone(index.errors), failed = new Set(index.blocked), nextReferences = new Map();
+      let retarget = false;
+      for (const binding of index.ordered) {
+        this.#stats.bindingsExamined += 1;
+        const resolved = bucket.resolutions.get(binding.id), derived = index.byTarget.has(resolved.source.key);
+        const dependencyFailure = [...new Set([...resolved.source.reads, ...resolved.target.prefixes])]
+          .map(key => index.byTarget.get(key)?.id).find(id => id && failed.has(id));
+        let entry = bucket.cache.get(binding.id);
+        const failure = resolved.source.error || resolved.target.error || (dependencyFailure ? {
+          code: 'binding-runtime-upstream', binding: createReference('binding', binding.id), upstream: createReference('binding', dependencyFailure), policy: 'suppress-dependent-consumer' } : null);
+        if (failure) { errors.push(clone(failure)); failed.add(binding.id); continue; }
+        if (!bucket.dirty.has(binding.id) && entry) { cacheHits += 1; this.#stats.cacheHits += 1; }
+        else {
+          const dependencies = new Set(), pulses = new Set(); let output, error = null;
+          try {
+            output = this.#endpointValue(document, binding.source, scope, virtual, pulses, dependencies);
+            output = this.#validateRuntimeEndpoint(document, resolved.source, output, `binding ${binding.id} source`);
+            for (const ref of binding.converterChain) {
+              const converter = catalog.converters.get(ref.id); this.#stats.converterEvaluations += 1;
+              output = converterValue(document, converter, output, listId => {
+                dependencies.add(runtimeListKey(scope, listId)); return this.#list(document, listId, scope);
+              });
+            }
+            output = this.#validateRuntimeEndpoint(document, resolved.target, output, `binding ${binding.id} target`);
+          } catch (cause) {
+            error = { code: 'binding-runtime-value', binding: createReference('binding', binding.id), source: clone(binding.source), target: clone(binding.target),
+              effectiveSource: clone(resolved.source.endpoint), effectiveTarget: clone(resolved.target.endpoint),
+              sourceType: dataTypeDescriptor(resolved.source.property), targetType: dataTypeDescriptor(resolved.target.property), message: String(cause.message), policy: 'suppress-invalid-output-and-dependent-consumers' };
+          }
+          entry = { value: clone(output), error, dependencies: [...dependencies], pulses: [...pulses], signature: compiled.signatures.get(binding.id), derived,
+            sourceToken: this.#sourceToken(document, binding, scope, derived, referenceValues) };
+          this.#register(bucket, binding.id, new Set([...resolved.dependencies, ...dependencies]));
+          bucket.cache.set(binding.id, entry); evaluatedBindings += 1; this.#stats.bindingEvaluations += 1;
+        }
+        bucket.dirty.delete(binding.id);
+        if (entry.error) { errors.push(clone(entry.error)); failed.add(binding.id); continue; }
+        const output = clone(entry.value), targetKey = resolved.target.key;
+        virtual.set(targetKey, clone(output));
+        for (const pulse of entry.pulses || []) triggerReads.add(pulse);
+        const stages = [...(chains.get(resolved.source.key) || []), {
+          binding: createReference('binding', binding.id), source: clone(binding.source), target: clone(binding.target),
+          effectiveSource: clone(resolved.source.endpoint), effectiveTarget: clone(resolved.target.endpoint),
+          converters: clone(binding.converterChain), mode: binding.mode,
+        }];
+        chains.set(targetKey, stages);
+        const address = endpointAddress(binding.target);
+        if (address) {
+          overrides[address] = clone(output);
+          ownership[address] = { kind: 'data-binding', ref: createReference('binding', binding.id), mode: binding.mode,
+            source: clone(binding.source), converters: clone(binding.converterChain), target: clone(binding.target),
+            chain: stages, runtimeScope: createDataRuntimeScope(scopeFromKey(scope)) };
+        }
+        this.#stats.outputApplications += 1;
+        if (resolved.target.property?.type === 'viewModel') {
+          nextReferences.set(targetKey, clone(output));
+          if (!referenceValues.has(targetKey) || stableString(referenceValues.get(targetKey)) !== stableString(output)) {
+            referenceValues.set(targetKey, clone(output));
+            const readers = index.byPath.get(targetKey) || [];
+            for (const id of readers) bucket.resolutionDirty.add(id);
+            if (bucket.resolutionDirty.size) { retarget = true; this.#stats.retargetPasses += 1; break; }
+          }
+        }
+      }
+      if (retarget) continue;
+      bucket.referenceValues = nextReferences;
+      final = { overrides, ownership, virtual, triggerReads, errors, conflicts: index.conflicts }; break;
     }
-    this.#stats.sourceInvalidations += sourceInvalidations;
     bucket.catalog = catalog;
-    const virtual = new Map(), chains = new Map(), overrides = {}, ownership = {}, triggerReads = new Set();
-    let evaluatedBindings = 0, cacheHits = 0;
-    for (const binding of index.ordered) {
-      this.#stats.bindingsExamined += 1;
-      const derived = index.byTarget.has(bindingEndpointKey(binding.source));
-      let output;
-      if (!bucket.dirty.has(binding.id) && bucket.cache.has(binding.id)) {
-        output = clone(bucket.cache.get(binding.id).value); cacheHits += 1; this.#stats.cacheHits += 1;
-      } else {
-        const dependencies = new Set();
-        output = this.#endpointValue(document, binding.source, scope, virtual, triggerReads, dependencies);
-        for (const ref of binding.converterChain) {
-          const converter = catalog.converters.get(ref.id);
-          this.#stats.converterEvaluations += 1;
-          output = converterValue(document, converter, output, listId => {
-            dependencies.add(runtimeListKey(scope, listId));
-            return this.#list(document, listId, scope);
-          });
-        }
-        this.#register(bucket, binding.id, dependencies);
-        bucket.cache.set(binding.id, { value: clone(output), signature: index.signatures.get(binding.id), derived,
-          sourceToken: this.#sourceToken(document, binding, scope, derived) });
-        evaluatedBindings += 1; this.#stats.bindingEvaluations += 1;
-      }
-      const targetKey = bindingEndpointKey(binding.target);
-      virtual.set(targetKey, clone(output));
-      const stages = [...(chains.get(bindingEndpointKey(binding.source)) || []), {
-        binding: createReference('binding', binding.id), source: clone(binding.source), target: clone(binding.target),
-        converters: clone(binding.converterChain), mode: binding.mode,
-      }];
-      chains.set(targetKey, stages);
-      const address = endpointAddress(binding.target);
-      if (address) {
-        overrides[address] = clone(output);
-        ownership[address] = { kind: 'data-binding', ref: createReference('binding', binding.id), mode: binding.mode,
-          source: clone(binding.source), converters: clone(binding.converterChain), target: clone(binding.target),
-          chain: stages, runtimeScope: createDataRuntimeScope(scopeFromKey(scope)) };
-      }
-      this.#stats.outputApplications += 1;
-      bucket.dirty.delete(binding.id);
+    if (!final) {
+      // Pathological runtime reference oscillation cannot hang or leak partial
+      // provisional outputs. Recovery remains possible on the next input edit.
+      for (const binding of compiled.all) { bucket.dirty.add(binding.id); bucket.resolutionDirty.add(binding.id); }
+      final = { overrides: {}, ownership: {}, virtual: new Map(), triggerReads: new Set(), conflicts: [], errors: [{ code: 'binding-runtime-retarget-limit', limit: passLimit, policy: 'suppress-provisional-frame' }] };
     }
-    // Use the same terminal dependency index on fire AND consume/settle.
-    for (const key of triggerReads) {
+    this.#stats.sourceInvalidations += sourceInvalidations; this.#stats.runtimeErrors += final.errors.length;
+    for (const key of final.triggerReads) {
       const count = this.#triggers.get(key) || 0;
       if (count > 1) this.#triggers.set(key, count - 1); else this.#triggers.delete(key);
       if (count) this.#stats.triggerPulsesConsumed += 1;
       this.#invalidateDependency(key);
     }
-    return { overrides, ownership, virtualValues: Object.fromEntries([...virtual].map(([key, value]) => [key, clone(value)])),
-      diagnostics: { conflicts: clone(index.conflicts), errors: [] },
-      stats: { evaluatedBindings, cacheHits, sourceInvalidations, graphBuilt: this.#stats.graphBuilds > buildsBefore, zeroBindingFastPath: false } };
+    return { overrides: final.overrides, ownership: final.ownership, virtualValues: Object.fromEntries(final.virtual),
+      diagnostics: { conflicts: clone(final.conflicts), errors: clone(final.errors) },
+      stats: { evaluatedBindings, cacheHits, sourceInvalidations, graphBuilt: this.#stats.graphBuilds > buildsBefore,
+        resolvedGraphBuilt: this.#stats.resolvedGraphBuilds > resolvedBuildsBefore, zeroBindingFastPath: false } };
   }
 
   // Observation shares the evaluator and the live state, but advances only a
@@ -1358,10 +1550,12 @@ export class VeyraDataRuntime {
       if (name === 'listSequences') fork.#listSequences = copy;
       if (name === 'propertyGroupValues') fork.#propertyGroupValues = copy;
     }
+    fork.#listChecks = new Map([...this.#listChecks].map(([key, check]) => [key, { ...check, items: fork.#lists.get(key) }]));
     fork.#indexes = new Map(this.#indexes);
     for (const [key, bucket] of this.#buckets) {
       const copied = { ...bucket, cache: new Map([...bucket.cache].map(([id, value]) => [id, clone(value)])),
-        dirty: new Set(bucket.dirty), dependencies: new Map() };
+        dirty: new Set(bucket.dirty), dependencies: new Map(), resolutionDirty: new Set(bucket.resolutionDirty),
+        resolutions: new Map(bucket.resolutions), referenceValues: new Map([...bucket.referenceValues].map(([id, value]) => [id, clone(value)])) };
       fork.#buckets.set(key, copied);
       for (const [id, dependencies] of bucket.dependencies) fork.#register(copied, id, new Set(dependencies));
     }
@@ -1391,7 +1585,7 @@ export class VeyraDataRuntime {
     if (!property) throw new TypeError(`[runtime-property-group-missing] ${propertyId} does not exist.`);
     if (!property.writable || !property.bindable || property.type === 'trigger') throw new TypeError(`[runtime-property-group-readonly] ${propertyId} has no value write port.`);
     const normalized = validateTypedValueTarget(document, property, value, `runtime Property Group ${propertyId}`);
-    const scope = scopeKey(options.scopePath), key = runtimePropertyGroupKey(scope, propertyId), oldValue = this.getPropertyGroupValue(propertyId, options);
+    const scope = scopeKey(options.scopePath), key = runtimePropertyGroupKey(scope, propertyId), oldValue = this.#propertyGroupValues.has(key) ? clone(this.#propertyGroupValues.get(key)) : this.getPropertyGroupValue(propertyId, options);
     if (this.#propertyGroupValues.has(key) && stableString(oldValue) === stableString(normalized)) return false;
     this.#propertyGroupValues.set(key, clone(normalized)); this.#invalidateDependency(key);
     this.#notify({ target: { kind: 'propertyGroupProperty', property: createReference('propertyGroupProperty', propertyId) }, oldValue, newValue: clone(normalized),

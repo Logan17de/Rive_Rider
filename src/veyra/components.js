@@ -266,7 +266,7 @@ export class ComponentRuntimeRegistry {
 
   evaluate(scopeInput) {
     const { document, instance, bucket, scope } = this.#bucket(scopeInput);
-    const overrides = {};
+    const overrides = {}, controllers = {};
     const timelineControllers = new Map(bucket.timelineTimes);
     const selectedTimelineId = instance.runtime?.timeline?.id || null;
     if (selectedTimelineId && !timelineControllers.has(selectedTimelineId)) timelineControllers.set(selectedTimelineId, 0);
@@ -279,7 +279,14 @@ export class ComponentRuntimeRegistry {
       this.#validateSourceRef(document, instance, effective);
       const timeline = document.timelines.find((item) => item.id === sourceTimelineId);
       if (!timeline) throw new TypeError(`Component runtime timeline ${sourceTimelineId} does not exist.`);
-      Object.assign(overrides, evaluateTimeline(timeline, timeSeconds));
+      const values = evaluateTimeline(timeline, timeSeconds);
+      Object.assign(overrides, values);
+      for (const address of Object.keys(values)) {
+        const track = timeline.tracks.find(item => item.address === address);
+        controllers[address] = { kind: 'animation-track', ref: { kind: 'track', id: track.id },
+          timeline: effective, controller, timeSeconds, source: 'animation', address,
+          evidence: [{ kind: 'component-timeline-controller', controller, effectiveTimeline: effective, timeSeconds }] };
+      }
       timelineMappings.push({ controllerId, sourceTimelineId, timeSeconds });
     }
 
@@ -289,7 +296,24 @@ export class ComponentRuntimeRegistry {
     const machineMappings = [];
     for (const controllerId of [...machineControllers].sort()) {
       const runtime = this.#machineRuntimeFor(document, instance, bucket, controllerId);
-      Object.assign(overrides, runtime.evaluate().overrides);
+      const state = runtime.evaluate();
+      Object.assign(overrides, state.overrides);
+      const machine = document.stateMachines.find(item => item.id === runtime.machineId);
+      const stateIds = state.transition ? [state.transition.fromId, state.transition.toId] : [state.stateId];
+      for (const address of Object.keys(state.overrides)) {
+        const contributors = (state.evaluatedTimelines || []).flatMap(entry => {
+          const timeline = document.timelines.find(item => item.id === entry.timelineId);
+          return (timeline?.tracks || []).filter(item => item.address === address && item.keyframes.length).map(track => ({ ...entry, track }));
+        });
+        const tracks = contributors.map((entry, index) => ({ timeSeconds: entry.time, blendWeight: entry.weight,
+          contribution: entry.weight * contributors.slice(index + 1).reduce((weight, next) => weight * (1 - next.weight), 1),
+          timeline: { kind: 'timeline', id: entry.timelineId }, ref: { kind: 'track', id: entry.track.id },
+          states: stateIds.filter(id => machine?.states.find(item => item.id === id)?.timeline?.id === entry.timelineId).map(id => ({ kind: 'machineState', id })) }));
+
+        controllers[address] = { kind: 'state-machine-animation', machine: { kind: 'stateMachine', id: runtime.machineId }, controller: { kind: 'stateMachine', id: controllerId },
+          state: { kind: 'machineState', id: state.stateId }, timeSeconds: state.stateTime, transition: cloneValue(state.transition), tracks, source: 'animation', address,
+          evidence: [{ kind: 'component-machine-controller', machineId: runtime.machineId, stateId: state.stateId }] };
+      }
       machineMappings.push({ controllerId, sourceMachineId: runtime.machineId });
     }
 
@@ -300,6 +324,7 @@ export class ComponentRuntimeRegistry {
       timelineIds: [...timelineControllers.keys()].sort(),
       machineIds: [...machineControllers].sort(),
       mappings: { timeline: timelineMappings, stateMachine: machineMappings },
+      controllers: Object.fromEntries(Object.entries(controllers).map(([address, controller]) => [address, { ...controller, mix: Number(instance.runtime?.mix ?? 1), runtimeScope: cloneValue(scope) }])),
       mix: Number(instance.runtime?.mix ?? 1),
     };
   }
@@ -401,6 +426,9 @@ export function evaluateComponentContent({
       depth: depth + 1,
       componentPath: [...componentPath, component.id],
       runtimeScopePath: runtimeScope.path,
+      componentContext: { instance: { kind: 'componentInstance', id: instance.id }, component: { kind: 'component', id: component.id },
+        runtime: runtimeResult, instanceOverrides: cloneValue(instance.overrides || []),
+        space: 'source-local', wrapperMatrix: cloneValue(wrapper), wrapperOpacity: instance.opacity },
     });
 
     const nodeIds = new Map(sourceScene.nodes.map((item) => [item.id, scopedEvaluatedId(instance.id, item.id)]));

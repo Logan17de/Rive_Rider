@@ -1,6 +1,6 @@
 import { cloneValue } from './model.js';
-import { evaluateDocument } from './evaluation.js';
-import { createVeyraControlPlane } from './controlPlane.js';
+import { evaluateDocument, OBSERVED_EVALUATION_CONTEXT } from './evaluation.js';
+import { createVeyraControlPlane, evaluateVeyraObservation } from './controlPlane.js';
 import { createDataRuntimeScope } from './dataGraph.js';
 import { VEYRA_DATA_RUNTIME_PORTS } from './runtimePorts.js';
 
@@ -35,6 +35,28 @@ export function createVeyraRuntimeHost({ store, dataRuntime, componentRuntime = 
       componentRuntime: options.live === false ? undefined : componentRuntime,
     };
   }
+  function observationOptions(options = {}) {
+    const context = readOptions(options);
+    if (!context.runtimeScopePath.length) return context;
+    const first = store.document.componentInstances.find(item => item.id === context.runtimeScopePath[0].id);
+    const selectedKey = createDataRuntimeScope(context.runtimeScopePath).key;
+    let observed = null, evaluatedScopes = 0;
+    // Traverse the exact canonical Component path, including parent evaluation,
+    // instance overrides, timeline/machine remaps/mix, and scoped live values.
+    // Only the private forks advance; source defaults are never substituted.
+    const observation = evaluateVeyraObservation(store.document, { ...context,
+      artboardId: first.artboard.id, runtimeScopePath: [], includeComponents: true,
+      onEvaluatedScope: captured => {
+        evaluatedScopes += 1;
+        if (createDataRuntimeScope(captured.runtimeScopePath).key === selectedKey) observed = captured;
+      },
+    });
+    if (observation.error) throw new TypeError(observation.error);
+    if (!observed) throw new TypeError('[runtime-host-scope-not-evaluated] the selected Component is not in the evaluated visible host tree.');
+    observed.observationWork = { evaluatedScopes, traversal: 'full-canonical-host', runtimeSnapshot: true };
+    observed.scene.observationWork = cloneValue(observed.observationWork);
+    return { ...context, [OBSERVED_EVALUATION_CONTEXT]: observed };
+  }
   const api = {};
   for (const [name, contract] of Object.entries(VEYRA_DATA_RUNTIME_PORTS)) {
     api[name] = (...input) => {
@@ -43,18 +65,22 @@ export function createVeyraRuntimeHost({ store, dataRuntime, componentRuntime = 
       const context = readOptions(given);
       args[optionsIndex] = { ...given, scopePath: context.runtimeScopePath };
       if (name === 'insertRuntimeListItem' && args[2] === undefined) args[2] = null;
-      const result = dataRuntime[contract.method](...args);
+      const runtime = contract.mutation ? dataRuntime : dataRuntime.fork();
+      const result = runtime[contract.method](...args);
       if (contract.mutation && result !== false) onChange({ port: name, result: cloneValue(result), options: args[optionsIndex] });
       return cloneValue(result);
     };
   }
   api.getManifest = options => controlPlane.getManifest(options);
-  api.read = (target, options = {}) => controlPlane.read(target, readOptions(options));
-  api.getOwnership = (target, options = {}) => controlPlane.getOwnership(target, readOptions(options));
+  api.read = (target, options = {}) => controlPlane.read(target, observationOptions(options));
+  api.getOwnership = (target, options = {}) => controlPlane.getOwnership(target, observationOptions(options));
   api.queryEntities = (query = {}, options = {}) => controlPlane.queryEntities(query, options);
   api.getEvaluatedScene = (options = {}) => {
-    const context = readOptions(options);
-    return evaluateDocument(store.document, context.evaluationLayers, null, { ...context, observe: true });
+    const context = observationOptions(options);
+    if (context[OBSERVED_EVALUATION_CONTEXT]) return cloneValue(context[OBSERVED_EVALUATION_CONTEXT].scene);
+    const observation = evaluateVeyraObservation(store.document, context);
+    if (observation.error) throw new TypeError(observation.error);
+    return cloneValue(observation.scene);
   };
   api.advanceDataRuntime = (options = {}) => {
     const context = readOptions(options);
