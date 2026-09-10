@@ -1,0 +1,26 @@
+name: C5 source transport
+on:
+  push:
+    branches: [work/m8-c5-transport]
+    paths: [.github/workflows/c5-transport.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Export pinned sources
+        run: |
+          mkdir /tmp/c5-source
+          git archive 479494c54d14c1c576d36484622c6056fbc3404d -o /tmp/c5-source/baseline.tar
+          git show 89e086caae68bc85b8e0e9d3d138af4cfc2b41c5:verification/m8-c4-review.mjs > /tmp/c5-source/review.mjs
+          git show c810199bdd6f049292b5c1a384a4ca4be7ec5a49:verification/M8-C4-review.md > /tmp/c5-source/review.md
+          git rev-parse 479494c54d14c1c576d36484622c6056fbc3404d^{tree} > /tmp/c5-source/base-tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c5-source
+          retention-days: 1
+          path: /tmp/c5-source
