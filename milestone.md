@@ -4,14 +4,14 @@
 
 Complete only the tasks below. Follow-up ideas belong in `suggestions`. Do not start M9. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed for the M8-C4 worker handoff (not independent acceptance)
+## Progress snapshot — refreshed after independent M8-C4 verification
 
-These are carry-forward approximate planning estimates, not measured vendor-parity scores, line-count metrics or test-pass percentages. The C3 corrections are independently confirmed. C4 now has worker implementation/test evidence, but M8 has not passed independent acceptance of the integrated result, so no new overall verified-completion increment is claimed.
+These are carry-forward approximate planning estimates, not measured vendor-parity scores, line-count metrics or test-pass percentages. C4's seven reproduced regressions now pass independently. Two remaining runtime integration families prevent acceptance of M8 as a whole; no new overall verified-completion increment is claimed.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation. C3 identity/observation/public-port fixes pass; C4 resolved identity/context corrections are implemented and awaiting independent verification. |
-| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; all earlier suites remain green. M8 is not accepted as a complete capability. |
+| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation. C3 and covered C4 fixes pass; the two-way runtime write must agree with effective read/graph identity. |
+| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; all 45 existing suites remain green. Invalid visual binding output still needs safe frame isolation. |
 | Modern Rive editor/runtime parity | **~53–57%** | No new feature-family completion credit until M8 acceptance. |
 | Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No new interchange capability accepted. |
 | Full Veyra superset target | **~46–49%** | Rive-class capability + Lottie/dotLottie interoperability + AI-native semantics, subject to quality/modularity gates. |
@@ -21,163 +21,146 @@ These are carry-forward approximate planning estimates, not measured vendor-pari
 
 - Implementation M0–M7: previously VERIFIED, with documented limitations preserved.
 - `plan.md` M3 / implementation M8: **CORRECTIONS REQUIRED**.
-- C3's ten previously reproduced failures: **FIXES CONFIRMED**; do not undo these fixes.
-- Current implementation work: **M8-C4 — AWAITING VERIFICATION**, below. All checked items are worker implementation coverage, not independent VERIFIED claims.
+- C3's ten reproduced failures and C4's seven reproduced failures: **FIXES CONFIRMED in their tested cases**. Preserve these fixes; do not restart their implementations.
+- Current implementation work: **M8-C5 — READY**, below.
 - M9 / layered state machines: **NOT STARTED; blocked on M8 acceptance**.
 
-Every verification/correction/advance must refresh this snapshot. Do not turn selected probe counts into completion percentages.
+Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
 
-## Independent M8-C3 evidence
+## Independent M8-C4 evidence
 
-- Production baseline: `d36f0ac2841fa6320f4335f617847d123dd394ca`.
-- Standard repository Tests #176, run `34349387154`: **SUCCESS on that exact baseline**.
-- Independent review commit: `92b91621aa81c095a591bc5abc9bbd20cc4c175e`.
-- Independent Actions run `34351233655`, job `102464741882`: unchanged-production guard and baseline gates PASS; additional composition probes FAIL.
-- **48/48 syntax checks, 41/41 existing suites, C3 12/12 reproduced-contract checks and 17/17 composition checks passed independently**, both locally and in GitHub Actions. Original M8/C1/C2 28/28/13 remain green.
-- Additional selected probes: **2 positive controls pass, 7 assertions fail across three blocker families, zero setup/execution errors in the final probe run**. This is not an overall application pass ratio.
-- Positive controls confirm warm nested numeric updates and non-consuming live ownership observation.
-- No production code or existing tests were modified by this verification. Temporary verifier workflow was removed from the review branch and never entered main.
-- Scope: executed Node runtime/control-plane/host-adapter verification, **not real-browser visual/usability acceptance**.
+- Production baseline: `b57b390b245b363f9024349d9b116996eb045e7a`.
+- Production Git tree: `0987af4e7c36aa367af320e862ea4ed8b85218dc`. The downloaded archive was independently indexed locally and reproduced this entire Git tree exactly.
+- Standard Tests #178, run `34426474579`: SUCCESS on the exact production baseline.
+- Independent local Node 22.16.0 and GitHub Node 22.23.2 reruns: **49/49 syntax checks and 45/45 existing suites PASS**. C4 reproduced/graph/types/context: **9 / 17 / 13 / 15 PASS**. Original M8/C1/C2 and C3 remain green.
+- Independent review commit `89e086caae68bc85b8e0e9d3d138af4cfc2b41c5`; Actions run `34428444954`, job `102718580904`.
+- The unchanged-production guard and baseline gates passed. Additional probes: **5 positive controls PASS, 5 regression assertions FAIL across two blocker families, 0 setup errors, 0 execution errors**. Local and GitHub observations agree.
+- Positive controls include resolved aliases, nominal enum rejection, scoped animation/context, callable correct terminal ownership recommendations, and bounded Property Group error isolation/recovery.
+- No production source or existing tests were changed by this review. The temporary verifier workflow was removed from its evidence branch and never entered main.
+- Scope: executed Node runtime/control-plane/public-host testing, **not real-browser visual/usability acceptance**.
 
-[Executed M8-C3 review](https://github.com/Logan17de/Rive_Rider/blob/805f3b30be4ca189605b183535d4aecd04485f6d/verification/M8-C3-review.md)
+[Executed M8-C4 review](https://github.com/Logan17de/Rive_Rider/blob/c810199bdd6f049292b5c1a384a4ca4be7ec5a49/verification/M8-C4-review.md)
 
-[Reproduction source](https://github.com/Logan17de/Rive_Rider/blob/92b91621aa81c095a591bc5abc9bbd20cc4c175e/verification/m8-c3-review.mjs)
+[Reproduction source](https://github.com/Logan17de/Rive_Rider/blob/89e086caae68bc85b8e0e9d3d138af4cfc2b41c5/verification/m8-c4-review.mjs)
 
-The review branch contains evidence, not a second implementation milestone. Convert the demonstrated behavior into permanent regressions; do not cherry-pick the temporary workflow.
+The review branch is evidence, not a second implementation milestone. Convert demonstrated behavior into permanent regressions. Do not cherry-pick the temporary verifier workflow.
 
 ---
 
-# MILESTONE M8-C4 — Resolved Binding Graph & Evaluated Context
+# MILESTONE M8-C5 — Effective Reverse Writes & Safe Visual Outputs
 
-**Topic:** Nested Data Aliases, Type Definitions, Scoped Observation & Controller Ownership  
+**Topic:** Two-Way Binding Identity, Actual Value Validation, Error Isolation & Event Safety  
 **Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding  
 **M8 verdict:** `CORRECTIONS REQUIRED`  
-**Implementation status:** `AWAITING VERIFICATION`
-
-Worker evidence: [M8-C4 runtime contract](docs/M8-C4-runtime-contract.md). The [post-promotion release receipt](https://github.com/Logan17de/Rive_Rider/blob/evidence/m8-c4-handoff/verification/M8-C4-handoff.md) records the actual final main SHA and standard Tests run without moving main again. Exact-final-head success is asserted in that receipt, not inferred from a local/staging pass.
+**Implementation status:** `READY`
 
 ## Goal
 
-Make the already-supported M8 features compose correctly. Fix the three executed blocker families below without adding a new feature family, removing supported types, restricting valid IDs, or starting M9.
+Close the two executed integration failures below without removing supported nested/two-way bindings, banning valid IDs/types, changing the product target, or starting M9. Keep C4's successful resolved graph, nominal type contracts and evaluated observation context.
 
 ## Instructions for implementing agents
 
-1. Read this file, the executed review, `QUALITY.md`, `docs/M8-C3-runtime-contract.md`, and affected tests before editing.
-2. Preserve one evaluator, one data graph, stable typed/opaque identities, canonical authored transactions and scoped ephemeral runtime values.
-3. Add failing regressions for each demonstrated behavior before the production fix. Do not count fixture errors as product failures, hard-code sample IDs/order, or weaken assertions to accept the defect.
-4. Keep successful C3 structured runtime keys, Property Group aliases, trigger fan-out, observation forks, typed live lists, callable runtime ports and retained indexes.
-5. Resolve graph/ownership meaning from IDs, paths, current scope and evaluated context, never human names. Retain authored root paths for future retargeting rather than permanently flattening them to today's terminal instance.
-6. Preserve explicit event advancement. Read/ownership/scene inspection must not consume live events, advance clocks, mutate live caches/counters, or emit mutation notifications.
-7. Intentional persistence goes through canonical validation/provenance/revision/history and one undo transaction. Invalid authoring must reject before commit with structured evidence.
-8. Keep performance counters honest; no per-runtime-write full-project scan or unconditional per-frame graph rebuild to hide dependency errors.
-9. Run all previous suites and new composition cases on the same final tree. Keep permanent tests in normal discovery and remove temporary transport/workflow artifacts before promotion.
-10. Stop at `AWAITING VERIFICATION` with final SHA and standard Tests evidence. M9 and progress increases remain verifier-owned.
+1. Read this milestone, the executed review, `QUALITY.md`, `docs/M8-C3-runtime-contract.md`, `docs/M8-C4-runtime-contract.md`, and relevant tests before editing.
+2. Preserve one evaluator, one effective graph, canonical authored validation/provenance/history, structural opaque identities and scoped ephemeral runtime values.
+3. Commit a failing regression for each demonstrated behavior before the production fix. Keep fixture/setup failures separate from product assertions. Do not hard-code IDs, prior render order or sample values.
+4. Preserve all 45 existing suites and the five new positive controls. Do not weaken assertions, bypass standard CI, or replace real public-port execution with metadata-only tests.
+5. Resolving the destination of a write is not event advancement. Do not consume events, move clocks, emit extra notifications or author data just to find the effective terminal.
+6. Use canonical property value constraints rather than a parallel set of magic bounds. Nominal type compatibility does not replace actual value validation.
+7. Keep performance counters truthful. Preserve direct scalar-write and settled-frame behavior; report any additional effective-resolution or validation cost explicitly.
+8. Stop at AWAITING VERIFICATION with exact clean main SHA and standard Tests evidence. No M9 or self-certified progress increase.
 
-## Blocker family A — Resolved nested data aliases disagree
-
-These two paths reach the same actual runtime property:
+## Blocker A — Public two-way writes follow the wrong nested reference
 
 ```text
-root.nested -> instance child
-root.nested.child_value
-child.child_value
+root.nested initially references child
+root.selector references child2
+reference_writer: root.selector -> root.nested
+ two_way: root.nested.value <-> box.opacity
 ```
 
-C3's syntactic key includes the root/path tuple, so the graph still treats them as different effective endpoints.
+Forward evaluation and ownership correctly resolve child2, displaying 0.9. But `host.setTwoWayBindingTarget('two_way', 0.47)` returns true, changes child.value to 0.47, leaves child2.value at 0.9 and leaves the visible result at 0.9.
+
+The same issue occurs inside real `[A, inner]` / `[B, inner]` Component paths. After A's selector is changed to child3, an immediate two-way edit to 0.63 changes A's old child; A remains 0.7. B remains correctly isolated at 0.9. This is wrong terminal resolution inside a scope, not cross-scope leakage or authored mutation.
+
+### Task 1 — Reverse writes use the authoritative effective endpoint
+
+- [ ] Make runtime `setTwoWayTarget` and public `setTwoWayBindingTarget` resolve the same current effective source as forward evaluation and ownership.
+- [ ] Include binding-derived reference values, current scope, current authored generation and pending reference retargeting. Retain the authored root/path for future retargets.
+- [ ] Do not rely solely on raw defaults, a previous rendered frame, a stale cached terminal, or a caller-assembled virtual-value map. Reuse the canonical graph/evaluator meaning instead of a second resolver.
+- [ ] Validate the effective writable endpoint before changing state. Missing/null/cyclic/invalid paths must not partially modify an unrelated child.
+- [ ] Preserve the currently correct terminal ownership recommendation and direct runtime data-write behavior.
+
+### Task 2 — Prove write/read agreement under retargeting and event pressure
+
+- [ ] Test cold and warm graphs, both binding-ID orders, direct and converter-derived reference writers, and at least two successive reference changes.
+- [ ] Test an edit immediately after reference change, before any read/render/advance, as well as after observation. The caller must not need to render first.
+- [ ] Exercise real repeated nested Components and distinct scoped values; only the effective child in the requested scope may change.
+- [ ] Snapshot old/effective/sibling child values, authored serialization/revision/history, data and machine queues/clocks, notifications and runtime work counters.
+- [ ] Successful write gives the correct next evaluated value and only the intended mutation notification. Failed resolution leaves all values/queues/history unchanged.
+
+## Blocker B — Ordinary visual target values can abort an entire frame
+
+`#validateRuntimeEndpoint` validates data/Property Group values but returns early for ordinary `property` endpoints. A legal unconstrained numeric source can therefore send 2 to opacity. The graph publishes that override and consumes events, then `evaluateDocument` throws during document normalization.
 
 Executed failures:
 
-- `z_writer: root.num -> child.child_value` plus `a_reader: root.nested.child_value -> box.opacity`: expected cold 0.25, then 0.66 after a runtime write; actual 0.2 both times.
-- Priority-10 nested-target binding and priority-0 direct-target binding to that same child field: actual lower-priority 0.75 with zero conflicts; expected 0.25 and one conflict.
-- A self-cycle from the nested form to the direct form is accepted and changes authored state instead of rejecting.
+- Numeric 2 -> opacity: raw `nodes[0].opacity must be between 0 and 1.`; no scene returned.
+- An independent trigger in that same frame is consumed, but the event-bearing scene is never returned.
+- A conditional color branch switches from valid `#112233` to `not-a-color`: raw paint.stroke error; independent scene output is lost.
+- A numeric source with current default 2 -> opacity: preview returns `ok:false`, dispatch returns `ok:true` and mutates authored state, then canonical evaluation throws.
 
-### Task 1 — One effective endpoint graph for resolved aliases
+The bounded Property Group positive control already diagnoses and suppresses bad values, preserves independent output, and recovers after a valid replacement. Ordinary visual destinations need the same safety boundary through their own canonical value contracts.
 
-- [x] Retain the stable authored root/path while resolving effective data endpoints in the relevant runtime scope.
-- [x] Use the resolved relationship consistently for topological order, virtual/derived values, conflicts, cycles, dependency propagation and ownership.
-- [x] Preserve the existing higher-priority/stable-ID tie-break policy across direct/nested aliases; dependency ordering must not depend on the chosen binding ID sorting before its writer.
-- [x] Reject demonstrable authored self/multi-hop cycles before document/revision/history mutation with stable endpoint/binding evidence.
-- [x] Preserve valid direct, nested and Property Group alias forms and existing file compatibility; do not ban nested targets to make the test pass.
+### Task 3 — Validate actual ordinary-property outputs before publication
 
-### Task 2 — Retargeting, warm caches and scope isolation
+- [ ] Reuse canonical implemented property value/normalization rules for ordinary visual targets, including applicable numeric ranges, finiteness, discrete/geometry constraints and paint/color validity. Do not just check broad `number`/`color` labels.
+- [ ] Validate before inserting invalid output into virtual downstream values, publishing scene overrides or irreversibly consuming events for that frame.
+- [ ] Preserve legal differently ranged numeric source/target bindings. An invalid value needs rejection/diagnosis; a broad numeric source must not be banned merely because it can later produce out-of-range values.
+- [ ] Preserve documented valid nullable/coercion behavior explicitly. A blanket early return is not a nullable-output policy.
+- [ ] Do not normalize/clone the whole project once per binding as a substitute for a shared bounded value contract. Record real validation work.
 
-- [x] Re-resolve affected effective edges when a nested instance reference changes, including runtime-scoped references and supported derived reference changes.
-- [x] Remove stale dependency registrations and invalidate only affected reachable branches.
-- [x] Define bounded deterministic handling for cycles/conflicts introduced by runtime retargeting; do not hang or silently choose a winner outside the documented policy.
-- [x] Test cold/warm chains with both binding-ID orders, aliases as source and target, same/different scopes, rename/reorder, reference retargeting, self/multi-hop cycles and unrelated cache hits.
-- [x] Exercise real repeated/nested Component instances as well as direct runtime fixtures.
+### Task 4 — Isolate invalid branches, conserve events and recover
 
-## Blocker family B — Broad type labels admit incompatible definitions
+- [ ] Return stable binding/effective-target/value/type evidence for runtime-invalid outputs. Suppress the failed binding and dependent consumers while keeping independent scene outputs available.
+- [ ] The numeric fixture must still return the independent opacity 0.25 and triggered visibility true, instead of throwing after consuming the trigger.
+- [ ] Unrecoverable publication failure must not silently drain event queues for a scene never returned. Keep live observation non-consuming.
+- [ ] Valid replacement must recover without discarding unrelated scoped runtime values; the following unchanged frame should return to cached behavior.
+- [ ] Exercise full `evaluateDocument` and public host read/scene/advance paths, not only `evaluateBindings` counters. Add repeated Component and downstream binding consumers where applicable.
 
-A property typed to enum e1 can currently bind to a Property Group typed to enum e2 simply because both report `enum`. Dispatch succeeds and changes authored state; evaluating the saved binding throws because e1v does not belong to e2. Preview currently throws a raw exception rather than returning its structured failure contract.
+### Task 5 — Preview, dispatch and converter validation agree
 
-A View Model property typed to vm_child can likewise bind to a Property Group typed to different_model, then fail during scene evaluation.
+- [ ] Prevent accepted authored bindings that immediately crash canonical evaluation. Return structured rejection with no document/revision/history change for known-invalid configurations, or define one consistent safe diagnostic-acceptance policy across all public surfaces.
+- [ ] Do not leave preview rejecting while dispatch commits a raw-evaluator-crashing graph. Preserve machine-readable error evidence and undo/provenance for successful intentional authoring.
+- [ ] Check statically demonstrable invalid converter branches when feasible through the same value contract. Preserve valid explicit conversions and runtime-dependent diagnostic recovery.
+- [ ] If the invalid-color fixture is rejected earlier after the fix, add atomic rejection coverage and a separate genuinely runtime-dependent invalid-output fixture. Early correct rejection is not a setup failure; weakening the safety assertion is not a fix.
 
-### Task 3 — Full type-descriptor compatibility and failure boundaries
+### Task 6 — Permanent regressions, lightweight gates and clean handoff
 
-- [x] Validate referenced enum and View Model definition identity, not only the broad labels `enum`/`viewModel`.
-- [x] Apply the same compatibility discipline to nested list descriptors and converter input/output contracts where those definitions flow through the existing binding pipeline.
-- [x] Preserve valid same-definition bindings and supported explicit conversions; do not delete M8 property types or silently coerce incompatible references.
-- [x] Make invalid normalization, preview and dispatch fail before authored mutation with stable source/target/type evidence; preview returns structured errors instead of leaking evaluation exceptions.
-- [x] Prove both executed enum/model mismatches reject with unchanged serialization/revision/history, then positively evaluate valid counterparts.
-- [x] Test the same contracts after authored schema/config changes with a warm runtime and explicit runtime overrides. Runtime-only incompatible values need bounded deterministic diagnostics rather than silently corrupting authored state or the next frame.
+- [ ] Convert all five executed failures and five positive controls into permanent normal-discovery tests; add the combinations in Tasks 1–5.
+- [ ] Rerun all 45 existing suites, including the 54 C4 checks and all C3/C2/C1/M8/M0–M7 gates. Do not change earlier expectations merely to hide a regression.
+- [ ] Preserve C3/C4 retained-index, scoped dependency, zero-binding and settled-work tests. Distinguish validation/resolution/output application work; no claim of zero total work from cache hits.
+- [ ] Run `npm run check`, `npm test`, and unchanged standard `.github/workflows/test.yml` on the exact final clean main SHA.
+- [ ] Remove temporary implementation/transport workflows and scripts from promoted code. Preserve durable test/report evidence without moving the tested SHA unnecessarily.
+- [ ] Report actual before/after values, event/history boundaries, performance impact, compatibility decisions and remaining limitations. Real-browser visual acceptance must remain a separate, honestly reported gate.
 
-## Blocker family C — Scoped reads omit Component animation context
+## Acceptance and handoff
 
-The executed fixture animates a source Property Group from 0.2 to 0.8, binds it to box.opacity, and instantiates the source twice. Instance A's timeline is at one second; B's is at zero.
+M8 is eligible for independent acceptance only when effective two-way writes agree with evaluated identity, invalid values cannot crash otherwise valid scene evaluation or silently consume undelivered events, preview/dispatch/evaluation have coherent failure behavior, all previous corrections remain green and exact-final-head standard Tests succeeds.
+
+No new feature family, runtime rewrite, broad UI redesign, scripting, Layout, Lottie/dotLottie, or M9 work belongs in this pass. Preserve the already-documented source-local scoped observation semantics and full-host observation cost; do not claim a path-only optimization here.
 
 ```text
-Full canonical host scene: A = 0.8, B = 0.2
-Scoped host.read:          A = 0.2, B = 0.2
-Scoped host scene for A:       0.2
+Handoff
+- Status: AWAITING VERIFICATION
+- Implementation commits:
+- Final clean main SHA / exact standard Tests run:
+- Five verifier failures -> permanent test mapping:
+- Effective two-way terminal / pending retarget / Component-scope proof:
+- Event/notification/history non-mutation during resolution proof:
+- Canonical ordinary-property value validation proof:
+- Invalid-branch isolation / event delivery / valid replacement proof:
+- Preview/dispatch/converter failure consistency proof:
+- All prior suites / syntax checks:
+- Actual validation/resolution/output work and size impact:
+- Cleanup / compatibility / browser-acceptance limitations:
 ```
-
-Selecting the terminal source artboard is not equivalent to evaluating that Component instance with its actual controller/override state. The non-consuming boundary is fixed; this defect is incorrect context.
-
-There is a related ownership failure even when the correct timeline context is explicitly supplied: visible output is 0.8, but the recommended operation edits the authored Property Group value that the timeline overwrites. The chain contains no controlling timeline.
-
-### Task 4 — Scoped observation uses the actual evaluated Component context
-
-- [x] Construct scoped read/ownership/scene context through the canonical Component evaluation semantics, including the selected instance path and applicable timeline/state-machine/remap/mix/authored override state.
-- [x] Match the full host scene for the same instance and corresponding property. Define source-local vs wrapper/world property semantics explicitly where relevant; the scalar opacity fixture must agree without ambiguity.
-- [x] Do not reset live controllers or silently substitute source defaults, the first artboard, or a sibling's runtime.
-- [x] Preserve non-mutating forks and repeated observation; snapshot live values, queues, controller times, buckets, counters, notifications and authored history before/after reads.
-- [x] Test A/B at different times, repeated nested instances, live binding input changes, remap/mix and supported instance overrides; compare actual full-scene descendants with public scoped read-back.
-
-### Task 5 — Ownership reaches the effective controller, including animation
-
-- [x] Continue the winning binding chain into the active controller of its source; `Timeline -> Property Group -> Binding -> visual` must not stop at the overwritten authored Property Group value.
-- [x] Include stable timeline/track or other applicable controller refs and truthful precedence/context evidence.
-- [x] Recommend a realizable edit that can affect the visible result: the active authored controller/keyframe or an explicitly described runtime override with its precedence. Do not claim an overwritten authored intermediate is the effective edit target.
-- [x] Execute the recommended operation through its advertised public/canonical transport and compare evaluated read-back, not just metadata/regex presence.
-- [x] Preserve existing data -> converter -> Property Group chains, conflict-winner ownership, readonly-source handling, name independence and runtime/authored separation.
-
-### Task 6 — Regression, lightweight and release gates
-
-- [x] Convert all seven executed regression assertions into permanent tests, retaining both positive controls and all 41 existing suites.
-- [x] Add combinations described above, not only a count-to-requirement mapping.
-- [x] Retain C3's 220-binding, two-artboard, two-scope fixture: settled revisits perform zero graph/catalog/signature rebuilds; account separately for output application. Record the cost of new alias-resolution/observation work truthfully.
-- [x] Keep syntax checks and the unchanged standard `.github/workflows/test.yml` green on the exact final clean main SHA.
-- [x] Record a reproducible handoff with actual values, test names, final SHA/run, compatibility decisions and limitations. Do not claim real-browser visual QA from Node tests.
-
-## Acceptance
-
-M8 is eligible for independent verification when the three blocker families are fixed on one production tree, all previous C3 fixes remain green, supported endpoint/type combinations behave consistently, public scoped reads match the canonical scene, effective ownership recommendations are executable, and the exact-final-head standard Tests gate passes.
-
-This milestone does not add layered state machines, Layout, assets/effects, scripting, interchange, MCP, a new UI framework or a runtime-language rewrite. No new vendor-parity completion credit is claimed before independent acceptance.
-
-## Handoff
-
-- **Status: AWAITING VERIFICATION.** M8 is still `CORRECTIONS REQUIRED`; M9 remains blocked.
-- **Implementation/final main SHA/standard Tests:** see the [immutable-main release receipt](https://github.com/Logan17de/Rive_Rider/blob/evidence/m8-c4-handoff/verification/M8-C4-handoff.md). It records actual commit/run/cleanup evidence after promotion; this source document does not guess those identifiers.
-- **Baseline reproduction:** unchanged production passed 48 syntax / 41 suites; the permanent reproduced test ran RED with two positive controls and all seven review regressions failing before production edits.
-- **Worker local gates:** 49/49 syntax files; 45/45 suites; 54 named C4 checks (9 reproduced, 17 graph, 13 type, 15 context). All 41 previous suites are unchanged.
-- **Resolved graph:** `0.25 -> 0.66` ordering, priority winner `0.25` with one conflict, transactional authored alias-cycle rejection; per-scope retargeting, derived references, runtime cycle recovery and stale dependency cleanup are exercised.
-- **Types/failures:** nominal enum/model and recursive list/converter compatibility, same-definition positives, structured preview/dispatch evidence and warm stale-runtime diagnostics/recovery.
-- **Scoped reads:** real A/B and nested instances match canonical full-scene descendants; timeline/machine/remap/mix/instance override context is captured. Source-local wrapper semantics are explicit.
-- **Effective ownership:** advertised runtime/canonical edits are executed and read back; A's animated Property Group can read `0.47` while B remains `0.2`, without authored or clock changes. Keyframe, fractional machine-transition and Component-override edits also execute.
-- **Observation safety:** repeated reads preserve live events, values/lists, machine state/clocks/buckets, runtime counters, notifications and authored history. Public read-only runtime ports also use private snapshots.
-- **C3 preservation:** 12 reproduced + 17 composition checks, including structural opaque IDs, PG aliases, trigger fan-out, live list typing, callable runtime ports and retained multi-artboard indexes. Original M8/C1/C2 remain 28/28/13.
-- **Cost/compatibility:** see [the implementation contract](docs/M8-C4-runtime-contract.md#lightweightwork-evidence). Settled C4 alias work is zero; output application is counted. Scoped observation traverses/forks rather than claiming zero total work. Source-size proxies and limitations are recorded; no distributable bundle/FPS claim.
-- **Temporary artifacts:** no transport workflow, payload, ad-hoc verifier script or measurement script belongs in the promoted source tree. The publication/release receipt records cleanup and exact-tree checks; the standard Tests workflow stays unchanged.
-- **Acceptance limit:** executable Node runtime/host evidence, not real-browser visual/usability QA. Suggested optimization stays in `suggestions`. Progress estimates remain unchanged until independent acceptance.
