@@ -1,6 +1,6 @@
 import { dataTypeDescriptor, dataTypeAccepts, bindingTypeError, converterTypeContract } from './dataTypeContracts.js';
 import { createReference, normalizeReference, referenceId } from './references.js';
-import { canonicalPropertyBindingCapabilities } from './propertyBinding.js';
+import { canonicalPropertyBindingCapabilities, normalizeCanonicalPropertyValue } from './propertyBinding.js';
 import { parsePropertyAddress, formatPropertyAddress } from './propertyAddress.js';
 
 export const VEYRA_DATA_VERSION = 6;
@@ -1409,10 +1409,13 @@ export class VeyraDataRuntime {
       if (typeof value !== 'boolean') throw new TypeError(`[binding-runtime-type] ${label} trigger pulse must be boolean.`);
       return value;
     }
-    // Null list-index output is an existing nullable converter contract. Keep it
-    // for ordinary visual targets (whose canonical writer defines coercion), but
-    // never let it bypass a non-null data/Property Group definition.
-    if (resolution.endpoint.kind === 'property') return value;
+    // Ordinary visual outputs use the canonical address-local writer contract.
+    // This preserves its coercions (including nullable numeric output) while
+    // rejecting invalid ranges, integers, paint, and non-finite values before
+    // an override can abort document normalization.
+    if (resolution.endpoint.kind === 'property') {
+      return normalizeCanonicalPropertyValue(document, resolution.endpoint.address, value, label, { preserveNullableOutput: true });
+    }
     return validateTypedValueTarget(document, property, value, `[binding-runtime-type] ${label}`);
   }
 
@@ -1462,21 +1465,24 @@ export class VeyraDataRuntime {
         if (failure) { errors.push(clone(failure)); failed.add(binding.id); continue; }
         if (!bucket.dirty.has(binding.id) && entry) { cacheHits += 1; this.#stats.cacheHits += 1; }
         else {
-          const dependencies = new Set(), pulses = new Set(); let output, error = null;
+          const dependencies = new Set(), pulses = new Set(); let output, error = null, phase = 'source';
           try {
             output = this.#endpointValue(document, binding.source, scope, virtual, pulses, dependencies);
             output = this.#validateRuntimeEndpoint(document, resolved.source, output, `binding ${binding.id} source`);
+            phase = 'converter';
             for (const ref of binding.converterChain) {
               const converter = catalog.converters.get(ref.id); this.#stats.converterEvaluations += 1;
               output = converterValue(document, converter, output, listId => {
                 dependencies.add(runtimeListKey(scope, listId)); return this.#list(document, listId, scope);
               });
             }
+            phase = 'target';
             output = this.#validateRuntimeEndpoint(document, resolved.target, output, `binding ${binding.id} target`);
           } catch (cause) {
             error = { code: 'binding-runtime-value', binding: createReference('binding', binding.id), source: clone(binding.source), target: clone(binding.target),
               effectiveSource: clone(resolved.source.endpoint), effectiveTarget: clone(resolved.target.endpoint),
-              sourceType: dataTypeDescriptor(resolved.source.property), targetType: dataTypeDescriptor(resolved.target.property), message: String(cause.message), policy: 'suppress-invalid-output-and-dependent-consumers' };
+              sourceType: dataTypeDescriptor(resolved.source.property), targetType: dataTypeDescriptor(resolved.target.property), phase,
+              message: String(cause.message), policy: 'suppress-invalid-output-and-dependent-consumers' };
           }
           entry = { value: clone(output), error, dependencies: [...dependencies], pulses: [...pulses], signature: compiled.signatures.get(binding.id), derived,
             sourceToken: this.#sourceToken(document, binding, scope, derived, referenceValues) };
@@ -1567,13 +1573,35 @@ export class VeyraDataRuntime {
   setTwoWayTarget(bindingId, value, options = {}) {
     const document = this.#document(), binding = bindingById(document, bindingId);
     if (!binding || binding.mode !== 'twoWay' || !binding.enabled) throw new TypeError(`[binding-two-way-unavailable] ${bindingId} is not an enabled two-way binding.`);
-    const source = normalizeBindingEndpoint(binding.source), capabilities = bindingEndpointCapabilities(document, source);
-    if (!capabilities.reverseWritable) throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(source)} has no deterministic reverse-write port.`);
+    const source = normalizeBindingEndpoint(binding.source);
     if (source.kind === 'data') {
-      const terminal = this.resolveDataEndpoint(source, options);
+      // Resolve through the same evaluated graph as the forward read. A private
+      // observation sees current scoped runtime values and binding-derived
+      // reference retargets without consuming events, publishing outputs, or
+      // requiring the caller to render first.
+      const observation = this.peekBindings(document, {
+        artboardId: binding.artboard.id,
+        scopePath: options.scopePath || [],
+      });
+      const resolutionError = observation.diagnostics.errors.find((error) =>
+        error.code === 'binding-runtime-retarget-limit'
+        || (error.binding?.id === binding.id && (
+          ['binding-runtime-path', 'binding-runtime-upstream'].includes(error.code)
+          || (error.code === 'binding-runtime-value' && error.phase === 'source')
+        ))
+      );
+      if (resolutionError) {
+        throw new TypeError(`[binding-two-way-resolution] binding ${binding.id} has no safe effective source: ${resolutionError.message || resolutionError.code}.`);
+      }
+      const terminal = this.resolveDataEndpoint(source, { ...options, virtualValues: observation.virtualValues });
+      const effectiveSource = { kind: 'data', instance: terminal.instance, path: [terminal.property] };
+      const capabilities = bindingEndpointCapabilities(document, effectiveSource);
+      if (!capabilities.reverseWritable) throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(effectiveSource)} has no deterministic reverse-write port.`);
       return this.setValue(terminal.instance.id, terminal.property.id, value, { ...options, source: options.source || 'two-way-binding', provenance: { ...(options.provenance || {}), binding: createReference('binding', binding.id) } });
     }
     if (source.kind === 'propertyGroupProperty') {
+      const capabilities = bindingEndpointCapabilities(document, source);
+      if (!capabilities.reverseWritable) throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(source)} has no deterministic reverse-write port.`);
       return this.setPropertyGroupValue(source.property.id, value, { ...options, source: options.source || 'two-way-binding',
         provenance: { ...(options.provenance || {}), binding: createReference('binding', binding.id) } });
     }

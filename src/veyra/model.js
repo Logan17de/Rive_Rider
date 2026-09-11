@@ -33,6 +33,16 @@ import {
   componentInstanceById as projectComponentInstanceById,
 } from './projectGraph.js';
 import {
+  VEYRA_PROPERTY_FILL_TYPES,
+  VEYRA_PROPERTY_VALUE_RANGES,
+  VEYRA_PROPERTY_VERTEX_HANDLE_MODES,
+  boundedPropertyNumber,
+  finitePropertyNumber,
+  integerPropertyNumber,
+  normalizePropertyColor,
+  normalizePropertyFill,
+} from './propertyValueContracts.js';
+import {
   VEYRA_DATA_VERSION,
   normalizeDataGraphDocument,
   viewModelById as dataViewModelById,
@@ -80,7 +90,7 @@ export const VEYRA_NODE_TYPES = Object.freeze([
   'polygon',
   'star',
 ]);
-export const VEYRA_VERTEX_HANDLE_MODES = Object.freeze(['straight', 'mirrored', 'aligned', 'detached']);
+export const VEYRA_VERTEX_HANDLE_MODES = VEYRA_PROPERTY_VERTEX_HANDLE_MODES;
 export const VEYRA_EASING_TYPES = Object.freeze([
   'linear',
   'ease-in',
@@ -91,7 +101,7 @@ export const VEYRA_EASING_TYPES = Object.freeze([
   'hold',
 ]);
 export const VEYRA_LOOP_MODES = Object.freeze(['none', 'loop', 'pingpong']);
-export const VEYRA_FILL_TYPES = Object.freeze(['solid', 'linearGradient', 'radialGradient']);
+export const VEYRA_FILL_TYPES = VEYRA_PROPERTY_FILL_TYPES;
 export const VEYRA_MACHINE_INPUT_TYPES = Object.freeze(['number', 'bool', 'trigger']);
 export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['animation']);
 export const VEYRA_CONDITION_OPS = Object.freeze([
@@ -609,89 +619,17 @@ export function createDocument(overrides = {}) {
   };
 }
 
-function finite(value, path) {
-  if (!Number.isFinite(Number(value))) throw new TypeError(`${path} must be finite.`);
-  return Number(value);
-}
-
-function bounded(value, path, min, max) {
-  const number = finite(value, path);
-  if (number < min || number > max) throw new RangeError(`${path} must be between ${min} and ${max}.`);
-  return number;
-}
-
-function integer(value, path, min, max) {
-  const number = bounded(value, path, min, max);
-  if (!Number.isInteger(number)) throw new TypeError(`${path} must be an integer.`);
-  return number;
-}
-
-function color(value, path) {
-  const normalized = String(value || '').toLowerCase();
-  if (normalized === 'none' || /^#[0-9a-f]{6}$/.test(normalized)) return normalized;
-  throw new TypeError(`${path} must be "none" or a six-digit hex color.`);
-}
-
-function gradientColor(value, path) {
-  const normalized = color(value, path);
-  if (normalized === 'none') throw new TypeError(`${path} must be a six-digit hex color.`);
-  return normalized;
-}
-
-function normalizeGradientStops(stops, path) {
-  if (!Array.isArray(stops) || stops.length < 2) {
-    throw new TypeError(`${path} must contain at least two gradient stops.`);
-  }
-  if (stops.length > 256) throw new RangeError(`${path} contains too many gradient stops.`);
-  const ids = new Set();
-  return stops.map((stop, index) => {
-    const id = String(stop?.id || createId('gradientStop'));
-    if (ids.has(id)) throw new TypeError(`${path} contains duplicate stop id ${id}.`);
-    ids.add(id);
-    return {
-      id,
-      offset: bounded(stop?.offset ?? 0, `${path}[${index}].offset`, 0, 1),
-      color: gradientColor(stop?.color ?? '#000000', `${path}[${index}].color`),
-      opacity: bounded(stop?.opacity ?? 1, `${path}[${index}].opacity`, 0, 1),
-    };
-  }).sort((a, b) => a.offset - b.offset);
-}
+const finite = finitePropertyNumber;
+const bounded = boundedPropertyNumber;
+const integer = integerPropertyNumber;
+const color = normalizePropertyColor;
 
 function normalizeFill(fill, path, inputVersion, fallback) {
-  if (typeof fill === 'string') {
-    if (inputVersion >= 3) throw new TypeError(`${path} must be a tagged fill object in version 3.`);
-    return createSolidFill(color(fill, path));
-  }
-  const source = fill ?? createSolidFill(fallback);
-  if (!source || typeof source !== 'object' || Array.isArray(source)) {
-    throw new TypeError(`${path} must be a tagged fill object.`);
-  }
-  const type = String(source.type || '');
-  if (!VEYRA_FILL_TYPES.includes(type)) throw new TypeError(`${path}.type is unsupported.`);
-  if (type === 'solid') {
-    return { type, color: color(source.color ?? fallback, `${path}.color`) };
-  }
-  const common = {
-    type,
-    stops: normalizeGradientStops(source.stops, `${path}.stops`),
-  };
-  if (type === 'linearGradient') {
-    return {
-      ...common,
-      x1: bounded(source.x1 ?? 0, `${path}.x1`, -10, 10),
-      y1: bounded(source.y1 ?? 0, `${path}.y1`, -10, 10),
-      x2: bounded(source.x2 ?? 1, `${path}.x2`, -10, 10),
-      y2: bounded(source.y2 ?? 1, `${path}.y2`, -10, 10),
-    };
-  }
-  return {
-    ...common,
-    cx: bounded(source.cx ?? 0.5, `${path}.cx`, -10, 10),
-    cy: bounded(source.cy ?? 0.5, `${path}.cy`, -10, 10),
-    r: bounded(source.r ?? 0.5, `${path}.r`, 0.000001, 10),
-    fx: bounded(source.fx ?? source.cx ?? 0.5, `${path}.fx`, -10, 10),
-    fy: bounded(source.fy ?? source.cy ?? 0.5, `${path}.fy`, -10, 10),
-  };
+  return normalizePropertyFill(fill, path, {
+    inputVersion,
+    fallback,
+    defaultStopId: () => createId('gradientStop'),
+  });
 }
 
 function normalizeTransform(transform, path, anglesUseDegrees) {
@@ -703,10 +641,10 @@ function normalizeTransform(transform, path, anglesUseDegrees) {
     x: finite(transform?.x ?? 0, `${path}.x`),
     y: finite(transform?.y ?? 0, `${path}.y`),
     rotation: angle(transform?.rotation, 'rotation'),
-    skewX: bounded(angle(transform?.skewX, 'skewX'), `${path}.skewX`, -1.5533430342749532, 1.5533430342749532),
-    skewY: bounded(angle(transform?.skewY, 'skewY'), `${path}.skewY`, -1.5533430342749532, 1.5533430342749532),
-    scaleX: bounded(transform?.scaleX ?? 1, `${path}.scaleX`, -100, 100),
-    scaleY: bounded(transform?.scaleY ?? 1, `${path}.scaleY`, -100, 100),
+    skewX: bounded(angle(transform?.skewX, 'skewX'), `${path}.skewX`, ...VEYRA_PROPERTY_VALUE_RANGES.skew),
+    skewY: bounded(angle(transform?.skewY, 'skewY'), `${path}.skewY`, ...VEYRA_PROPERTY_VALUE_RANGES.skew),
+    scaleX: bounded(transform?.scaleX ?? 1, `${path}.scaleX`, ...VEYRA_PROPERTY_VALUE_RANGES.scale),
+    scaleY: bounded(transform?.scaleY ?? 1, `${path}.scaleY`, ...VEYRA_PROPERTY_VALUE_RANGES.scale),
     pivotX: finite(transform?.pivotX ?? 0, `${path}.pivotX`),
     pivotY: finite(transform?.pivotY ?? 0, `${path}.pivotY`),
   };
@@ -718,25 +656,25 @@ function normalizeGeometry(type, geometry, path) {
       return null;
     case 'rectangle':
       return {
-        width: bounded(geometry?.width, `${path}.width`, 0.01, 100000),
-        height: bounded(geometry?.height, `${path}.height`, 0.01, 100000),
-        cornerRadius: bounded(geometry?.cornerRadius ?? 0, `${path}.cornerRadius`, 0, 100000),
+        width: bounded(geometry?.width, `${path}.width`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryDimension),
+        height: bounded(geometry?.height, `${path}.height`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryDimension),
+        cornerRadius: bounded(geometry?.cornerRadius ?? 0, `${path}.cornerRadius`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryRadius),
       };
     case 'ellipse':
       return {
-        width: bounded(geometry?.width, `${path}.width`, 0.01, 100000),
-        height: bounded(geometry?.height, `${path}.height`, 0.01, 100000),
+        width: bounded(geometry?.width, `${path}.width`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryDimension),
+        height: bounded(geometry?.height, `${path}.height`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryDimension),
       };
     case 'polygon':
       return {
-        radius: bounded(geometry?.radius, `${path}.radius`, 0.01, 100000),
-        sides: integer(geometry?.sides, `${path}.sides`, 3, 256),
+        radius: bounded(geometry?.radius, `${path}.radius`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryDimension),
+        sides: integer(geometry?.sides, `${path}.sides`, ...VEYRA_PROPERTY_VALUE_RANGES.geometrySides),
       };
     case 'star':
       return {
-        outerRadius: bounded(geometry?.outerRadius, `${path}.outerRadius`, 0.01, 100000),
-        innerRadius: bounded(geometry?.innerRadius, `${path}.innerRadius`, 0, 100000),
-        points: integer(geometry?.points, `${path}.points`, 2, 256),
+        outerRadius: bounded(geometry?.outerRadius, `${path}.outerRadius`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryDimension),
+        innerRadius: bounded(geometry?.innerRadius, `${path}.innerRadius`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryRadius),
+        points: integer(geometry?.points, `${path}.points`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryPoints),
       };
     case 'path': {
       if (!Array.isArray(geometry?.vertices) || geometry.vertices.length < 2) {
@@ -769,7 +707,7 @@ function normalizeGeometry(type, geometry, path) {
           y: finite(vertex.y, `${path}.vertices[${index}].y`),
           ...handles,
           handleMode,
-          cornerRadius: bounded(vertex.cornerRadius ?? 0, `${path}.vertices[${index}].cornerRadius`, 0, 100000),
+          cornerRadius: bounded(vertex.cornerRadius ?? 0, `${path}.vertices[${index}].cornerRadius`, ...VEYRA_PROPERTY_VALUE_RANGES.geometryRadius),
         };
       });
       return { closed: Boolean(geometry.closed), vertices };
@@ -796,12 +734,12 @@ function normalizeNode(node, index, anglesUseDegrees, inputVersion) {
     visible: node.visible !== false,
     locked: Boolean(node.locked),
     ...(pointerEvents !== 'auto' ? { pointerEvents } : {}),
-    opacity: bounded(node.opacity ?? 1, `nodes[${index}].opacity`, 0, 1),
+    opacity: bounded(node.opacity ?? 1, `nodes[${index}].opacity`, ...VEYRA_PROPERTY_VALUE_RANGES.unit),
     transform: normalizeTransform(node.transform, `nodes[${index}].transform`, anglesUseDegrees),
     paint: {
       fill: normalizeFill(node.paint?.fill, `nodes[${index}].paint.fill`, inputVersion, '#ec4899'),
       stroke: color(node.paint?.stroke ?? 'none', `nodes[${index}].paint.stroke`),
-      strokeWidth: bounded(node.paint?.strokeWidth ?? 0, `nodes[${index}].paint.strokeWidth`, 0, 10000),
+      strokeWidth: bounded(node.paint?.strokeWidth ?? 0, `nodes[${index}].paint.strokeWidth`, ...VEYRA_PROPERTY_VALUE_RANGES.strokeWidth),
     },
     geometry: normalizeGeometry(type, node.geometry, `nodes[${index}].geometry`),
   };
@@ -840,8 +778,8 @@ function normalizeRigTransform(transform, path, anglesUseDegrees) {
     x: finite(transform?.x ?? 0, `${path}.x`),
     y: finite(transform?.y ?? 0, `${path}.y`),
     rotation: anglesUseDegrees ? degreesToRadians(angleValue) : angleValue,
-    scaleX: bounded(transform?.scaleX ?? 1, `${path}.scaleX`, -100, 100),
-    scaleY: bounded(transform?.scaleY ?? 1, `${path}.scaleY`, -100, 100),
+    scaleX: bounded(transform?.scaleX ?? 1, `${path}.scaleX`, ...VEYRA_PROPERTY_VALUE_RANGES.scale),
+    scaleY: bounded(transform?.scaleY ?? 1, `${path}.scaleY`, ...VEYRA_PROPERTY_VALUE_RANGES.scale),
   };
 }
 
@@ -854,7 +792,7 @@ function normalizeBone(bone, index, anglesUseDegrees) {
     parent: normalizeReference(bone.parent, 'bone', `bones[${index}].parent`),
     visible: bone.visible !== false,
     locked: Boolean(bone.locked),
-    length: bounded(bone.length ?? 100, `bones[${index}].length`, 0.01, 100000),
+    length: bounded(bone.length ?? 100, `bones[${index}].length`, ...VEYRA_PROPERTY_VALUE_RANGES.boneLength),
     color: color(bone.color ?? '#22d3ee', `bones[${index}].color`),
     rest: normalizeRigTransform(bone.rest, `bones[${index}].rest`, anglesUseDegrees),
     pose: normalizeRigTransform(bone.pose, `bones[${index}].pose`, anglesUseDegrees),
@@ -909,7 +847,7 @@ function normalizeMesh(mesh, index, inputVersion) {
       boneIds.add(boneId);
       return {
         bone,
-        value: bounded(weight.value, `meshes[${index}].vertices[${vertexIndex}].weights[${weightIndex}].value`, 0, 1),
+        value: bounded(weight.value, `meshes[${index}].vertices[${vertexIndex}].weights[${weightIndex}].value`, ...VEYRA_PROPERTY_VALUE_RANGES.unit),
       };
     });
     return {
@@ -936,11 +874,11 @@ function normalizeMesh(mesh, index, inputVersion) {
     name: String(mesh.name || 'Mesh'),
     visible: mesh.visible !== false,
     locked: Boolean(mesh.locked),
-    opacity: bounded(mesh.opacity ?? 1, `meshes[${index}].opacity`, 0, 1),
+    opacity: bounded(mesh.opacity ?? 1, `meshes[${index}].opacity`, ...VEYRA_PROPERTY_VALUE_RANGES.unit),
     paint: {
       fill: normalizeFill(mesh.paint?.fill, `meshes[${index}].paint.fill`, inputVersion, '#f472b6'),
       stroke: color(mesh.paint?.stroke ?? '#831843', `meshes[${index}].paint.stroke`),
-      strokeWidth: bounded(mesh.paint?.strokeWidth ?? 2, `meshes[${index}].paint.strokeWidth`, 0, 10000),
+      strokeWidth: bounded(mesh.paint?.strokeWidth ?? 2, `meshes[${index}].paint.strokeWidth`, ...VEYRA_PROPERTY_VALUE_RANGES.strokeWidth),
     },
     vertices,
     triangles,
@@ -963,7 +901,7 @@ function normalizeConstraint(constraint, index, anglesUseDegrees) {
     type,
     name: String(constraint.name || `${type} constraint`),
     enabled: constraint.enabled !== false,
-    strength: bounded(constraint.strength ?? 1, `constraints[${index}].strength`, 0, 1),
+    strength: bounded(constraint.strength ?? 1, `constraints[${index}].strength`, ...VEYRA_PROPERTY_VALUE_RANGES.unit),
     order: integer(constraint.order ?? 0, `constraints[${index}].order`, -100000, 100000),
   };
   if (type === 'ik') {
@@ -981,13 +919,13 @@ function normalizeConstraint(constraint, index, anglesUseDegrees) {
     ...base,
     bone: requiredReference(constraint.bone, 'bone', `constraints[${index}].bone`),
     target: requiredReference(constraint.target, 'control', `constraints[${index}].target`),
-    distance: bounded(constraint.distance ?? 100, `constraints[${index}].distance`, 0, 100000),
+    distance: bounded(constraint.distance ?? 100, `constraints[${index}].distance`, ...VEYRA_PROPERTY_VALUE_RANGES.constraintDistance),
   };
   if (type === 'path') return {
     ...base,
     bone: requiredReference(constraint.bone, 'bone', `constraints[${index}].bone`),
     path: requiredReference(constraint.path, 'node', `constraints[${index}].path`),
-    position: bounded(constraint.position ?? 0, `constraints[${index}].position`, 0, 1),
+    position: bounded(constraint.position ?? 0, `constraints[${index}].position`, ...VEYRA_PROPERTY_VALUE_RANGES.unit),
     rotate: constraint.rotate !== false,
   };
   const offsetValue = finite(constraint.offset ?? 0, `constraints[${index}].offset`);

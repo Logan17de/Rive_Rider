@@ -8,7 +8,7 @@ import {
   semanticFor,
 } from './model.js';
 import { supportsNodeProperty, supportsRigProperty } from './capabilities.js';
-import { canonicalPropertyBindingCapabilities } from './propertyBinding.js';
+import { canonicalPropertyBindingCapabilities, normalizeCanonicalPropertyValue } from './propertyBinding.js';
 import { createNodeRef, createReference, normalizeReference } from './references.js';
 
 function propertyGroupPropertyById(document, value) {
@@ -96,29 +96,30 @@ export function readProperty(document, address) {
 
 export function writeProperty(document, address, value) {
   const target = propertyTarget(document, address, true);
+  const normalizedValue = normalizeCanonicalPropertyValue(document, target.parsed, value, `Property ${address}`);
   if (target.key === 'parent') {
     const expectedKind = target.parsed.reference.kind === 'bone' ? 'bone' : 'node';
-    target.container.parent = value == null || value === ''
+    target.container.parent = normalizedValue == null || normalizedValue === ''
       ? null
-      : normalizeReference(value, expectedKind, `${expectedKind}.parent`);
+      : normalizeReference(normalizedValue, expectedKind, `${expectedKind}.parent`);
   } else if (target.parsed.reference.kind === 'constraint' && ['bone', 'target', 'path', 'bones'].includes(target.key)) {
     const constraint = target.container;
     if (target.key === 'bones') {
-      if (!Array.isArray(value)) throw new TypeError('constraint.bones must be an array.');
-      constraint.bones = value.map((reference) => normalizeReference(reference, 'bone', 'constraint.bones'));
+      if (!Array.isArray(normalizedValue)) throw new TypeError('constraint.bones must be an array.');
+      constraint.bones = normalizedValue.map((reference) => normalizeReference(reference, 'bone', 'constraint.bones'));
     } else {
       const expectedKind = target.key === 'path'
         ? 'node'
         : target.key === 'target' && ['ik', 'distance'].includes(constraint.type)
           ? 'control'
           : 'bone';
-      constraint[target.key] = normalizeReference(value, expectedKind, `constraint.${target.key}`);
+      constraint[target.key] = normalizeReference(normalizedValue, expectedKind, `constraint.${target.key}`);
     }
   } else if (target.parsed.segments[0] === 'semantic' && target.key === 'tags') {
-    const tags = Array.isArray(value) ? value : String(value).split(',');
+    const tags = Array.isArray(normalizedValue) ? normalizedValue : String(normalizedValue).split(',');
     target.container.tags = [...new Set(tags.map((tag) => String(tag).trim()).filter(Boolean))];
   } else {
-    target.container[target.key] = cloneValue(value);
+    target.container[target.key] = cloneValue(normalizedValue);
   }
   return target.parsed;
 }

@@ -1,4 +1,114 @@
 import { supportsNodeProperty, supportsRigProperty } from './propertyCapabilities.js';
+import { parsePropertyAddress } from './propertyAddress.js';
+import {
+  VEYRA_PROPERTY_VALUE_RANGES,
+  VEYRA_PROPERTY_VERTEX_HANDLE_MODES,
+  boundedPropertyNumber,
+  finitePropertyNumber,
+  integerPropertyNumber,
+  normalizePropertyColor,
+  normalizePropertyFill,
+} from './propertyValueContracts.js';
+
+function clone(value) {
+  if (value === undefined) return undefined;
+  return globalThis.structuredClone ? globalThis.structuredClone(value) : JSON.parse(JSON.stringify(value));
+}
+
+function normalizePaintValue(document, referenceKind, path, value, label) {
+  if (path === 'paint.fill') return normalizePropertyFill(value, label, {
+    inputVersion: document.version,
+    fallback: referenceKind === 'mesh' ? '#f472b6' : '#ec4899',
+    defaultStopId: (index) => `runtimeGradientStop_${index}`,
+  });
+  if (path === 'paint.stroke' || path === 'paint.fill.color') return normalizePropertyColor(value, label);
+  if (/^paint\.fill\.stops\.[^.]+\.color$/.test(path)) return normalizePropertyColor(value, label, { allowNone: false });
+  if (/^paint\.fill\.stops\.[^.]+\.(offset|opacity)$/.test(path)) return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.unit);
+  if (path === 'paint.fill.r') return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.gradientRadius);
+  if (/^paint\.fill\.(x1|y1|x2|y2|cx|cy|fx|fy)$/.test(path)) return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.gradientCoordinate);
+  if (path === 'paint.strokeWidth') return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.strokeWidth);
+  return undefined;
+}
+
+/**
+ * Normalize one value through the same constraints as the canonical authored
+ * property writer. This is deliberately address-local: data evaluation can
+ * validate each output without cloning or normalizing the whole project.
+ */
+export function normalizeCanonicalPropertyValue(document, parsedInput, value, label = 'property value', options = {}) {
+  if (value == null && options.preserveNullableOutput) {
+    // Validate the writer's real coercion without erasing the binding engine's
+    // documented nullable converter output. Full scene application will run
+    // this function again and apply that coercion at the property boundary.
+    normalizeCanonicalPropertyValue(document, parsedInput, value, label);
+    return null;
+  }
+  const parsed = typeof parsedInput === 'string'
+    ? parsePropertyAddress(parsedInput)
+    : parsedInput;
+  const capabilities = canonicalPropertyBindingCapabilities(document, parsed);
+  if (!capabilities.exists || !capabilities.writable) throw new TypeError(`${label} targets an unavailable property.`);
+  const { reference } = parsedParts(parsed);
+  const path = capabilities.path;
+  const object = {
+    node: document.nodes,
+    bone: document.bones,
+    mesh: document.meshes,
+    control: document.controls,
+    constraint: document.constraints,
+  }[reference.kind]?.find((item) => item.id === reference.id);
+
+  if (['node', 'mesh'].includes(reference.kind)) {
+    if (path === 'visible') return value !== false;
+    if (path === 'opacity') return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.unit);
+    const paintValue = normalizePaintValue(document, reference.kind, path, value, label);
+    if (paintValue !== undefined) return paintValue;
+  }
+
+  if (reference.kind === 'node') {
+    if (/^transform\.(x|y|rotation|pivotX|pivotY)$/.test(path)) return finitePropertyNumber(value, label);
+    if (/^transform\.skew[XY]$/.test(path)) return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.skew);
+    if (/^transform\.scale[XY]$/.test(path)) return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.scale);
+    if (path === 'geometry.closed') return Boolean(value);
+    if (/^geometry\.(width|height|radius|outerRadius)$/.test(path)) return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.geometryDimension);
+    if (path === 'geometry.innerRadius' || path === 'geometry.cornerRadius' || /^geometry\.vertices\.[^.]+\.cornerRadius$/.test(path)) {
+      return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.geometryRadius);
+    }
+    if (path === 'geometry.sides') return integerPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.geometrySides);
+    if (path === 'geometry.points') return integerPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.geometryPoints);
+    if (/^geometry\.vertices\.[^.]+\.(x|y|inX|inY|outX|outY)$/.test(path)) return finitePropertyNumber(value, label);
+    if (/^geometry\.vertices\.[^.]+\.handleMode$/.test(path)) {
+      const result = String(value || '');
+      if (!VEYRA_PROPERTY_VERTEX_HANDLE_MODES.includes(result)) throw new TypeError(`${label} must be one of ${VEYRA_PROPERTY_VERTEX_HANDLE_MODES.join(', ')}.`);
+      return result;
+    }
+  }
+
+  if (reference.kind === 'bone') {
+    if (path === 'visible') return value !== false;
+    if (path === 'length') return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.boneLength);
+    if (/^(rest|pose)\.(x|y|rotation)$/.test(path)) return finitePropertyNumber(value, label);
+    if (/^(rest|pose)\.scale[XY]$/.test(path)) return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.scale);
+  }
+
+  if (reference.kind === 'control') {
+    if (path === 'visible') return value !== false;
+    if (/^position\.(x|y)$/.test(path)) return finitePropertyNumber(value, label);
+    if (path === 'value') return boundedPropertyNumber(value, label, Number(object.min), Number(object.max));
+  }
+
+  if (reference.kind === 'constraint') {
+    if (path === 'enabled') return value !== false;
+    if (path === 'strength' || path === 'position') return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.unit);
+    if (path === 'distance') return boundedPropertyNumber(value, label, ...VEYRA_PROPERTY_VALUE_RANGES.constraintDistance);
+    if (path === 'offset') return finitePropertyNumber(value, label);
+  }
+
+  // Canonical binding capabilities keep data outputs on the animatable subset;
+  // this fallback is for future structured properties whose model validator is
+  // intentionally authoritative after application.
+  return clone(value);
+}
 
 function propertyGroupPropertyById(document, value) {
   for (const group of document.propertyGroups || []) {
