@@ -2,9 +2,9 @@
 
 `plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This is the **only active implementation milestone**.
 
-Complete only the tasks below. Follow-up ideas belong in `suggestions`. Do not start M9. The user explicitly assigned the combined verifier/implementer role for C5; the normal separate-verifier boundary is recorded as overridden for this pass.
+Complete only the active M9-C1 tasks below. Follow-up ideas belong in `suggestions`. The user explicitly assigned the combined verifier/implementer role; the normal separate-verifier boundary is recorded as overridden for this pass.
 
-## Progress snapshot — refreshed after M8-C5 verification
+## Progress snapshot — refreshed for M9-C1 implementation
 
 These are carry-forward approximate planning estimates, not measured vendor-parity scores, line-count metrics or test-pass percentages. C3, C4 and C5 corrections are green; M8's View Models/Data Binding correction program is accepted. The estimates remain conservative because C5 closes correctness debt rather than adding a new parity family.
 
@@ -23,9 +23,41 @@ These are carry-forward approximate planning estimates, not measured vendor-pari
 - `plan.md` M3 / implementation M8: **VERIFIED**.
 - C3, C4 and C5 reproduced failures: **FIXES CONFIRMED**. Preserve these fixes; do not restart their implementations.
 - Current implementation work: **M8-C5 — VERIFIED**, below. Reproducible evidence is recorded in `docs/M8-C5-runtime-contract.md`.
-- M9 / layered state machines: **NOT STARTED; unblocked but outside this milestone**.
+- M9 / layered state machines: **IN PROGRESS — C1 layer model/runtime/control surface is the active milestone**.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
+
+---
+
+# MILESTONE M9-C1 — Layered State Machine Foundation
+
+**Topic:** Canonical layers, deterministic legacy migration, simultaneous evaluation, stable AI control
+**Roadmap mapping:** first implementation slice of `plan.md` M4 — State Machine parity + visual graph editor
+**Implementation status:** IN PROGRESS
+
+## Goal
+
+Replace the single-clock machine core with an ordered layer model without breaking legacy machine documents or compatibility reads. Every persisted layer must have a stable typed reference, every edit must use the canonical transaction/command surface, all enabled layers must advance from the same input snapshot, and later layers must have deterministic property priority.
+
+## Tasks
+
+- [ ] Add a versioned `machineLayer` record with stable id, display name, enabled flag, weight, initial state, states and transitions. Migrate legacy root graphs deterministically to one base layer.
+- [ ] Preserve legacy `machine.initial/states/transitions` as a first-layer compatibility view while making `layers` authoritative for new code and serialized round trips.
+- [ ] Validate globally unique layer/state/transition/condition identities and same-layer transition endpoints. Reject duplicate or cross-layer graph references loudly.
+- [ ] Add transactional add/update/remove/reorder layer commands. Existing state/transition commands default to the base layer and accept an explicit stable layer id.
+- [ ] Advance all enabled layers simultaneously from one input snapshot and consume triggers only after every layer samples them.
+- [ ] Evaluate layers in authored order. Later enabled layers override earlier properties; layer weight blends against accumulated output and authored values through the canonical animation evaluator.
+- [ ] Expose per-layer clocks, active state/transition, evaluated timelines and stable refs through runtime results, scene summary, manifest capabilities, resolver, semantics and dependency graph.
+- [ ] Preserve component runtimes, listener dispatch, undo/redo, project duplication, timeline deletion guards and legacy public machine reads.
+- [ ] Add permanent migration/model/command/runtime/AI-surface regressions, then run all standard syntax and test gates on the exact final clean commit.
+
+## Explicitly deferred to the next M9 slices
+
+Entry/Exit/Any nodes, blend states, state actions/speed/editor metadata, data-bound transition sources, transition interpolation/exit controls/actions/randomization, and the visual graph editor remain required by the full M9 roadmap but are not part of C1.
+
+## Acceptance
+
+M9-C1 is accepted only when a legacy single-layer file round-trips deterministically, a multi-layer machine advances all layers using the same trigger, disabled layers remain frozen, ordered priority and partial layer weights evaluate correctly, every layer is addressable without names, all authoring operations are undoable, and all existing suites remain green.
 
 ## Independent M8-C4 evidence
 
