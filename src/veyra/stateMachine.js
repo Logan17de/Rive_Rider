@@ -9,7 +9,7 @@ export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
 
 export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   inputTypes: Object.freeze(['number', 'bool', 'trigger']),
-  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation']),
+  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend']),
   graph: Object.freeze([
     'set-name', 'set-initial',
     'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
@@ -111,6 +111,13 @@ function timelineTimeForState(document, state, elapsed) {
   const id = referenceId(state.timeline, 'timeline');
   if (speed >= 0) return elapsed * speed;
   return timelineEndSeconds(document, id) + elapsed * speed;
+}
+
+function timelineTimeForBlendChild(document, state, child, elapsed) {
+  const timelineId = referenceId(child.timeline, 'timeline');
+  const speed = stateSpeed(state) * Number(child.speed ?? 1);
+  if (speed >= 0) return elapsed * speed;
+  return timelineEndSeconds(document, timelineId) + elapsed * speed;
 }
 
 function runtimeLayerSnapshot(layer, runtime) {
@@ -355,21 +362,59 @@ export class MachineRuntime {
     return true;
   }
 
-  #stateTimelineContributions(layer, runtime) {
+  #steadyStateContributions(state, elapsed, inputsById) {
+    if (!state) return [];
     const document = this.#document;
-    const contributions = [];
+    if (state.type === 'animation' && state.timeline) {
+      return [{ timelineId: referenceId(state.timeline, 'timeline'), time: timelineTimeForState(document, state, elapsed), weight: 1, effectiveWeight: 1, stateId: state.id }];
+    }
+    if (state.type === 'blend1d') {
+      const value = Number(inputsById.get(referenceId(state.input, 'machineInput')) ?? 0);
+      const children = state.children || [];
+      if (!children.length) return [];
+      if (value <= children[0].threshold) {
+        const child=children[0]; return [{timelineId:referenceId(child.timeline,'timeline'),time:timelineTimeForBlendChild(document,state,child,elapsed),weight:1,effectiveWeight:1,stateId:state.id,blendChildId:child.id}];
+      }
+      if (value >= children.at(-1).threshold) {
+        const child=children.at(-1); return [{timelineId:referenceId(child.timeline,'timeline'),time:timelineTimeForBlendChild(document,state,child,elapsed),weight:1,effectiveWeight:1,stateId:state.id,blendChildId:child.id}];
+      }
+      for (let i=0;i<children.length-1;i+=1) {
+        const low=children[i], high=children[i+1];
+        if (value < low.threshold || value > high.threshold) continue;
+        const t=(value-low.threshold)/(high.threshold-low.threshold);
+        return [
+          {timelineId:referenceId(low.timeline,'timeline'),time:timelineTimeForBlendChild(document,state,low,elapsed),weight:1,effectiveWeight:1-t,stateId:state.id,blendChildId:low.id},
+          {timelineId:referenceId(high.timeline,'timeline'),time:timelineTimeForBlendChild(document,state,high,elapsed),weight:t,effectiveWeight:t,stateId:state.id,blendChildId:high.id},
+        ];
+      }
+      return [];
+    }
+    if (state.type === 'directBlend') {
+      const active=(state.children||[]).map(child=>({child,raw:Math.max(0,Number(inputsById.get(referenceId(child.input,'machineInput')) ?? 0))})).filter(item=>Number.isFinite(item.raw)&&item.raw>0);
+      const total=active.reduce((sum,item)=>sum+item.raw,0);
+      if (!(total>0)) return [];
+      let cumulative=0;
+      return active.map((item,index)=>{
+        const {child,raw}=item; cumulative+=raw;
+        return {timelineId:referenceId(child.timeline,'timeline'),time:timelineTimeForBlendChild(document,state,child,elapsed),weight:index===0?1:raw/cumulative,effectiveWeight:raw/total,stateId:state.id,blendChildId:child.id};
+      });
+    }
+    return [];
+  }
+
+  #stateTimelineContributions(layer, runtime, inputsById) {
     if (runtime.transition) {
       const { fromId, toId, startedAt, duration } = runtime.transition;
       const elapsed = runtime.stateTime - startedAt;
       const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
       const outgoing = stateById(layer, fromId), incoming = stateById(layer, toId);
-      if (outgoing?.type === 'animation' && outgoing.timeline) contributions.push({ timelineId: referenceId(outgoing.timeline, 'timeline'), time: timelineTimeForState(document, outgoing, runtime.stateTime), weight: 1, stateId: outgoing.id });
-      if (incoming?.type === 'animation' && incoming.timeline) contributions.push({ timelineId: referenceId(incoming.timeline, 'timeline'), time: timelineTimeForState(document, incoming, elapsed), weight: progress, stateId: incoming.id });
-    } else {
-      const state = stateById(layer, runtime.stateId);
-      if (state?.type === 'animation' && state.timeline) contributions.push({ timelineId: referenceId(state.timeline, 'timeline'), time: timelineTimeForState(document, state, runtime.stateTime), weight: 1, stateId: state.id });
+      const contributions = this.#steadyStateContributions(outgoing, runtime.stateTime, inputsById);
+      // Blend states are currently rejected as transition endpoints by model
+      // validation, so the legacy incoming animation scaling remains exact.
+      for (const item of this.#steadyStateContributions(incoming, elapsed, inputsById)) contributions.push({ ...item, weight: item.weight * progress, effectiveWeight: item.effectiveWeight * progress });
+      return contributions;
     }
-    return contributions;
+    return this.#steadyStateContributions(stateById(layer, runtime.stateId), runtime.stateTime, inputsById);
   }
 
   evaluate() {
@@ -397,6 +442,7 @@ export class MachineRuntime {
     }
 
     let activeLayers = 0, inactiveLayers = 0;
+    const inputsById = this.#inputsById();
     for (const layer of orderedLayers(machine)) {
       const runtime = this.#layers.get(layer.id) || createLayerRuntime(layer);
       if (layer.enabled === false) {
@@ -405,11 +451,11 @@ export class MachineRuntime {
         continue;
       }
       activeLayers += 1; this.#stats.layerEvaluations += 1;
-      const contributions = this.#stateTimelineContributions(layer, runtime);
+      const contributions = this.#stateTimelineContributions(layer, runtime, inputsById);
       if (runtime.stateId) this.#stats.stateEvaluations += 1;
       this.#stats.timelineEvaluations += contributions.length;
       const layerOverrides = evaluateTimelines(this.#document, contributions);
-      const layerEvidence = contributions.map(item => ({ timeline: createReference('timeline', item.timelineId), state: createReference('machineState', item.stateId), time: item.time, weight: item.weight }));
+      const layerEvidence = contributions.map(item => ({ timeline: createReference('timeline', item.timelineId), state: createReference('machineState', item.stateId), time: item.time, weight: item.weight, effectiveWeight: item.effectiveWeight ?? item.weight, blendChild: item.blendChildId ? createReference('machineBlendChild', item.blendChildId) : null }));
       for (const [address, value] of Object.entries(layerOverrides)) {
         const previous = result.ownership[address] || [];
         for (const item of previous) item.effective = false;

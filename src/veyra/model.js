@@ -95,7 +95,7 @@ export const VEYRA_EASING_TYPES = Object.freeze([
 export const VEYRA_LOOP_MODES = Object.freeze(['none', 'loop', 'pingpong']);
 export const VEYRA_FILL_TYPES = Object.freeze(['solid', 'linearGradient', 'radialGradient']);
 export const VEYRA_MACHINE_INPUT_TYPES = Object.freeze(['number', 'bool', 'trigger']);
-export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['entry', 'exit', 'any', 'animation']);
+export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend']);
 export const VEYRA_MACHINE_LAYER_VERSION = 1;
 export const VEYRA_CONDITION_OPS = Object.freeze([
   '<',
@@ -494,19 +494,34 @@ export function createMachineLayer(overrides = {}) {
   };
 }
 
+export function createMachineBlendChild(overrides = {}) {
+  const timeline = normalizeReference(overrides.timeline ?? overrides.timelineId, 'timeline', 'blendChild.timeline');
+  if (!timeline) throw new TypeError('blend children require a timeline reference.');
+  const speed = finite(overrides.speed ?? 1, 'blendChild.speed');
+  if (speed === 0) throw new TypeError('blendChild.speed cannot be zero.');
+  const child = {
+    id: overrides.id || createId('machineBlendChild'),
+    timeline,
+    speed,
+  };
+  if (overrides.threshold != null) child.threshold = finite(overrides.threshold, 'blendChild.threshold');
+  if (overrides.input != null || overrides.inputId != null) child.input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'blendChild.input');
+  return child;
+}
+
 export function createMachineState(overrides = {}) {
   const type = String(overrides.type || 'animation');
   if (!VEYRA_MACHINE_STATE_TYPES.includes(type)) throw new TypeError(`Unsupported machine state type: ${type}`);
   const timelineValue = overrides.timeline ?? overrides.timelineId;
   const timeline = timelineValue == null || timelineValue === '' ? null : normalizeReference(timelineValue, 'timeline', 'state.timeline');
   if (type === 'animation' && !timeline) throw new TypeError('animation states require a timeline reference.');
-  if (['entry', 'exit', 'any'].includes(type) && timeline) throw new TypeError(`${type} pseudo-states cannot own a timeline.`);
+  if (['entry', 'exit', 'any', 'blend1d', 'directBlend'].includes(type) && timeline) throw new TypeError(`${type} states cannot own a direct timeline.`);
   const speed = finite(overrides.speed ?? 1, 'state.speed');
   if (speed === 0) throw new TypeError('state.speed cannot be zero.');
   const graph = overrides.graph && typeof overrides.graph === 'object' && !Array.isArray(overrides.graph)
     ? { x: finite(overrides.graph.x ?? 0, 'state.graph.x'), y: finite(overrides.graph.y ?? 0, 'state.graph.y') }
     : { x: 0, y: 0 };
-  return {
+  const result = {
     id: overrides.id || createId('machineState'),
     name: String(overrides.name || 'State'),
     displayNameAdvisory: true,
@@ -516,6 +531,24 @@ export function createMachineState(overrides = {}) {
     speed,
     graph,
   };
+  if (type === 'blend1d') {
+    result.input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'state.input');
+    if (!result.input) throw new TypeError('blend1d states require a numeric machine input reference.');
+    result.children = (overrides.children || []).map(createMachineBlendChild);
+    if (result.children.length < 2) throw new TypeError('blend1d states require at least two children.');
+  } else if (type === 'directBlend') {
+    result.children = (overrides.children || []).map(createMachineBlendChild);
+    if (!result.children.length) throw new TypeError('directBlend states require at least one child.');
+    if (result.children.some(child => !child.input)) throw new TypeError('directBlend children require numeric machine input references.');
+  }
+  if (result.children) {
+    const ids = new Set();
+    for (const child of result.children) {
+      if (ids.has(child.id)) throw new TypeError(`Duplicate machine blend child id ${child.id}.`);
+      ids.add(child.id);
+    }
+  }
+  return result;
 }
 
 export function createMachineTransition(overrides = {}) {
@@ -1226,7 +1259,31 @@ function normalizeMachineCondition(condition, path, inputsById) {
   return { id, input: resolvedInput, op, value: cloneValue(condition.value) };
 }
 
-function normalizeMachineState(state, index, layerPath, timelineIds) {
+function resolveMachineNumberInput(value, path, inputsById) {
+  const ref = requiredReference(value, 'machineInput', path);
+  const key = referenceId(ref, 'machineInput');
+  const input = inputsById.get(key) || [...inputsById.values()].find(candidate => candidate.name === key) || null;
+  if (!input) throw new TypeError(`${path} references missing machine input ${key}.`);
+  if (input.type !== 'number') throw new TypeError(`${path} requires a number input.`);
+  return { kind: 'machineInput', id: input.id };
+}
+
+function normalizeBlendChild(child, index, path, timelineIds, inputsById, type) {
+  const childPath = `${path}.children[${index}]`;
+  const id = String(child?.id || '');
+  if (!id) throw new TypeError(`${childPath}.id is required.`);
+  const timeline = requiredReference(child?.timeline ?? child?.timelineId, 'timeline', `${childPath}.timeline`);
+  const timelineId = referenceId(timeline, 'timeline');
+  if (!timelineIds.has(timelineId)) throw new TypeError(`${childPath}.timeline references missing timeline ${timelineId}.`);
+  const speed = finite(child?.speed ?? 1, `${childPath}.speed`);
+  if (speed === 0) throw new TypeError(`${childPath}.speed cannot be zero.`);
+  const result = { id, timeline, speed };
+  if (type === 'blend1d') result.threshold = finite(child?.threshold, `${childPath}.threshold`);
+  if (type === 'directBlend') result.input = resolveMachineNumberInput(child?.input ?? child?.inputId, `${childPath}.input`, inputsById);
+  return result;
+}
+
+function normalizeMachineState(state, index, layerPath, timelineIds, inputsById) {
   const path = `${layerPath}.states[${index}]`;
   const id = String(state?.id || '');
   if (!id) throw new TypeError(`${path}.id is required.`);
@@ -1236,7 +1293,7 @@ function normalizeMachineState(state, index, layerPath, timelineIds) {
   const timeline = timelineValue == null || timelineValue === '' ? null : requiredReference(timelineValue, 'timeline', `${path}.timeline`);
   if (type === 'animation' && !timeline) throw new TypeError(`${path}.timeline is required for animation states.`);
   if (timeline && !timelineIds.has(referenceId(timeline, 'timeline'))) throw new TypeError(`${path}.timeline references missing timeline ${referenceId(timeline, 'timeline')}.`);
-  if (['entry', 'exit', 'any'].includes(type) && timeline) throw new TypeError(`${path}.${type} pseudo-state cannot own a timeline.`);
+  if (['entry', 'exit', 'any', 'blend1d', 'directBlend'].includes(type) && timeline) throw new TypeError(`${path}.${type} state cannot own a direct timeline.`);
   const speed = finite(state?.speed ?? 1, `${path}.speed`);
   if (speed === 0) throw new TypeError(`${path}.speed cannot be zero.`);
   const graph = state?.graph && typeof state.graph === 'object' && !Array.isArray(state.graph)
@@ -1244,6 +1301,22 @@ function normalizeMachineState(state, index, layerPath, timelineIds) {
     : { x: 0, y: 0 };
   const result = { id, name: String(state.name || ''), displayNameAdvisory: true, caption: String(state.caption ?? ''), type, speed, graph };
   if (timeline) result.timeline = timeline;
+  if (type === 'blend1d' || type === 'directBlend') {
+    if (!Array.isArray(state?.children)) throw new TypeError(`${path}.children must be an array.`);
+    result.children = state.children.map((child,i)=>normalizeBlendChild(child,i,path,timelineIds,inputsById,type));
+    const childIds = new Set();
+    for (const child of result.children) {
+      if (childIds.has(child.id)) throw new TypeError(`Duplicate machine blend child id ${child.id} in ${path}.`);
+      childIds.add(child.id);
+    }
+    if (type === 'blend1d') {
+      if (result.children.length < 2) throw new TypeError(`${path}.blend1d requires at least two children.`);
+      result.input = resolveMachineNumberInput(state?.input ?? state?.inputId, `${path}.input`, inputsById);
+      for (let i=1;i<result.children.length;i+=1) if (!(result.children[i].threshold > result.children[i-1].threshold)) {
+        throw new TypeError(`${path}.blend1d child thresholds must be strictly increasing in authored order.`);
+      }
+    } else if (!result.children.length) throw new TypeError(`${path}.directBlend requires at least one child.`);
+  }
   return result;
 }
 
@@ -1266,13 +1339,15 @@ function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsByI
   const path=`${machinePath}.layers[${index}]`;
   const id=String(layer?.id || '');
   if (!id) throw new TypeError(`${path}.id is required.`);
-  const states=(Array.isArray(layer?.states)?layer.states:[]).map((state,i)=>normalizeMachineState(state,i,path,timelineIds));
+  const states=(Array.isArray(layer?.states)?layer.states:[]).map((state,i)=>normalizeMachineState(state,i,path,timelineIds,inputsById));
   const stateIds=new Set();
   for(const state of states){
     if(stateIds.has(state.id) || globalStateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${machinePath}.`);
     stateIds.add(state.id); globalStateIds.add(state.id);
   }
   const transitions=(Array.isArray(layer?.transitions)?layer.transitions:[]).map((transition,i)=>normalizeMachineTransition(transition,i,path,stateIds,inputsById));
+  const blendIds=new Set(states.filter(state=>['blend1d','directBlend'].includes(state.type)).map(state=>state.id));
+  for(const transition of transitions) if(blendIds.has(referenceId(transition.from,'machineState')) || blendIds.has(referenceId(transition.to,'machineState'))) throw new TypeError(`${path} transitions to/from blend states are not yet supported by the canonical transition compositor.`);
   for(const transition of transitions){
     if(globalTransitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
     globalTransitionIds.add(transition.id);
