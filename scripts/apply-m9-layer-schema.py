@@ -19,10 +19,9 @@ layer_code="""export function createMachineLayer(overrides = {}) {\n  const stat
 once(model, create_marker, layer_code+create_marker)
 
 old_create="""export function createStateMachine(overrides = {}) {\n  return {\n    id: overrides.id || createId('machine'),\n    name: String(overrides.name || 'State Machine'),\n    initial: overrides.initial == null\n      ? null\n      : normalizeReference(overrides.initial, 'machineState', 'machine.initial'),\n    inputs: (overrides.inputs || []).map((input) => createMachineInput(input)),\n    states: (overrides.states || []).map((state) => createMachineState(state)),\n    transitions: (overrides.transitions || []).map((transition) => createMachineTransition(transition)),\n  };\n}\n"""
-new_create="""export function createStateMachine(overrides = {}) {\n  const id = overrides.id || createId('machine');\n  const rawLayers = Array.isArray(overrides.layers) && overrides.layers.length\n    ? overrides.layers\n    : [{\n      id: `machineLayer_${id}_default`, name: 'Base Layer', order: 0, enabled: true,\n      initial: overrides.initial ?? null, states: overrides.states || [], transitions: overrides.transitions || [], graph: { x: 0, y: 0 },\n    }];\n  const layers = rawLayers.map((layer, index) => createMachineLayer({ ...layer, order: layer.order ?? index }));\n  layers.sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id));\n  layers.forEach((layer,index)=>{ layer.order=index; });\n  const primary = layers[0];\n  return {\n    id,\n    name: String(overrides.name || 'State Machine'),\n    layerVersion: VEYRA_MACHINE_LAYER_VERSION,\n    inputs: (overrides.inputs || []).map((input) => createMachineInput(input)),\n    layers,\n    // Compatibility aliases intentionally point at the first layer in-memory.\n    initial: primary.initial, states: primary.states, transitions: primary.transitions,\n  };\n}\n"""
+new_create="""export function createStateMachine(overrides = {}) {\n  const id = overrides.id || createId('machine');\n  const rawLayers = Array.isArray(overrides.layers) && overrides.layers.length\n    ? overrides.layers\n    : [{\n      id: `machineLayer_${id}_default`, name: 'Base Layer', order: 0, enabled: true,\n      initial: overrides.initial ?? null, states: overrides.states || [], transitions: overrides.transitions || [], graph: { x: 0, y: 0 },\n    }];\n  const layers = rawLayers.map((layer, index) => createMachineLayer({ ...layer, order: layer.order ?? index }));\n  layers.sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id));\n  layers.forEach((layer,index)=>{ layer.order=index; });\n  const primary = layers[0];\n  return {\n    id,\n    name: String(overrides.name || 'State Machine'),\n    layerVersion: VEYRA_MACHINE_LAYER_VERSION,\n    inputs: (overrides.inputs || []).map((input) => createMachineInput(input)),\n    layers,\n    // Temporary M0-M8 compatibility view over the primary layer. Runtime and\n    // later M9 work can move to `layers` without breaking old public callers.\n    initial: primary.initial, states: primary.states, transitions: primary.transitions,\n  };\n}\n"""
 once(model, old_create, new_create)
 
-# Replace state/transition normalizers with layer-aware versions while preserving legacy aliases.
 start=model.read_text()
 pattern=re.compile(r"function normalizeMachineState\(state, index, machinePath, timelineIds\) \{.*?\nfunction normalizeListener", re.S)
 replacement=r'''function normalizeMachineState(state, index, layerPath, timelineIds) {
@@ -110,18 +109,15 @@ text,count=pattern.subn(replacement,start,count=1)
 if count!=1: raise SystemExit(f'{model}: failed replacing machine normalizers')
 model.write_text(text)
 
-# stable IDs include layers and every nested member across layers.
 text=model.read_text()
 old="""  document.stateMachines.forEach((machine, machineIndex) => {\n    register('stateMachine', machine.id, `stateMachines[${machineIndex}]`);\n    machine.inputs.forEach((input, inputIndex) => register('machineInput', input.id, `stateMachines[${machineIndex}].inputs[${inputIndex}]`));\n    machine.states.forEach((state, stateIndex) => register('machineState', state.id, `stateMachines[${machineIndex}].states[${stateIndex}]`));\n    machine.transitions.forEach((transition, transitionIndex) => {\n      register('machineTransition', transition.id, `stateMachines[${machineIndex}].transitions[${transitionIndex}]`);\n      transition.conditions.forEach((condition, conditionIndex) => register(\n        'machineCondition', condition.id,\n        `stateMachines[${machineIndex}].transitions[${transitionIndex}].conditions[${conditionIndex}]`,\n      ));\n    });\n"""
 new="""  document.stateMachines.forEach((machine, machineIndex) => {\n    register('stateMachine', machine.id, `stateMachines[${machineIndex}]`);\n    machine.inputs.forEach((input, inputIndex) => register('machineInput', input.id, `stateMachines[${machineIndex}].inputs[${inputIndex}]`));\n    machine.layers.forEach((layer, layerIndex) => {\n      register('machineLayer', layer.id, `stateMachines[${machineIndex}].layers[${layerIndex}]`);\n      layer.states.forEach((state, stateIndex) => register('machineState', state.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}]`));\n      layer.transitions.forEach((transition, transitionIndex) => {\n        register('machineTransition', transition.id, `stateMachines[${machineIndex}].layers[${layerIndex}].transitions[${transitionIndex}]`);\n        transition.conditions.forEach((condition, conditionIndex) => register('machineCondition', condition.id, `stateMachines[${machineIndex}].layers[${layerIndex}].transitions[${transitionIndex}].conditions[${conditionIndex}]`));\n      });\n    });\n"""
 if old not in text: raise SystemExit('stable identity machine block not found')
 model.write_text(text.replace(old,new,1))
 
-# Add finders.
 once(model, "export function machineTransitionById(document, machineId, transitionId) {\n  const machine = machineById(document, machineId);\n  return machine?.transitions.find((transition) => transition.id === transitionId) || null;\n}\n", "export function machineLayerById(document, machineId, layerId) {\n  return machineById(document, machineId)?.layers?.find((layer) => layer.id === layerId) || null;\n}\n\nexport function machineTransitionById(document, machineId, transitionId) {\n  const machine = machineById(document, machineId);\n  for (const layer of machine?.layers || []) { const found=layer.transitions.find((transition)=>transition.id===transitionId); if(found) return found; }\n  return null;\n}\n")
 once(model, "export function machineConditionById(document, machineId, conditionId) {\n  const machine = machineById(document, machineId);\n  for (const transition of machine?.transitions || []) {\n    const condition = transition.conditions.find((candidate) => candidate.id === conditionId);\n    if (condition) return condition;\n  }\n  return null;\n}\n", "export function machineConditionById(document, machineId, conditionId) {\n  const machine = machineById(document, machineId);\n  for (const layer of machine?.layers || []) for (const transition of layer.transitions) {\n    const condition = transition.conditions.find((candidate) => candidate.id === conditionId);\n    if (condition) return condition;\n  }\n  return null;\n}\n")
 
-# Store layer CRUD; canonical command wiring comes in M9 Task 8.
 store=ROOT/'src/veyra/store.js'
 insert="""
   addMachineLayer(machineId, overrides = {}, commandDescriptor = {}) {
@@ -137,15 +133,16 @@ insert="""
     const machine=machineById(this.document,machineId), layer=machine?.layers?.find((candidate)=>candidate.id===layerId); if(!layer) return false;
     const descriptor=typeof commandDescriptor==='string'?{label:commandDescriptor}:{label:`Update machine layer ${layer.name||layer.id}`,source:'user',...commandDescriptor};
     this.execute(descriptor,(document)=>{const target=machineById(document,machineId).layers.find((candidate)=>candidate.id===layerId); if(changes.name!==undefined) target.name=String(changes.name); if(changes.enabled!==undefined) target.enabled=Boolean(changes.enabled); if(changes.graph!==undefined) target.graph=cloneValue(changes.graph);});
-    return true;
+    return layerId;
   }
 
   reorderMachineLayer(machineId, layerId, index, commandDescriptor = {}) {
     const machine=machineById(this.document,machineId), from=machine?.layers?.findIndex((candidate)=>candidate.id===layerId) ?? -1; if(from<0) return false;
-    const at=Math.max(0,Math.min(machine.layers.length-1,Math.trunc(Number(index)))); if(!Number.isFinite(Number(index))) throw new TypeError('Machine layer index must be finite.');
+    if(!Number.isFinite(Number(index))) throw new TypeError('Machine layer order index must be finite.');
+    const at=Math.max(0,Math.min(machine.layers.length-1,Math.trunc(Number(index))));
     const descriptor=typeof commandDescriptor==='string'?{label:commandDescriptor}:{label:`Reorder machine layer ${layerId}`,source:'user',...commandDescriptor};
-    this.execute(descriptor,(document)=>{const target=machineById(document,machineId),pos=target.layers.findIndex((candidate)=>candidate.id===layerId),[moved]=target.layers.splice(pos,1);target.layers.splice(at,0,moved);target.layers.forEach((item,i)=>{item.order=i;});const primary=target.layers[0];target.initial=primary.initial;target.states=primary.states;target.transitions=primary.transitions;});
-    return true;
+    this.execute(descriptor,(document)=>{const target=machineById(document,machineId);const current=target.layers.findIndex((candidate)=>candidate.id===layerId);const [item]=target.layers.splice(current,1);target.layers.splice(at,0,item);target.layers.forEach((entry,i)=>{entry.order=i;});const primary=target.layers[0];target.initial=primary.initial;target.states=primary.states;target.transitions=primary.transitions;});
+    return layerId;
   }
 
   removeMachineLayer(machineId, layerId, commandDescriptor = {}) {
@@ -158,25 +155,39 @@ insert="""
 
 """
 once(store, "  get commandHistory() {\n", insert+"  get commandHistory() {\n")
-# ensure createMachineLayer import present
 text=store.read_text()
 text=text.replace('createMachineInput,\n', 'createMachineInput,\n  createMachineLayer,\n',1) if 'createMachineLayer,' not in text else text
 store.write_text(text)
 
-# Capabilities advertise layer schema operations.
 sm=ROOT/'src/veyra/stateMachine.js'
 once(sm, "    'set-initial',\n    'add-input',", "    'set-initial',\n    'add-layer',\n    'update-layer',\n    'remove-layer',\n    'reorder-layer',\n    'add-input',")
 
-# Summary includes layers and typed layer refs.
 summary=ROOT/'src/veyra/summary.js'
 once(summary, "  createMachineConditionRef,\n", "  createMachineConditionRef,\n  createMachineLayerRef,\n")
 marker="""      inputs: machine.inputs.map((input) => ({\n        ref: createMachineInputRef(input.id),\n        name: input.name,\n        type: input.type,\n        value: input.value,\n      })),\n"""
 addition=marker+"""      layers: machine.layers.map((layer) => ({\n        ref: createMachineLayerRef(layer.id),\n        name: layer.name, displayNameAdvisory: true, enabled: layer.enabled, order: layer.order, graph: cloneValue(layer.graph),\n        initial: layer.initial ? createMachineStateRef(referenceId(layer.initial, 'machineState')) : null,\n        states: layer.states.map((state) => createMachineStateRef(state.id)),\n        transitions: layer.transitions.map((transition) => createMachineTransitionRef(transition.id)),\n      })),\n"""
 once(summary, marker, addition)
 
-# Public exports.
+# Artboard duplication must treat layers as scoped stable identities and remap
+# their nested state/transition objects just like the legacy flat view.
+project=ROOT/'src/veyra/projectGraph.js'
+once(project,
+"""  for (const machine of document.stateMachines.filter((item) => item.artboard.id === artboardId)) {\n    push('stateMachine', machine.id, 'machine');\n    for (const input of machine.inputs) push('machineInput', input.id);\n    for (const state of machine.states) push('machineState', state.id);\n    for (const transition of machine.transitions) {\n      push('machineTransition', transition.id);\n      for (const condition of transition.conditions) push('machineCondition', condition.id);\n    }\n  }\n""",
+"""  for (const machine of document.stateMachines.filter((item) => item.artboard.id === artboardId)) {\n    push('stateMachine', machine.id, 'machine');\n    for (const input of machine.inputs) push('machineInput', input.id);\n    for (const layer of machine.layers || []) {\n      push('machineLayer', layer.id);\n      for (const state of layer.states) push('machineState', state.id);\n      for (const transition of layer.transitions) {\n        push('machineTransition', transition.id);\n        for (const condition of transition.conditions) push('machineCondition', condition.id);\n      }\n    }\n  }\n""
+)
+once(project,
+"""    } else if (kind === 'stateMachine') {\n      source.inputs.forEach((item, index) => { copy.inputs[index].id = mapped('machineInput', item.id); });\n      source.states.forEach((item, index) => { copy.states[index].id = mapped('machineState', item.id); });\n      source.transitions.forEach((item, index) => {\n        copy.transitions[index].id = mapped('machineTransition', item.id);\n        item.conditions.forEach((condition, conditionIndex) => { copy.transitions[index].conditions[conditionIndex].id = mapped('machineCondition', condition.id); });\n      });\n""",
+"""    } else if (kind === 'stateMachine') {\n      source.inputs.forEach((item, index) => { copy.inputs[index].id = mapped('machineInput', item.id); });\n      (source.layers || []).forEach((layer, layerIndex) => {\n        copy.layers[layerIndex].id = mapped('machineLayer', layer.id);\n        layer.states.forEach((item, stateIndex) => { copy.layers[layerIndex].states[stateIndex].id = mapped('machineState', item.id); });\n        layer.transitions.forEach((item, transitionIndex) => {\n          copy.layers[layerIndex].transitions[transitionIndex].id = mapped('machineTransition', item.id);\n          item.conditions.forEach((condition, conditionIndex) => { copy.layers[layerIndex].transitions[transitionIndex].conditions[conditionIndex].id = mapped('machineCondition', condition.id); });\n        });\n      });\n      const primary = copy.layers?.[0];\n      if (primary) { copy.initial = primary.initial; copy.states = primary.states; copy.transitions = primary.transitions; }\n"""
+)
+
+# Existing manifest capability ratchet intentionally grows with M9 layer CRUD.
+manifest_test=ROOT/'tests/veyra-manifest.test.mjs'
+once(manifest_test,
+"""assert.deepEqual(machine.capabilities.graph, [\n  'set-name', 'set-initial', 'add-input', 'remove-input', 'update-input',\n  'add-state', 'update-state', 'remove-state',\n  'add-transition', 'update-transition', 'remove-transition',\n]);\n""",
+"""assert.deepEqual(machine.capabilities.graph, [\n  'set-name', 'set-initial', 'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',\n  'add-input', 'remove-input', 'update-input',\n  'add-state', 'update-state', 'remove-state',\n  'add-transition', 'update-transition', 'remove-transition',\n]);\n"""
+)
+
 index=ROOT/'src/index.js'
-# machine creators are exported elsewhere in model module? src/index doesn't export model. Find state machine exports section impossible, append focused exports.
 index.write_text(index.read_text()+"\n// M9 layered state-machine schema primitives.\nexport { VEYRA_MACHINE_LAYER_VERSION, createMachineLayer, machineLayerById } from './veyra/model.js';\nexport { createMachineLayerRef } from './veyra/references.js';\n")
 
 print('M9 layer schema patch applied')
