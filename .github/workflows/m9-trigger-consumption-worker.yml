@@ -34,7 +34,7 @@ jobs:
           p.write_text(text.replace(old,new,1))
           PY
       - run: python3 scripts/apply-m9-trigger-consumption.py
-      - name: Add reset consumption counter
+      - name: Preserve compatibility and advance event contract
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -50,7 +50,81 @@ jobs:
                 timelineEvaluations: 0,
           """
           if text.count(old)!=1: raise SystemExit(f'reset stats target count {text.count(old)}')
+          text=text.replace(old,new,1)
+          old="""      if (source.kind === 'machineInput') {
+                if (inputsById.get(source.id) !== true) continue;
+                inputsById.set(source.id, false);
+                this.#overrideValues.set(source.id, false);
+                this.#stats.triggerPulsesConsumed += 1;
+              } else if (this.#dataRuntime.consumeEndpointTrigger(source.endpoint, { scopePath: this.#runtimeScopePath })) {
+          """
+          new="""      if (source.kind === 'machineInput') {
+                // Legacy machine triggers intentionally remain one-step broadcast pulses.
+                // Exact consume-on-selected-transition semantics apply to M8 event queues.
+                continue;
+              } else if (this.#dataRuntime.consumeEndpointTrigger(source.endpoint, { scopePath: this.#runtimeScopePath })) {
+          """
+          if text.count(old)!=1: raise SystemExit('legacy trigger consumption block missing')
+          text=text.replace(old,new,1)
+          old="""    if (delta > 0) {
+                for (const layer of orderedLayers(machine)) this.#stepLayer(layer, this.#layers.get(layer.id), delta, inputsById, events);
+              }
+              return events;
+            }
+
+            setInput(nameOrId, value) {
+          """
+          new="""    if (delta > 0) {
+                for (const layer of orderedLayers(machine)) this.#stepLayer(layer, this.#layers.get(layer.id), delta, inputsById, events);
+              }
+              this.#clearTriggers();
+              return events;
+            }
+
+            #clearTriggers() {
+              for (const input of this.machine?.inputs || []) if (input.type === 'trigger' && (this.#overrideValues.get(input.id) ?? input.value)) this.#overrideValues.set(input.id, false);
+            }
+
+            setInput(nameOrId, value) {
+          """
+          if text.count(old)!=1: raise SystemExit('step return block missing')
           p.write_text(text.replace(old,new,1))
+
+          p=Path('tests/veyra-m9-data-condition-sources.test.mjs')
+          text=p.read_text()
+          text=text.replace("// M8 trigger properties are legal machine event sources. This slice observes the\n// queued pulse non-destructively; exact machine consumption is deliberately a later M9 contract.", "// M8 trigger properties are legal machine event sources. A selected transition now\n// consumes exactly one queued pulse; plain endpoint reads and forks remain non-consuming.")
+          old="assert.equal(dataRuntime.getValue('inst_main', 'p_trigger'), true, 'machine observation must not silently consume an M8 trigger yet');"
+          new="assert.equal(dataRuntime.getValue('inst_main', 'p_trigger'), false, 'selected transition must consume exactly one M8 trigger pulse');"
+          if text.count(old)!=1: raise SystemExit('old M8 trigger assertion missing')
+          p.write_text(text.replace(old,new,1))
+
+          p=Path('tests/veyra-m9-trigger-consumption.test.mjs')
+          text=p.read_text().replace("background: '#fff'", "background: '#ffffff'")
+          old="""// Legacy machine triggers now follow the same exact policy: unmatched pulses persist,
+          // and a selected transition consumes them rather than step() globally clearing them.
+          """
+          new="""// Legacy machine triggers preserve the verified compatibility policy: they are
+          // one-step broadcast pulses and clear after the step even if no transition wins.
+          """
+          text=text.replace(old,new)
+          old="""  assert.equal(runtime.inputs.find(input => input.id === 'go_input').value, true, 'failed legacy candidate must conserve pulse');
+            runtime.setInput('ready_input', true);
+            runtime.step(.01);
+          """
+          new="""  assert.equal(runtime.inputs.find(input => input.id === 'go_input').value, false, 'legacy trigger remains a one-step compatibility pulse');
+            runtime.setInput('ready_input', true);
+            runtime.fire('go_input');
+            runtime.step(.01);
+          """
+          if text.count(old)!=1: raise SystemExit('legacy compatibility assertion missing')
+          text=text.replace(old,new,1)
+          text=text.replace('// One legacy pulse cannot be reused by a later layer in the same deterministic step.', '// A legacy one-step pulse remains a broadcast across simultaneously evaluated layers.')
+          old="assert.equal(layers.layer_b, 'b0');"
+          new="assert.equal(layers.layer_b, 'b1');"
+          if text.count(old)!=2: raise SystemExit(f'expected two layer_b b0 assertions, found {text.count(old)}')
+          # Only the first occurrence belongs to legacy; data-trigger single-pulse test must stay b0.
+          text=text.replace(old,new,1)
+          p.write_text(text)
           PY
       - run: npm run check
       - run: npm test
@@ -59,6 +133,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/veyra/dataGraph.js src/veyra/stateMachine.js tests/veyra-m9-trigger-consumption.test.mjs
-          git commit -m 'feat(m9): consume only triggers used by selected transitions'
+          git add src/veyra/dataGraph.js src/veyra/stateMachine.js tests/veyra-m9-data-condition-sources.test.mjs tests/veyra-m9-trigger-consumption.test.mjs
+          git commit -m 'feat(m9): consume queued data triggers on selected transitions'
           git push origin HEAD:work/m9-trigger-consumption
