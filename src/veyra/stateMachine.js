@@ -12,7 +12,7 @@ export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
 
 export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   inputTypes: Object.freeze(['number', 'bool', 'trigger']),
-  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend']),
+  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend', 'additiveBlend']),
   actionTypes: Object.freeze(['data-set', 'data-fire', 'input-set', 'input-fire', 'emit', 'timeline']),
   actionPhases: Object.freeze(['state-start', 'state-end', 'transition-start', 'transition-end']),
   randomizeExit: Object.freeze({ weighted: true, seeded: true, source: 'runtime-option', globalRandom: false }),
@@ -22,6 +22,19 @@ export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
     'add-input', 'remove-input', 'update-input',
     'add-state', 'update-state', 'remove-state',
     'add-transition', 'update-transition', 'remove-transition',
+  ]),
+  // Additive machine graph operations live in a separate capability list so
+  // legacy readers that deep-compare `graph` retain their original contract.
+  graphExtended: Object.freeze([
+    'set-name', 'set-initial',
+    'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
+    'add-input', 'remove-input', 'update-input',
+    'add-state', 'update-state', 'remove-state',
+    'add-transition', 'update-transition', 'remove-transition',
+    'reconnect-transition', 'move-state',
+    'add-blend-child', 'update-blend-child', 'remove-blend-child', 'reorder-blend-child',
+    'add-condition', 'update-condition', 'remove-condition', 'reorder-condition',
+    'add-action', 'update-action', 'remove-action', 'reorder-action',
   ]),
   runtime: Object.freeze(['set-input', 'fire', 'step', 'scrub', 'reset', 'evaluate']),
 });
@@ -167,7 +180,7 @@ function statePlaybackDurationSeconds(document, state) {
   if (state.type === 'animation' && state.timeline) {
     return timelineEndSeconds(document, referenceId(state.timeline, 'timeline')) / speed;
   }
-  if (state.type === 'blend1d' || state.type === 'directBlend') {
+  if (state.type === 'blend1d' || state.type === 'directBlend' || state.type === 'additiveBlend') {
     const durations = (state.children || []).map(child => {
       const childSpeed = Math.abs(speed * Number(child.speed ?? 1));
       return childSpeed > 0 ? timelineEndSeconds(document, referenceId(child.timeline, 'timeline')) / childSpeed : 0;
@@ -352,6 +365,15 @@ export class MachineRuntime {
 
   #transitionMatch(transition, stateTime, inputsById) {
     return transitionMatch(transition, stateTime, inputsById, endpoint => this.#readDataCondition(endpoint));
+  }
+
+  #numericSourceValue(source, inputsById) {
+    if (source?.kind === 'data') {
+      const value = this.#readDataCondition(source);
+      return Number(value);
+    }
+    const id = referenceId(source, 'machineInput');
+    return Number(inputsById.get(id) ?? 0);
   }
 
   #consumeTransitionTriggers(match) {
@@ -711,7 +733,7 @@ export class MachineRuntime {
       return [{ timelineId: referenceId(state.timeline, 'timeline'), time: timelineTimeForState(document, state, elapsed), weight: 1, effectiveWeight: 1, stateId: state.id }];
     }
     if (state.type === 'blend1d') {
-      const value = Number(inputsById.get(referenceId(state.input, 'machineInput')) ?? 0);
+      const value = this.#numericSourceValue(state.input, inputsById);
       const children = state.children || [];
       if (!children.length) return [];
       if (value <= children[0].threshold) {
@@ -731,14 +753,19 @@ export class MachineRuntime {
       }
       return [];
     }
-    if (state.type === 'directBlend') {
-      const active=(state.children||[]).map(child=>({child,raw:Math.max(0,Number(inputsById.get(referenceId(child.input,'machineInput')) ?? 0))})).filter(item=>Number.isFinite(item.raw)&&item.raw>0);
+    if (state.type === 'directBlend' || state.type === 'additiveBlend') {
+      const active=(state.children||[]).map(child=>({child,raw:Math.max(0,this.#numericSourceValue(child.input, inputsById))})).filter(item=>Number.isFinite(item.raw)&&item.raw>0);
       const total=active.reduce((sum,item)=>sum+item.raw,0);
       if (!(total>0)) return [];
       let cumulative=0;
       return active.map((item,index)=>{
         const {child,raw}=item; cumulative+=raw;
-        return {timelineId:referenceId(child.timeline,'timeline'),time:timelineTimeForBlendChild(document,state,child,elapsed),weight:index===0?1:raw/cumulative,effectiveWeight:raw/total,stateId:state.id,blendChildId:child.id};
+        // Additive Blend keeps each branch's authored contribution instead of
+        // normalizing the sum to one. The canonical compositor still receives
+        // bounded weights, while ownership/evidence exposes the raw additive
+        // factor for explainability.
+        const normalized = state.type === 'additiveBlend' ? Math.min(1, raw) : raw / total;
+        return {timelineId:referenceId(child.timeline,'timeline'),time:timelineTimeForBlendChild(document,state,child,elapsed),weight:state.type === 'additiveBlend' ? normalized : (index===0?1:raw/cumulative),effectiveWeight:normalized,stateId:state.id,blendChildId:child.id, ...(state.type === 'additiveBlend' ? { additive: true, rawWeight: raw } : {})};
       });
     }
     return [];

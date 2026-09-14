@@ -448,15 +448,41 @@ function buildIndexData(input) {
     for (const input of machine.inputs || []) add(makeEntity(createReference('machineInput', input.id), input, { type: input.type, displayName: input.name }));
     for (const layer of machine.layers || []) {
       add(makeEntity(createReference('machineLayer', layer.id), layer, { type: 'machineLayer', displayName: layer.name }));
-      for (const state of layer.states || []) add(makeEntity(createReference('machineState', state.id), state, { type: state.type, displayName: state.name }));
+      for (const state of layer.states || []) {
+        add(makeEntity(createReference('machineState', state.id), state, { type: state.type, displayName: state.name }));
+        for (const child of state.children || []) add(makeEntity(createReference('machineBlendChild', child.id), child, { type: 'machineBlendChild' }));
+        for (const action of state.actions || []) add(makeEntity(createReference('machineAction', action.id), action, { type: action.type }));
+      }
       for (const transition of layer.transitions || []) {
         add(makeEntity(createReference('machineTransition', transition.id), transition, { type: 'machineTransition' }));
         for (const condition of transition.conditions || []) add(makeEntity(createReference('machineCondition', condition.id), condition, { type: condition.op }));
+        for (const action of transition.actions || []) add(makeEntity(createReference('machineAction', action.id), action, { type: action.type }));
       }
     }
   }
 
   for (const listener of document.listeners || []) add(makeEntity(createReference('listener', listener.id), listener, { type: listener.kind, displayName: listener.name || '' }));
+  // Feature-family entities are first-class semantic targets. Their display
+  // names are only hints; stable typed refs and explicit relationships remain
+  // the resolver's source of truth.
+  for (const text of document.texts || []) {
+    add(makeEntity(createReference('text', text.id), text, { type: 'text', displayName: text.name }));
+    for (const run of text.runs || []) add(makeEntity(createReference('textRun', run.id), run, { type: 'textRun' }));
+    for (const modifier of text.modifiers || []) add(makeEntity(createReference('textModifier', modifier.id), modifier, { type: modifier.type }));
+  }
+  for (const layout of document.layouts || []) {
+    add(makeEntity(createReference('layout', layout.id), layout, { type: layout.mode, displayName: layout.name }));
+    for (const item of layout.items || []) add(makeEntity(createReference('layoutItem', item.id), item, { type: 'layoutItem' }));
+  }
+  for (const event of document.events || []) {
+    add(makeEntity(createReference('event', event.id), event, { type: event.type, displayName: event.name }));
+    for (const action of event.actions || []) add(makeEntity(createReference('eventAction', action.id), action, { type: action.type }));
+  }
+  for (const item of document.accessibility || []) add(makeEntity(createReference('accessibility', item.id), item, { type: item.role, displayName: item.label }));
+  for (const item of document.scripts || []) add(makeEntity(createReference('script', item.id), item, { type: item.language, displayName: item.name }));
+  for (const item of document.shaders || []) add(makeEntity(createReference('shader', item.id), item, { type: item.language, displayName: item.name }));
+  for (const item of document.renderPresets || []) add(makeEntity(createReference('renderPreset', item.id), item, { type: item.format, displayName: item.name }));
+  for (const item of document.interchangeAssets || []) add(makeEntity(createReference('interchangeAsset', item.id), item, { type: item.format, displayName: item.externalId || item.id }));
   for (const spec of dataIndexEntitySpecs(document)) add(makeEntity(spec.ref, spec.object, { type: spec.type, displayName: spec.displayName, capabilities: spec.capabilities }));
   for (const record of document.semantics || []) add(makeEntity(createReference('semanticRecord', record.id), record, { type: 'semanticRecord' }));
 
@@ -490,6 +516,7 @@ function buildIndexData(input) {
     else link(byKey, nodeRef, 'owner', node.artboard, 'owns');
     const paintRef = createPaintRef('node', node.id);
     link(byKey, paintRef, 'owner', nodeRef, 'owns_paint');
+    if (node.type === 'image' && node.asset) link(byKey, nodeRef, 'uses_asset', node.asset, 'used_by_image');
     for (const vertex of node.type === 'path' ? node.geometry.vertices || [] : []) link(byKey, createReference('pathVertex', vertex.id), 'owner', nodeRef, 'owns');
     for (const stop of node.paint?.fill?.stops || []) link(byKey, createReference('gradientStop', stop.id), 'owner', paintRef, 'owns_stop');
   }
@@ -567,6 +594,15 @@ function buildIndexData(input) {
         link(byKey, stateRef, 'owner', layerRef, 'state');
         const timelineId = referenceId(state.timeline, 'timeline');
         if (timelineId) link(byKey, stateRef, 'uses_timeline', createReference('timeline', timelineId), 'used_by_state');
+        for (const child of state.children || []) {
+          const childRef = createReference('machineBlendChild', child.id);
+          link(byKey, childRef, 'owner', stateRef, 'blend_child');
+          const childTimelineId = referenceId(child.timeline, 'timeline');
+          if (childTimelineId) link(byKey, childRef, 'uses_timeline', createReference('timeline', childTimelineId), 'used_by_blend_child');
+          const childInputId = referenceId(child.input, 'machineInput');
+          if (childInputId) link(byKey, childRef, 'uses_input', createReference('machineInput', childInputId), 'used_by_blend_child');
+        }
+        for (const action of state.actions || []) link(byKey, createReference('machineAction', action.id), 'owner', stateRef, 'state_action');
       }
       for (const transition of layer.transitions || []) {
         const transitionRef = createReference('machineTransition', transition.id);
@@ -581,8 +617,41 @@ function buildIndexData(input) {
           const inputId = referenceId(condition.input, 'machineInput');
           if (inputId) link(byKey, conditionRef, 'uses_input', createReference('machineInput', inputId), 'used_by_condition');
         }
+        for (const action of transition.actions || []) link(byKey, createReference('machineAction', action.id), 'owner', transitionRef, 'transition_action');
       }
     }
+  }
+
+  for (const text of document.texts || []) {
+    const textRef = createReference('text', text.id);
+    if (text.artboard) link(byKey, textRef, 'owner', text.artboard, 'owns');
+    if (text.node) link(byKey, textRef, 'targets', text.node, 'text_target');
+    for (const run of text.runs || []) link(byKey, createReference('textRun', run.id), 'owner', textRef, 'owns');
+    for (const modifier of text.modifiers || []) link(byKey, createReference('textModifier', modifier.id), 'owner', textRef, 'owns');
+  }
+  for (const layout of document.layouts || []) {
+    const layoutRef = createReference('layout', layout.id);
+    if (layout.artboard) link(byKey, layoutRef, 'owner', layout.artboard, 'owns');
+    if (layout.target) link(byKey, layoutRef, 'targets', layout.target, 'layout_target');
+    for (const item of layout.items || []) {
+      const itemRef = createReference('layoutItem', item.id);
+      link(byKey, itemRef, 'owner', layoutRef, 'owns');
+      if (item.target) link(byKey, itemRef, 'targets', item.target, 'layout_item_target');
+    }
+  }
+  for (const event of document.events || []) {
+    const eventRef = createReference('event', event.id);
+    if (event.artboard) link(byKey, eventRef, 'owner', event.artboard, 'owns');
+    if (event.target) link(byKey, eventRef, 'targets', event.target, 'event_target');
+    for (const action of event.actions || []) link(byKey, createReference('eventAction', action.id), 'owner', eventRef, 'owns');
+  }
+  for (const item of document.accessibility || []) {
+    const ref = createReference('accessibility', item.id);
+    link(byKey, ref, 'targets', item.target, 'accessibility_target');
+  }
+  for (const collection of ['scripts', 'shaders', 'renderPresets', 'interchangeAssets']) {
+    const kind = { scripts: 'script', shaders: 'shader', renderPresets: 'renderPreset', interchangeAssets: 'interchangeAsset' }[collection];
+    for (const item of document[collection] || []) link(byKey, createReference(kind, item.id), 'owner', documentRef, 'owns');
   }
 
   for (const listener of document.listeners || []) {

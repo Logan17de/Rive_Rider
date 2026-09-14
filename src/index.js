@@ -153,6 +153,97 @@ export {
 export { createVeyraRuntimeHost } from './veyra/runtimeHost.js';
 export { VEYRA_DATA_RUNTIME_PORTS, VEYRA_DATA_RUNTIME_CONTRACT } from './veyra/runtimePorts.js';
 
-// M9 layered state-machine schema primitives.
-export { VEYRA_MACHINE_LAYER_VERSION, createMachineLayer, machineLayerById } from './veyra/model.js';
-export { createMachineLayerRef } from './veyra/references.js';
+// M9 layered state-machine schema primitives and the canonical runtime. Every
+// graph operation is also present in the command registry consumed by the UI
+// and AI/browser adapters.
+export {
+  VEYRA_MACHINE_LAYER_VERSION,
+  VEYRA_MACHINE_ACTION_PHASES,
+  VEYRA_MACHINE_ACTION_TYPES,
+  VEYRA_MACHINE_STATE_TYPES,
+  createMachineLayer,
+  createMachineBlendChild,
+  createMachineAction,
+  createMachineCondition,
+  createMachineState,
+  createMachineTransition,
+  machineLayerById,
+  machineLayers,
+  machineStates,
+  machineTransitions,
+  machineLayerForState,
+  machineLayerForTransition,
+} from './veyra/model.js';
+export { createMachineLayerRef, createMachineBlendChildRef, createMachineActionRef, createMachineConditionRef } from './veyra/references.js';
+export { VEYRA_MACHINE_CAPABILITIES, MachineRuntime, createMachineRuntime } from './veyra/stateMachine.js';
+export {
+  VEYRA_COMMAND_ACTIONS,
+  VEYRA_COMMAND_TABLE,
+  VEYRA_EXTENDED_COMMAND_ACTIONS,
+  VEYRA_EXTENDED_COMMAND_TABLE,
+  VEYRA_ALL_COMMAND_TABLE,
+  dispatchVeyraCommand,
+} from './veyra/commands.js';
+
+// M10 feature graph: text/layout/event/accessibility/script/shader/render and
+// interchange records all use the same stable typed-reference contract.
+export {
+  VEYRA_FEATURE_VERSION,
+  VEYRA_FEATURE_KINDS,
+  VEYRA_FEATURE_COLLECTIONS,
+  VEYRA_TEXT_MODIFIER_TYPES,
+  VEYRA_LAYOUT_MODES,
+  VEYRA_LAYOUT_ALIGN,
+  VEYRA_EVENT_TYPES,
+  VEYRA_EVENT_ACTION_TYPES,
+  VEYRA_ACCESSIBILITY_ROLES,
+  VEYRA_SCRIPT_LANGUAGES,
+  VEYRA_SHADER_LANGUAGES,
+  VEYRA_RENDER_FORMATS,
+  createFeatureRecord,
+  createText,
+  createLayout,
+  createEvent,
+  createAccessibility,
+  createScript,
+  createShader,
+  createRenderPreset,
+  createInterchangeAsset,
+  featureRef,
+  featureCollections,
+  featureRecords,
+  featureById,
+  featureGraphSummary,
+  featureCollectionForKind,
+  normalizeFeatureGraphDocument,
+  validateFeatureGraph,
+} from './veyra/featureGraph.js';
+export {
+  createTextRef, createTextRunRef, createTextModifierRef, createLayoutRef,
+  createLayoutItemRef, createEventRef, createEventActionRef,
+  createAccessibilityRef, createScriptRef, createShaderRef,
+  createRenderPresetRef, createInterchangeAssetRef,
+} from './veyra/references.js';
+export {
+  VEYRA_LOTTIE_FORMAT,
+  VEYRA_DOTLOTTIE_FORMAT,
+  VEYRA_LOTTIE_VERSION,
+  importLottie,
+  exportLottie,
+  serializeLottie,
+  importDotLottie,
+  exportDotLottie,
+} from './veyra/lottie.js';
+export { VEYRA_PLAYER_EVENTS, VeyraPlayer, createVeyraPlayer, registerVeyraPlayerElement } from './veyra/player.js';
+export {
+  VEYRA_GRAPH_NODE_WIDTH,
+  VEYRA_GRAPH_NODE_HEIGHT,
+  VEYRA_GRAPH_SNAP,
+  GraphEditorState,
+  createGraphEditorState,
+  createGraphEditorController,
+  snapGraphPoint,
+  graphNodePoint,
+  graphNodeBounds,
+  renderMachineGraphSvg,
+} from './veyra/graphEditor.js';

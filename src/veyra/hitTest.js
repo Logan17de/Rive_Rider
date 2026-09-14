@@ -248,7 +248,7 @@ function roundedRectangleScreenPoints(node, localToScreen) {
 }
 
 function drawableGeometry(node) {
-  if (node.type === 'rectangle' || node.type === 'ellipse') {
+  if (node.type === 'image' || node.type === 'rectangle' || node.type === 'ellipse') {
     return Number(node.geometry?.width) > 0 && Number(node.geometry?.height) > 0;
   }
   if (node.type === 'polygon') return Number(node.geometry?.radius) > 0 && Number(node.geometry?.sides) >= 3;
@@ -265,7 +265,7 @@ function geometryScreenPath(node, localToScreen) {
   if (!drawableGeometry(node)) return { points: [], strokeClosed: false, curvedApproximation: false };
   if (node.type === 'path') return pathScreenPoints(node, localToScreen);
   if (node.type === 'ellipse') return { points: ellipseScreenPoints(node, localToScreen), strokeClosed: true, curvedApproximation: true };
-  if (node.type === 'rectangle') {
+  if (node.type === 'image' || node.type === 'rectangle') {
     const curved = Number(node.geometry?.cornerRadius) > 0;
     return { points: roundedRectangleScreenPoints(node, localToScreen), strokeClosed: true, curvedApproximation: curved };
   }
@@ -277,7 +277,7 @@ function geometryScreenPath(node, localToScreen) {
 }
 
 function exactCurvedFillContains(node, screen, localToScreen) {
-  if (!['rectangle', 'ellipse'].includes(node.type)) return null;
+  if (!['image', 'rectangle', 'ellipse'].includes(node.type)) return null;
   const inverse = invert(localToScreen);
   if (!inverse) return false;
   const localPoint = apply(inverse, screen);
@@ -305,7 +305,7 @@ function hitGeometry(node, screen, worldMatrix, viewportTransform) {
   const halfStroke = Math.abs(Number(node.paint.strokeWidth)) / 2;
   // Ellipse/rounded-rect chord error consumes part of the public tolerance
   // budget, so the maximum true-boundary expansion remains <= 0.35 CSS px.
-  const allowance = curvedApproximation && ['ellipse', 'rectangle'].includes(node.type)
+  const allowance = curvedApproximation && ['ellipse', 'rectangle', 'image'].includes(node.type)
     ? VEYRA_HIT_TEST_TOLERANCE_PX - VEYRA_CURVE_APPROXIMATION_TOLERANCE_PX
     : VEYRA_HIT_TEST_TOLERANCE_PX;
   const threshold = (halfStroke + allowance) ** 2;

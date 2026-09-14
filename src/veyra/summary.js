@@ -1,5 +1,6 @@
 import { nodeCapabilities, rigCapabilities, VEYRA_SEMANTIC_CAPABILITIES } from './capabilities.js';
 import { cloneValue, semanticFor } from './model.js';
+import { featureGraphSummary, featureCollections, featureRecords } from './featureGraph.js';
 import { VEYRA_MACHINE_CAPABILITIES } from './stateMachine.js';
 import {
   createDocumentRef,
@@ -9,6 +10,8 @@ import {
   createComponentOverrideRef,
   createGradientStopRef,
   createMachineConditionRef,
+  createMachineActionRef,
+  createMachineBlendChildRef,
   createMachineLayerRef,
   createMachineInputRef,
   createMachineStateRef,
@@ -57,7 +60,7 @@ function semanticSummary(record) {
 
 export function createSceneSummary(document, options = {}) {
   const includeGeometry = Boolean(options.includeGeometry);
-  return {
+  const summary = {
     format: 'veyra-scene-summary',
     version: 1,
     document: {
@@ -186,18 +189,58 @@ export function createSceneSummary(document, options = {}) {
       })),
       layers: machine.layers.map((layer) => ({
         ref: createMachineLayerRef(layer.id),
-        name: layer.name, displayNameAdvisory: true, enabled: layer.enabled, order: layer.order, graph: cloneValue(layer.graph),
+        name: layer.name, displayNameAdvisory: true, enabled: layer.enabled, weight: layer.weight ?? 1, order: layer.order, graph: cloneValue(layer.graph),
         initial: layer.initial ? createMachineStateRef(referenceId(layer.initial, 'machineState')) : null,
         states: layer.states.map((state) => createMachineStateRef(state.id)),
         transitions: layer.transitions.map((transition) => createMachineTransitionRef(transition.id)),
+        // Keep the compact ref arrays above for backwards compatibility, while
+        // exposing complete layer-local records for AI clients that should not
+        // have to reconstruct ownership from the machine-level aliases.
+        stateRecords: layer.states.map((state) => ({
+          ref: createMachineStateRef(state.id),
+          name: state.name,
+          type: state.type,
+          caption: state.caption,
+          speed: state.speed,
+          timeline: state.timeline ? createTimelineRef(referenceId(state.timeline, 'timeline')) : null,
+          ...(state.input ? { input: cloneValue(state.input) } : {}),
+          ...(state.children ? { children: state.children.map((child) => ({ ref: createMachineBlendChildRef(child.id), timeline: createTimelineRef(referenceId(child.timeline, 'timeline')), ...(child.threshold !== undefined ? { threshold: child.threshold } : {}), ...(child.input ? { input: cloneValue(child.input) } : {}), speed: child.speed })) } : {}),
+          actions: (state.actions || []).map((action) => ({ ref: createMachineActionRef(action.id), ...cloneValue(action) })),
+        })),
+        transitionRecords: layer.transitions.map((transition) => ({
+          ref: createMachineTransitionRef(transition.id),
+          from: createMachineStateRef(referenceId(transition.from, 'machineState')),
+          to: createMachineStateRef(referenceId(transition.to, 'machineState')),
+          duration: transition.duration,
+          after: transition.after,
+          conditions: transition.conditions.map((condition) => ({
+            ref: createMachineConditionRef(condition.id),
+            ...(condition.input ? { input: createMachineInputRef(referenceId(condition.input, 'machineInput')) } : {}),
+            op: condition.op,
+            ...(condition.value !== undefined ? { value: condition.value } : {}),
+            ...(condition.source ? { source: cloneValue(condition.source) } : {}),
+            ...(condition.compare ? { compare: cloneValue(condition.compare) } : {}),
+          })),
+          actions: (transition.actions || []).map((action) => ({ ref: createMachineActionRef(action.id), ...cloneValue(action) })),
+          enabled: transition.enabled !== false,
+          exitTime: cloneValue(transition.exitTime || null),
+          pauseSource: Boolean(transition.pauseSource),
+          allowExitDuringTransition: Boolean(transition.allowExitDuringTransition),
+          easing: transition.easing || 'linear',
+        })),
       })),
       states: machine.states.map((state) => ({
         ref: createMachineStateRef(state.id),
         name: state.name,
         type: state.type,
+        caption: state.caption,
+        speed: state.speed,
         timeline: state.timeline
           ? createTimelineRef(referenceId(state.timeline, 'timeline'))
           : null,
+        ...(state.input ? { input: cloneValue(state.input) } : {}),
+        ...(state.children ? { children: state.children.map((child) => ({ ref: createMachineBlendChildRef(child.id), timeline: createTimelineRef(referenceId(child.timeline, 'timeline')), ...(child.threshold !== undefined ? { threshold: child.threshold } : {}), ...(child.input ? { input: cloneValue(child.input) } : {}), speed: child.speed })) } : {}),
+        actions: (state.actions || []).map((action) => ({ ref: createMachineActionRef(action.id), ...cloneValue(action) })),
       })),
       transitions: machine.transitions.map((transition) => ({
         ref: createMachineTransitionRef(transition.id),
@@ -207,10 +250,18 @@ export function createSceneSummary(document, options = {}) {
         after: transition.after,
         conditions: transition.conditions.map((condition) => ({
           ref: createMachineConditionRef(condition.id),
-          input: createMachineInputRef(referenceId(condition.input, 'machineInput')),
+          ...(condition.input ? { input: createMachineInputRef(referenceId(condition.input, 'machineInput')) } : {}),
           op: condition.op,
           ...(condition.value !== undefined ? { value: condition.value } : {}),
+          ...(condition.source ? { source: cloneValue(condition.source) } : {}),
+          ...(condition.compare ? { compare: cloneValue(condition.compare) } : {}),
         })),
+        actions: (transition.actions || []).map((action) => ({ ref: createMachineActionRef(action.id), ...cloneValue(action) })),
+        enabled: transition.enabled !== false,
+        exitTime: cloneValue(transition.exitTime || null),
+        pauseSource: Boolean(transition.pauseSource),
+        allowExitDuringTransition: Boolean(transition.allowExitDuringTransition),
+        easing: transition.easing || 'linear',
       })),
     })),
     listeners: (document.listeners || []).map((listener) => ({
@@ -226,4 +277,15 @@ export function createSceneSummary(document, options = {}) {
       ...(listener.value !== undefined ? { value: cloneValue(listener.value) } : {}),
     })),
   };
+  const feature = featureGraphSummary(document);
+  if (feature.records.length) {
+    summary.features = {
+      ...feature,
+      collections: Object.fromEntries(Object.entries(featureCollections(document)).map(([key, records]) => [key, cloneValue(records)])),
+      // Records contain the full JSON-safe payload only when a caller asks for
+      // it; the default remains bounded but still completely addressable.
+      ...(options.includeFeatureData ? { records: featureRecords(document).map(({ kind, ref, owner, record }) => ({ kind, ref, ...(owner ? { owner } : {}), ...cloneValue(record) })) } : {}),
+    };
+  }
+  return summary;
 }

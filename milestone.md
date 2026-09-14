@@ -1,28 +1,29 @@
 # Veyra — Current Milestone
 
-`plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This is the **only active implementation milestone**.
+`plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This is the **only active implementation milestone**. Earlier milestones remain in this file as historical contracts and verification context.
 
 Complete only the tasks below. Follow-up ideas belong in `suggestions`. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed after independent M8 acceptance
+## Progress snapshot — refreshed for the M9/M10 implementation slice
 
 These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. M8 is now counted because its full View Model/Data Binding capability has passed independent verification through the original implementation and correction passes C1–C5.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~96–97%** | Stable typed identity, universal semantics, canonical UI/AI control, ownership/dependency evidence, Components and the M8 data graph are independently verified. Remaining architecture work is mainly integration of later feature families into the same contracts. |
-| Core editor / engine foundation | **~95–96%** | Workspace, authoring, Components, interaction loop, data runtime, incremental caches and authored/evaluated boundaries are verified. |
-| Modern Rive editor/runtime parity | **~59–63%** | Components and View Models/Data Binding are now accepted; major remaining families include layered state machines, Layout, richer listeners/events/accessibility, drawing/effects/text/media, advanced rigging, scripting/shaders and production runtimes. |
-| Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No new interchange family was completed by M8. |
-| Full Veyra superset target | **~50–54%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
-| Remaining full-target work | **~46–50%** | Dominated by feature breadth, production runtime/export tooling and later editor/runtime systems rather than another identity/control-plane retrofit. |
+| AI-native identity / semantics / control architecture | **~98%** | Stable typed identity now covers scene, data, machine and feature-graph records; canonical commands, resolver, manifest, ownership and dependency evidence are shared by the UI and AI adapters. Remaining work is production hardening and browser-level acceptance. |
+| Core editor / engine foundation | **~97%** | Workspace, vector/rig authoring, Components, interaction loop, data runtime, layered machine runtime, player and authored/evaluated boundaries are implemented and regression-tested. |
+| Modern Rive editor/runtime parity | **~70–75%** | Layered machines, blend composition, lifecycle records, graph authoring, text/accessibility contracts and image nodes are present; production WASM parity, full layout execution, GPU effects, audio/video, and complete Rive interchange remain open. |
+| Lottie / dotLottie / Creator ecosystem parity | **~45–50%** | Dependency-free Lottie JSON import/export covers common shape, path, text, marker and image layers; dotLottie is represented as a JSON package contract. Binary `.lottie` ZIP packaging and full Creator feature parity remain open. |
+| Full Veyra superset target | **~62–68%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
+| Remaining full-target work | **~32–38%** | Dominated by vendor-runtime parity, production export/render backends, broader authoring families and real-browser/accessibility acceptance rather than another identity/control-plane retrofit. |
 
 ### Roadmap position
 
 - Implementation M0–M7: **VERIFIED**.
 - `plan.md` M3 / implementation M8 — View Models & Data Binding: **VERIFIED**.
 - M8-C1 through M8-C5 corrections: **VERIFIED as part of M8**; preserve their regression suites and contracts.
-- Current implementation work: **M9 — State Machine parity + visual graph editor**, below.
+- M9 layered machine/runtime work: **implemented slice; acceptance remains open**, below.
+- Current implementation work: **M10 — AI-readable feature graph, player and interchange**, below.
 - `plan.md` M5+ remains queued until M9 is independently accepted.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
@@ -396,4 +397,89 @@ Handoff
 - Existing M0–M8 regression proof:
 - Browser/headless acceptance boundary:
 - Compatibility/migration/size limitations:
+```
+
+---
+
+# MILESTONE M10 — AI-readable Feature Graph, Player + Interchange
+
+**Roadmap mapping:** extension of `plan.md` M4/M5 editor-runtime work
+**Status:** `AWAITING VERIFICATION`
+
+## Goal
+
+Make the editor source useful as a complete, inspectable 2D animation document:
+every new feature family has a stable typed identity, canonical command path,
+semantic/dependency evidence, deterministic preview/runtime behavior, and an
+embeddable player surface. The graph editor, AI/browser API, manifest and
+exporters all operate on the same normalized document.
+
+## Implemented slice
+
+- **Feature graph (`featureVersion: 8`):** rich text runs/modifiers, layout
+  containers/items, unified events/marker actions, accessibility metadata,
+  script and shader source contracts, render presets, and interchange audit
+  records. Nested records carry owner refs and participate in identity,
+  semantics, resolver queries, dependency links, summaries and manifests.
+- **Canonical feature commands:** `addFeature`, `updateFeature`,
+  `removeFeature`, and `reorderFeature` share Store validation, transactions,
+  provenance, undo/redo and the AI/browser command bus. Layered machine graph
+  commands include state movement, transition reconnect, blend-child,
+  condition, and lifecycle-action CRUD/reorder operations.
+- **Rendering/media bridge:** image nodes reference the asset registry and
+  render to SVG with embedded or external sources. Text records render as
+  accessible SVG text spans while remaining editable source data.
+- **Player/runtime:** `VeyraPlayer` provides deterministic seek/advance,
+  looping and ping-pong, machine inputs, lifecycle events, snapshots and
+  render callbacks. `registerVeyraPlayerElement()` supplies the browser
+  `<veyra-player>` custom element using the same evaluator as the editor.
+- **Graph editor:** the Logic panel now supports machine/layer selection,
+  layer create/rename/reorder/enable/remove, state and transition creation,
+  stable-ID selection, reconnecting endpoints, snap-to-grid drag, pan/zoom,
+  typed pseudo/animation/blend visuals, runtime readout and inspector edits.
+- **Lottie bridge:** dependency-free import/export covers common shape,
+  polygon/star/path, text, marker and image layers with parent links, transform
+  tracks, diagnostics and stable mapping refs. `exportDotLottie()` and
+  `importDotLottie()` exchange a JSON-safe package with manifest, animations,
+  images, fonts and Veyra extension metadata.
+
+## Verification evidence
+
+- `npm run check`: **55/55** source files pass syntax checks.
+- `npm test`: **59/59** repository suites pass, including the M10 feature,
+  player, graph and Lottie suite plus all M0–M9 regression suites.
+- Direct M10 acceptance: feature nested identity/undo, graph camera
+  non-mutation, state movement/reconnect, deterministic player stepping,
+  Lottie text/marker/image mapping, SVG text output and dotLottie round-trip.
+- `git diff --check`: clean before the implementation commit.
+
+## Acceptance boundary and known limitations
+
+This milestone is an implementation slice, not a claim of literal vendor
+parity with every Rive runtime/editor feature. Scripts and shaders are
+machine-readable authored contracts; they are not executed in the browser
+runtime. Layout, event and accessibility records are addressable and rendered
+where applicable, but do not yet constitute a full production layout/event
+engine. The dotLottie bridge is intentionally JSON-safe and dependency-free;
+it is not a binary ZIP writer. There is no `.riv` binary importer/exporter,
+production GPU/raster/video encoder, or complete Rive WASM feature surface in
+this change. Real-browser visual/usability acceptance remains a separate gate;
+the available CUA browser session could not be started because its request
+header policy rejected the local tab inventory.
+
+## M10 handoff
+
+```text
+Handoff
+- Status: AWAITING VERIFICATION
+- Implementation commit: pending final verification commit
+- Final clean main SHA / exact standard Tests run: pending push
+- Feature graph / nested stable identity proof: tests/veyra-m10-features.test.mjs
+- Canonical command + UI parity proof: src/veyra/commands.js, src/veyra/serviceRegistry.js, veyra.js
+- Player/custom-element proof: src/veyra/player.js + M10 suite
+- Graph editor proof: src/veyra/graphEditor.js + graph panel in veyra.html/veyra.js
+- Lottie/dotLottie proof: src/veyra/lottie.js + M10 suite
+- Regression proof: npm run check and npm test (counts above)
+- Browser/headless acceptance boundary: fake-DOM suite is green; real-browser visual acceptance remains open
+- Compatibility/size limitations: JSON dotLottie package only; no .riv binary or production encoder/runtime parity
 ```

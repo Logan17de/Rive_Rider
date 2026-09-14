@@ -710,6 +710,73 @@ button svg,
   *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
 
+/* M10 machine graph: a compact, keyboard-accessible view over the canonical
+   layered state-machine records. The panel stays deliberately lightweight so
+   the artboard and timeline remain the primary editing surfaces. */
+.stagePanel { grid-template-rows: auto auto minmax(0, 1fr) 34px 5px var(--timeline-height) minmax(220px, 31vh); }
+.stagePanel:has(.timelinePanel[data-collapsed='true']) { grid-template-rows: auto auto minmax(0, 1fr) 34px 5px 48px minmax(220px, 31vh); }
+.machineGraphPanel { min-height: 220px; max-height: 430px; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--ui-border); background: var(--ui-surface); }
+.machineGraphPanel[data-collapsed='true'] { min-height: 48px; max-height: 48px; }
+.machineGraphPanel[data-collapsed='true'] .machineGraphBody { display: none; }
+.machineGraphBar { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); background: var(--ui-surface-2); }
+.machineGraphTitle { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.machineGraphTitle h2 { margin: 0; color: var(--ui-text); font: 650 13px/1.2 'Fredoka', 'Segoe UI', sans-serif; }
+.machineGraphStatus { min-width: 0; overflow: hidden; color: var(--ui-control); font-size: 9px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.machineGraphControls { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 5px; overflow-x: auto; }
+.machineGraphControls select { max-width: 150px; height: 30px; padding: 0 24px 0 7px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--ui-surface); color: var(--ui-text); font: 650 10px/1.2 'Nunito', sans-serif; }
+.graphButton { height: 30px; padding: 0 8px; border: 1px solid var(--ui-border-strong); border-radius: 6px; background: var(--ui-surface); color: var(--ui-muted); font: 750 9px/1 'Nunito', sans-serif; white-space: nowrap; }
+.graphButton:hover:not(:disabled) { border-color: var(--ui-control); color: var(--ui-control); background: color-mix(in srgb, var(--ui-control) 9%, var(--ui-surface)); }
+.graphButton:disabled { opacity: .42; cursor: not-allowed; }
+.graphDanger { color: var(--ui-danger, #fb7185); }
+.machineGraphBody { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 210px; }
+.machineGraphCanvas { min-width: 0; min-height: 170px; overflow: auto; outline: none; background: linear-gradient(135deg, color-mix(in srgb, var(--ui-workspace) 90%, transparent), var(--ui-surface)); background-image: radial-gradient(circle, color-mix(in srgb, var(--ui-border-strong) 28%, transparent) 1px, transparent 1px); background-size: 16px 16px; touch-action: none; }
+.machineGraphCanvas:focus-visible { box-shadow: inset 0 0 0 2px var(--ui-accent); }
+.machineGraphCanvas > svg { display: block; width: 100%; min-width: 680px; min-height: 190px; height: 100%; }
+.veyra-machine-graph .veyra-graph-state { cursor: grab; }
+.veyra-machine-graph .veyra-graph-state:active { cursor: grabbing; }
+.veyra-machine-graph .veyra-graph-state.is-selected rect:first-child { stroke-width: 2.5; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ui-accent) 35%, transparent)); }
+.veyra-machine-graph .veyra-graph-transition { fill: none; stroke: var(--ui-border-strong); stroke-width: 1.5; pointer-events: stroke; cursor: pointer; }
+.veyra-machine-graph .veyra-graph-transition.is-selected { stroke: var(--ui-control); stroke-width: 2.5; }
+.veyra-graph-title { fill: var(--ui-text); font: 700 12px 'Nunito', sans-serif; pointer-events: none; }
+.veyra-graph-detail { fill: var(--ui-muted); font: 600 9px 'Nunito', sans-serif; pointer-events: none; }
+.machineGraphInspector { min-width: 0; overflow: auto; padding: 10px; border-left: 1px solid var(--ui-border); background: color-mix(in srgb, var(--ui-surface-2) 70%, var(--ui-surface)); color: var(--ui-muted); font-size: 10px; }
+.machineDebugHeading { margin-bottom: 5px; color: var(--ui-quiet); font-size: 9px; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+.machineRuntimeReadout { display: block; margin-bottom: 10px; color: var(--ui-control); font: 750 11px/1.35 'Nunito', sans-serif; }
+.machineOwnershipReadout { display: grid; gap: 7px; line-height: 1.35; }
+.machineOwnershipReadout strong { color: var(--ui-text); font-size: 10px; }
+.machineOwnershipReadout code { overflow-wrap: anywhere; color: var(--ui-quiet); font: 600 9px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.graphInspectorInput { width: 100%; height: 28px; padding: 0 7px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--ui-surface); color: var(--ui-text); font: 600 10px/1 'Nunito', sans-serif; }
+.graphInspectorEndpoints { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.graphInspectorEndpoints label { display: grid; gap: 3px; color: var(--ui-quiet); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.graphInspectorCheck { display: flex; align-items: center; gap: 6px; color: var(--ui-muted); }
+.graphInspectorCheck input { accent-color: var(--ui-accent); }
+.graphInspectorActions { display: flex; gap: 5px; }
+.graphInspectorSection { display: grid; gap: 5px; padding-top: 3px; border-top: 1px solid var(--ui-border); }
+.graphInspectorSectionTitle { color: var(--ui-quiet); font-size: 9px; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+.graphInspectorList { display: grid; gap: 4px; }
+.graphInspectorRow { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 4px 0; color: var(--ui-muted); }
+.graphInspectorRow > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graphInspectorRowActions { flex: none; display: inline-flex; align-items: center; gap: 3px; }
+.graphInspectorRowActions .graphInspectorButton { min-width: 24px; min-height: 24px; padding: 0 4px; }
+.graphInspectorMiniInput { width: 62px; height: 24px; padding: 0 4px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--ui-surface); color: var(--ui-text); font: 600 9px/1 ui-monospace, monospace; }
+.graphInspectorButton { min-height: 28px; padding: 0 7px; border: 1px solid var(--ui-border-strong); border-radius: 6px; background: var(--ui-surface); color: var(--ui-muted); font-size: 9px; font-weight: 800; }
+.graphInspectorButton:hover { border-color: var(--ui-control); color: var(--ui-control); }
+.graphInspectorNote { color: var(--ui-quiet); }
+.machineGraphEmpty { min-height: 180px; display: grid; place-content: center; gap: 7px; padding: 18px; color: var(--ui-quiet); text-align: center; }
+.machineGraphEmpty strong { color: var(--ui-text); font: 650 13px 'Fredoka', 'Segoe UI', sans-serif; }
+.machineGraphEmpty code { color: var(--ui-control); font-size: 9px; }
+.formatGlyph { font: 800 10px/1 'Nunito', sans-serif; letter-spacing: -.08em; }
+
+@media (max-width: 900px) {
+  .stagePanel { grid-template-rows: auto auto minmax(340px, 1fr) 34px 48px minmax(220px, 300px) minmax(220px, 300px); }
+  .stagePanel:has(.timelinePanel[data-collapsed='false']) { grid-template-rows: auto auto minmax(340px, 1fr) 34px 48px minmax(220px, 300px) minmax(220px, 300px); }
+  .machineGraphBody { grid-template-columns: minmax(0, 1fr); }
+  .machineGraphInspector { display: none; }
+  .machineGraphBar { align-items: flex-start; flex-direction: column; }
+  .machineGraphControls { width: 100%; justify-content: flex-start; }
+  .machineGraphControls select { max-width: 130px; }
+}
+
 
 /* Editor appearance controls: neutral graphite workspace with semantic accent themes. */
 :root {
@@ -879,3 +946,13 @@ html { transition: background-color 180ms ease, color 180ms ease; }
 #cleanPreview.isActive { border-color: var(--ui-accent); color: var(--ui-accent-soft); background: color-mix(in srgb, var(--ui-accent) 14%, transparent); }
 .m7DoneButton { border-color: color-mix(in srgb, var(--ui-accent) 48%, var(--ui-border)); }
 .treeRow.isMultiSelected .treeSelect { box-shadow: inset 3px 0 0 var(--ui-accent); background: color-mix(in srgb, var(--ui-accent) 11%, var(--ui-surface-2)); }
+
+/* M10 graph layout wins over the later workspace token blocks above. Keep the
+   graph as an explicit stage row so it cannot collapse into an implicit grid
+   track when the timeline height or theme changes. */
+.stagePanel { grid-template-rows: auto auto minmax(0, 1fr) 34px 5px var(--timeline-height) minmax(220px, 31vh); }
+.stagePanel:has(.timelinePanel[data-collapsed='true']) { grid-template-rows: auto auto minmax(0, 1fr) 34px 5px 48px minmax(220px, 31vh); }
+@media (max-width: 900px) {
+  .stagePanel { grid-template-rows: auto auto minmax(340px, 1fr) 34px 48px minmax(220px, 300px) minmax(220px, 300px); }
+  .stagePanel:has(.timelinePanel[data-collapsed='true']) { grid-template-rows: auto auto minmax(340px, 1fr) 34px 48px 48px minmax(220px, 300px); }
+}

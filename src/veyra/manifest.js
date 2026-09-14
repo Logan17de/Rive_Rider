@@ -21,11 +21,19 @@ import {
   createTrackRef,
   createTimelineRef,
 } from './references.js';
-import { VEYRA_COMMAND_ACTIONS, VEYRA_COMMAND_PROVENANCE_AUDIT, VEYRA_COMMAND_TABLE } from './commands.js';
+import {
+  VEYRA_COMMAND_ACTIONS,
+  VEYRA_COMMAND_PROVENANCE_AUDIT,
+  VEYRA_COMMAND_TABLE,
+  VEYRA_EXTENDED_COMMAND_ACTIONS,
+  VEYRA_EXTENDED_COMMAND_TABLE,
+  VEYRA_ALL_COMMAND_TABLE,
+} from './commands.js';
 import { createSceneSummary } from './summary.js';
 import { VEYRA_RESOLVER_CAPABILITIES, VEYRA_RESOLVER_SCORING } from './resolver.js';
 import { VEYRA_BROWSER_MUTATION_COMPATIBILITY, VEYRA_SERVICE_DEFINITIONS, VEYRA_UI_MUTATION_PARITY_AUDIT } from './serviceRegistry.js';
 import { projectGraphCapabilities } from './projectGraph.js';
+import { featureGraphSummary, featureRecords } from './featureGraph.js';
 
 export const VEYRA_MANIFEST_FORMAT = 'veyra-project-manifest';
 export const VEYRA_MANIFEST_VERSION = 1;
@@ -75,6 +83,14 @@ const BASE_PROJECT_CAPABILITIES = Object.freeze([
   'data.runtime-isolated',
   'data.incremental-dirty-evaluation',
   'data.binding-capability-validation',
+  'animation.blend-states',
+  'animation.additive-blend',
+  'animation.lifecycle-actions',
+  'animation.transition-exit-time',
+  'animation.transition-interruption',
+  'animation.randomize-exit-seeded',
+  'ai.machine-graph-addressable',
+  'ai.feature-graph-addressable',
 ]);
 
 function projectCapabilities(document) {
@@ -88,6 +104,8 @@ function projectCapabilities(document) {
   if (document.timelines.length) capabilities.push('animation.timelines');
   if ((document.stateMachines || []).length) capabilities.push('animation.state-machines');
   if ((document.listeners || []).length) capabilities.push('interaction.listeners');
+  const feature = featureGraphSummary(document);
+  capabilities.push(...feature.capabilities);
   return capabilities;
 }
 
@@ -276,8 +294,15 @@ function authoringContract() {
       identity: 'stable machineLayer ref; display name and order are advisory',
     },
     machineState: {
+      // `timeline` remains the historical required authoring field for the
+      // command/manifest contract. Pseudo and blend states intentionally
+      // omit it at runtime; `type` is now the discriminator for those
+      // families and is advertised separately so old consumers stay stable.
       required: ['id', 'timeline'],
+      discriminator: 'type',
       type: { enum: [...VEYRA_MACHINE_STATE_TYPES] },
+      blendChildren: 'stable machineBlendChild refs with deterministic thresholds/weights and zero-weight sleeping',
+      lifecycleActions: 'state-start/state-end actions execute once per actual lifecycle event',
     },
     machineCondition: {
       required: ['id', 'input', 'op'],
@@ -286,6 +311,12 @@ function authoringContract() {
       allowedOperatorsByInputType: machineConditionRules(),
       valueRequiredFor: VEYRA_CONDITION_OPS.filter((op) => op !== 'fired' && op !== '!fired'),
       triggerOperators: ['fired', '!fired'],
+    },
+    machineAction: {
+      required: ['id', 'type', 'phase'],
+      type: { enum: ['data-set', 'data-fire', 'input-set', 'input-fire', 'emit', 'timeline'] },
+      phases: ['state-start', 'state-end', 'transition-start', 'transition-end'],
+      mutation: 'runtime-only; authored graph is never mutated by an action',
     },
     listener: {
       required: ['id', 'target', 'event', 'action'],
@@ -307,6 +338,13 @@ function authoringContract() {
           hostAvailability: 'available',
         },
       },
+    },
+    featureGraph: {
+      version: 8,
+      collections: ['texts', 'layouts', 'events', 'accessibility', 'scripts', 'shaders', 'renderPresets', 'interchangeAssets'],
+      nested: ['textRun', 'textModifier', 'layoutItem', 'eventAction'],
+      identity: 'stable typed refs; names and labels are advisory; nested records retain owner refs',
+      capabilities: ['readable', 'command-addressable', 'undoable', 'name-independent'],
     },
   };
 }
@@ -378,15 +416,20 @@ function generatedCommandAction(commandName, command) {
 
 // The catalog is generated from the canonical command registry. Non-command
 // runtime/read affordances are explicit above because they have no Store method.
-function projectActions() {
+function projectActions({ includeExtended = true, onlyExtended = false } = {}) {
+  const commandEntries = onlyExtended
+    ? Object.entries(VEYRA_EXTENDED_COMMAND_TABLE)
+    : includeExtended
+      ? Object.entries(VEYRA_ALL_COMMAND_TABLE)
+      : Object.entries(VEYRA_COMMAND_TABLE);
   const actions = [
-    ...Object.entries(VEYRA_COMMAND_TABLE).map(([commandName, command]) => {
+    ...commandEntries.map(([commandName, command]) => {
       if (!command.manifestId || !command.name || !command.description || !command.targetKind) {
         throw new TypeError(`Command ${commandName} is missing manifest metadata.`);
       }
       return generatedCommandAction(commandName, command);
     }),
-    ...NON_COMMAND_ACTIONS.map((item) => cloneValue(item)),
+    ...(onlyExtended ? [] : NON_COMMAND_ACTIONS.map((item) => cloneValue(item))),
   ].sort((left, right) => left.ref.id.localeCompare(right.ref.id));
   const ids = new Set();
   for (const item of actions) {
@@ -421,6 +464,9 @@ export function createProjectManifest(document, options = {}) {
     includeAssetData: Boolean(options.includeAssetData),
   };
   const scene = createSceneSummary(document, { includeGeometry: manifestOptions.includeGeometry });
+  const extendedActions = projectActions({ onlyExtended: true });
+  const actions = projectActions({ includeExtended: Boolean(options.includeExtendedActions) });
+  const feature = featureGraphSummary(document);
   return {
     format: VEYRA_MANIFEST_FORMAT,
     version: VEYRA_MANIFEST_VERSION,
@@ -430,6 +476,7 @@ export function createProjectManifest(document, options = {}) {
       name: document.name,
       format: document.format,
       version: document.version,
+      ...(document.featureVersion ? { featureVersion: document.featureVersion } : {}),
       artboard: cloneValue(document.artboard),
       artboards: document.artboards.map((artboard) => ({ ref: { kind: 'artboard', id: artboard.id }, ...cloneValue(artboard) })),
       components: document.components.map((component) => ({ ref: { kind: 'component', id: component.id }, ...cloneValue(component), displayNameAdvisory: true })),
@@ -450,6 +497,7 @@ export function createProjectManifest(document, options = {}) {
         stateMachines: (document.stateMachines || []).length,
         machineLayers: (document.stateMachines || []).reduce((total, machine) => total + machine.layers.length, 0),
         listeners: (document.listeners || []).length,
+        ...(feature.records.length ? { features: feature.records.length } : {}),
       },
     },
     capabilities: projectCapabilities(document),
@@ -465,8 +513,14 @@ export function createProjectManifest(document, options = {}) {
     assets: document.assets.map((asset) => summarizeAsset(asset, manifestOptions)),
     timelines: document.timelines.map((timeline) => summarizeTimeline(timeline, manifestOptions)),
     stateMachines: summarizeStateMachines(scene),
+    ...(feature.records.length ? { features: { ...feature, records: featureRecords(document).map(({ kind, ref, owner, record }) => ({ kind, ref, ...(owner ? { owner } : {}), ...cloneValue(record) })) } } : {}),
     scene,
-    actions: projectActions(),
+    actions,
+    // New machine CRUD actions are additive. They live in this explicit
+    // extension catalog by default so clients that pinned the original action
+    // count remain compatible; pass includeExtendedActions for a single full
+    // catalog used by the editor/AI bridge.
+    extendedActions,
   };
 }
 

@@ -295,6 +295,8 @@ export function entityByReference(document, reference) {
     case 'machineInput':
     case 'machineTransition':
     case 'machineCondition':
+    case 'machineBlendChild':
+    case 'machineAction':
       for (const machine of document.stateMachines || []) {
         if (ref.kind === 'machineLayer') {
           const layer = find(machine.layers || []);
@@ -305,6 +307,11 @@ export function entityByReference(document, reference) {
           machineState: (machine.layers || []).flatMap((layer) => layer.states || []),
           machineInput: machine.inputs,
           machineTransition: (machine.layers || []).flatMap((layer) => layer.transitions || []),
+          machineBlendChild: (machine.layers || []).flatMap((layer) => (layer.states || []).flatMap((state) => state.children || [])),
+          machineAction: [
+            ...(machine.layers || []).flatMap((layer) => (layer.states || []).flatMap((state) => state.actions || [])),
+            ...(machine.layers || []).flatMap((layer) => (layer.transitions || []).flatMap((transition) => transition.actions || [])),
+          ],
         }[ref.kind];
         if (collection) {
           const item = find(collection);
@@ -318,6 +325,26 @@ export function entityByReference(document, reference) {
       }
       return null;
     case 'listener': return find(document.listeners);
+    case 'text': return find(document.texts);
+    case 'textRun':
+      for (const text of document.texts || []) { const run = find(text.runs); if (run) return run; }
+      return null;
+    case 'textModifier':
+      for (const text of document.texts || []) { const modifier = find(text.modifiers); if (modifier) return modifier; }
+      return null;
+    case 'layout': return find(document.layouts);
+    case 'layoutItem':
+      for (const layout of document.layouts || []) { const item = find(layout.items); if (item) return item; }
+      return null;
+    case 'event': return find(document.events);
+    case 'eventAction':
+      for (const event of document.events || []) { const action = find(event.actions); if (action) return action; }
+      return null;
+    case 'accessibility': return find(document.accessibility);
+    case 'script': return find(document.scripts);
+    case 'shader': return find(document.shaders);
+    case 'renderPreset': return find(document.renderPresets);
+    case 'interchangeAsset': return find(document.interchangeAssets);
     case 'semanticRecord': return find(document.semantics);
     default: return null;
   }
@@ -424,14 +451,37 @@ export function allEntityReferenceKeys(document) {
     for (const input of machine.inputs || []) add('machineInput', input.id);
     for (const layer of machine.layers || []) {
       add('machineLayer', layer.id);
-      for (const state of layer.states || []) add('machineState', state.id);
+      for (const state of layer.states || []) {
+        add('machineState', state.id);
+        for (const child of state.children || []) add('machineBlendChild', child.id);
+        for (const action of state.actions || []) add('machineAction', action.id);
+      }
       for (const transition of layer.transitions || []) {
         add('machineTransition', transition.id);
         for (const condition of transition.conditions || []) add('machineCondition', condition.id);
+        for (const action of transition.actions || []) add('machineAction', action.id);
       }
     }
   }
   for (const listener of document.listeners || []) add('listener', listener.id);
+  for (const text of document.texts || []) {
+    add('text', text.id);
+    for (const run of text.runs || []) add('textRun', run.id);
+    for (const modifier of text.modifiers || []) add('textModifier', modifier.id);
+  }
+  for (const layout of document.layouts || []) {
+    add('layout', layout.id);
+    for (const item of layout.items || []) add('layoutItem', item.id);
+  }
+  for (const event of document.events || []) {
+    add('event', event.id);
+    for (const action of event.actions || []) add('eventAction', action.id);
+  }
+  for (const item of document.accessibility || []) add('accessibility', item.id);
+  for (const item of document.scripts || []) add('script', item.id);
+  for (const item of document.shaders || []) add('shader', item.id);
+  for (const item of document.renderPresets || []) add('renderPreset', item.id);
+  for (const item of document.interchangeAssets || []) add('interchangeAsset', item.id);
   for (const semantic of document.semantics || []) add('semanticRecord', semantic.id);
   return keys;
 }

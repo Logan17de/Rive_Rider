@@ -34,7 +34,7 @@ import {
 } from './src/veyra/contracts.js';
 import { evaluateDocument } from './src/veyra/evaluation.js';
 import { AnimationPlayback, evaluateTimeline, normalizeFrame } from './src/veyra/animation.js';
-import { parseVeyra, downloadSvg, downloadVeyra, serializeVeyra } from './src/veyra/io.js';
+import { parseVeyra, downloadBlob, downloadSvg, downloadVeyra, safeFilename, serializeVeyra } from './src/veyra/io.js';
 import { isAnimatableProperty, nodePropertyAddress, readProperty, rigPropertyAddress, writeProperty } from './src/veyra/properties.js';
 import {
   createArtboardRef,
@@ -61,6 +61,10 @@ import { createShellInteractionBridge, createPreviewPointerHandlers } from './sr
 import { createInteractionDispatcher } from './src/veyra/interactionTransport.js';
 import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
 import { createComponentRuntimeRegistry, createComponentRuntimeScope } from './src/veyra/components.js';
+import { createVeyraPlayer } from './src/veyra/player.js';
+import { createGraphEditorState, renderMachineGraphSvg } from './src/veyra/graphEditor.js';
+import { exportDotLottie, exportLottie, importDotLottie, importLottie } from './src/veyra/lottie.js';
+import { featureCollections, featureGraphSummary, featureRecords } from './src/veyra/featureGraph.js';
 import {
   VEYRA_DATA_PROPERTY_TYPES, VEYRA_CONVERTER_TYPES, createVeyraDataRuntime,
   viewModelById as dataViewModelById, dataPropertyById as graphDataPropertyById,
@@ -162,6 +166,28 @@ const finishPathButton = $('finishPath');
 const cleanPreviewButton = $('cleanPreview');
 const coordinateReadoutElement = $('coordinateReadout');
 const marqueeBox = $('marqueeBox');
+const machineGraphPanel = $('machineGraphPanel');
+const machineGraphBody = $('machineGraphBody');
+const machineGraphCanvas = $('machineGraphCanvas');
+const machineSelect = $('machineSelect');
+const machineLayerSelect = $('machineLayerSelect');
+const machineAddMachine = $('machineAddMachine');
+const machineAddLayer = $('machineAddLayer');
+const machineRenameLayer = $('machineRenameLayer');
+const machineLayerUp = $('machineLayerUp');
+const machineLayerDown = $('machineLayerDown');
+const machineLayerToggle = $('machineLayerToggle');
+const machineRemoveLayer = $('machineRemoveLayer');
+const machineAddState = $('machineAddState');
+const machineAddTransition = $('machineAddTransition');
+const machineGraphToggle = $('machineGraphToggle');
+const machineGraphStatus = $('machineGraphStatus');
+const machineRuntimeReadout = $('machineRuntimeReadout');
+const machineOwnershipReadout = $('machineOwnershipReadout');
+const importLottieButton = $('importLottie');
+const exportLottieButton = $('exportLottie');
+const exportDotLottieButton = $('exportDotLottie');
+const lottieFile = $('lottieFile');
 
 function applyTheme(theme) {
   const nextTheme = normalizeTheme(theme);
@@ -235,6 +261,10 @@ if (restored) savedRevision = -1;
 const componentRuntimeRegistry = createComponentRuntimeRegistry(() => store.document);
 const dataRuntime = createVeyraDataRuntime(() => store.document);
 let currentEvaluationLayers = {};
+let graphEditorState = createGraphEditorState();
+let graphMachineId = null;
+let graphLayerId = null;
+let graphDrag = null;
 
 function activeArtboard() {
   return store.document.artboards.find((item) => item.id === activeArtboardId) || store.document.artboards[0];
@@ -2423,6 +2453,434 @@ function recordKeyframe() {
   recordKeyframeFor(address);
 }
 
+// The graph panel is a view over the same normalized machine records used by
+// MachineRuntime and the command bus. It deliberately keeps a cloned graph
+// snapshot while dragging so a pointer gesture cannot mutate authored state
+// outside a transactional command.
+function graphMachine() {
+  return machineById(store.document, graphMachineId)
+    || store.document.stateMachines?.[0]
+    || null;
+}
+
+function graphLayer(machine = graphMachine()) {
+  if (!machine) return null;
+  return machine.layers?.find((layer) => layer.id === graphLayerId)
+    || machine.layers?.[0]
+    || null;
+}
+
+function syncGraphSnapshot() {
+  const machine = graphMachine();
+  if (!machine) {
+    graphMachineId = null;
+    graphLayerId = null;
+    graphEditorState.setMachine(null);
+    return { machine: null, layer: null };
+  }
+  graphMachineId = machine.id;
+  const layer = graphLayer(machine);
+  graphLayerId = layer?.id || null;
+  const selected = graphEditorState.selected;
+  const selectedStateIds = graphEditorState.selection.map((ref) => ref.id);
+  graphEditorState.setMachine(cloneValue(machine), graphLayerId);
+  const validStateIds = selectedStateIds.filter((id) => layer?.states.some((state) => state.id === id));
+  validStateIds.forEach((id, index) => graphEditorState.select(id, index > 0));
+  if (!validStateIds.length && selected?.kind === 'machineState' && layer?.states.some((state) => state.id === selected.id)) graphEditorState.select(selected.id);
+  if (selected?.kind === 'machineTransition' && layer?.transitions.some((transition) => transition.id === selected.id)) graphEditorState.selectTransition(selected.id);
+  return { machine, layer };
+}
+
+function graphPointerPoint(event) {
+  const svg = machineGraphCanvas?.querySelector('svg');
+  const rect = svg?.getBoundingClientRect?.() || machineGraphCanvas?.getBoundingClientRect?.();
+  if (!rect || !rect.width || !rect.height) return { x: event.offsetX || 0, y: event.offsetY || 0 };
+  const viewBox = svg?.viewBox?.baseVal;
+  const width = Number(viewBox?.width) || 1000;
+  const height = Number(viewBox?.height) || 600;
+  const view = {
+    x: (event.clientX - rect.left) * width / rect.width,
+    y: (event.clientY - rect.top) * height / rect.height,
+  };
+  return {
+    x: (view.x - graphEditorState.pan.x) / graphEditorState.zoom,
+    y: (view.y - graphEditorState.pan.y) / graphEditorState.zoom,
+  };
+}
+
+function renderGraphSvgOnly() {
+  if (!machineGraphCanvas) return;
+  const machine = graphMachine();
+  if (!machine) {
+    machineGraphCanvas.replaceChildren();
+    return;
+  }
+  machineGraphCanvas.innerHTML = renderMachineGraphSvg(graphEditorState, { width: 1000, height: 420 });
+}
+
+function graphInspectorButton(label, onClick, className = 'graphInspectorButton') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function graphInspectorSection(title) {
+  const section = document.createElement('section');
+  section.className = 'graphInspectorSection';
+  const heading = document.createElement('div');
+  heading.className = 'graphInspectorSectionTitle';
+  heading.textContent = title;
+  const body = document.createElement('div');
+  body.className = 'graphInspectorList';
+  section.append(heading, body);
+  return { section, body };
+}
+
+function appendMachineActionInspector(container, machine, ownerKind, owner) {
+  if (!owner || ['entry', 'exit', 'any'].includes(owner.type)) return;
+  const { section, body } = graphInspectorSection('Lifecycle actions');
+  const actions = owner.actions || [];
+  actions.forEach((action, index) => {
+    const row = document.createElement('div'); row.className = 'graphInspectorRow';
+    const detail = document.createElement('span'); detail.textContent = `${action.phase} · ${action.type}`;
+    const controls = document.createElement('span'); controls.className = 'graphInspectorRowActions';
+    if (index > 0) controls.appendChild(graphInspectorButton('↑', () => projectCommand('reorderMachineAction', { machineId: machine.id, ownerKind, ownerId: owner.id, actionId: action.id, index: index - 1 }, `Move action ${action.id}`)));
+    if (index < actions.length - 1) controls.appendChild(graphInspectorButton('↓', () => projectCommand('reorderMachineAction', { machineId: machine.id, ownerKind, ownerId: owner.id, actionId: action.id, index: index + 1 }, `Move action ${action.id}`)));
+    controls.appendChild(graphInspectorButton('×', () => projectCommand('removeMachineAction', { machineId: machine.id, ownerKind, ownerId: owner.id, actionId: action.id }, `Remove action ${action.id}`), 'graphInspectorButton graphDanger'));
+    row.append(detail, controls); body.appendChild(row);
+  });
+  body.appendChild(graphInspectorButton('+ Emit action', () => projectCommand('addMachineAction', {
+    machineId: machine.id, ownerKind, ownerId: owner.id,
+    overrides: { type: 'emit', phase: ownerKind === 'state' ? 'state-start' : 'transition-start', event: `${owner.id}:event`, payload: null },
+  }, `Add ${ownerKind} emit action`)));
+  container.appendChild(section);
+}
+
+function appendBlendChildInspector(container, machine, layer, state) {
+  if (!['blend1d', 'directBlend', 'additiveBlend'].includes(state.type)) return;
+  const { section, body } = graphInspectorSection(`${state.type === 'blend1d' ? '1D blend thresholds' : 'Blend children'}`);
+  const children = state.children || [];
+  children.forEach((child, index) => {
+    const row = document.createElement('div'); row.className = 'graphInspectorRow graphInspectorBlendRow';
+    const label = document.createElement('span'); label.textContent = `${index + 1} · ${child.timeline?.id || child.timelineId || 'timeline'}`;
+    const controls = document.createElement('span'); controls.className = 'graphInspectorRowActions';
+    if (state.type === 'blend1d') {
+      const threshold = document.createElement('input'); threshold.className = 'graphInspectorMiniInput'; threshold.type = 'number'; threshold.step = '0.01'; threshold.value = child.threshold ?? 0; threshold.setAttribute('aria-label', `Threshold ${index + 1}`);
+      threshold.addEventListener('change', () => projectCommand('updateMachineBlendChild', { machineId: machine.id, stateId: state.id, childId: child.id, changes: { threshold: Number(threshold.value) } }, `Set blend threshold ${child.id}`));
+      controls.appendChild(threshold);
+    }
+    if (index > 0) controls.appendChild(graphInspectorButton('↑', () => projectCommand('reorderMachineBlendChild', { machineId: machine.id, stateId: state.id, childId: child.id, index: index - 1 }, `Move blend child ${child.id}`)));
+    if (index < children.length - 1) controls.appendChild(graphInspectorButton('↓', () => projectCommand('reorderMachineBlendChild', { machineId: machine.id, stateId: state.id, childId: child.id, index: index + 1 }, `Move blend child ${child.id}`)));
+    controls.appendChild(graphInspectorButton('×', () => projectCommand('removeMachineBlendChild', { machineId: machine.id, stateId: state.id, childId: child.id }, `Remove blend child ${child.id}`), 'graphInspectorButton graphDanger'));
+    row.append(label, controls); body.appendChild(row);
+  });
+  const add = graphInspectorButton('+ Child', () => {
+    if (!activeTimelineId) return showToast('Create a timeline before adding a blend child', true);
+    const overrides = { timeline: activeTimelineId, speed: 1 };
+    if (state.type === 'blend1d') overrides.threshold = Number(children.at(-1)?.threshold ?? -1) + 1;
+    else {
+      const input = machine.inputs.find((candidate) => candidate.type === 'number');
+      if (!input) return showToast('Blend children need a numeric machine input', true);
+      overrides.input = { kind: 'machineInput', id: input.id };
+    }
+    projectCommand('addMachineBlendChild', { machineId: machine.id, stateId: state.id, overrides }, `Add blend child ${state.id}`);
+  });
+  body.appendChild(add);
+  container.appendChild(section);
+}
+
+function appendConditionInspector(container, machine, transition) {
+  const { section, body } = graphInspectorSection('Transition conditions');
+  const conditions = transition.conditions || [];
+  conditions.forEach((condition, index) => {
+    const row = document.createElement('div'); row.className = 'graphInspectorRow';
+    const input = condition.input?.id || condition.source?.path?.at(-1)?.id || 'data source';
+    const detail = document.createElement('span'); detail.textContent = `${input} ${condition.op}${condition.value === undefined ? '' : ` ${String(condition.value)}`}`;
+    const controls = document.createElement('span'); controls.className = 'graphInspectorRowActions';
+    if (index > 0) controls.appendChild(graphInspectorButton('↑', () => projectCommand('reorderMachineCondition', { machineId: machine.id, transitionId: transition.id, conditionId: condition.id, index: index - 1 }, `Move condition ${condition.id}`)));
+    if (index < conditions.length - 1) controls.appendChild(graphInspectorButton('↓', () => projectCommand('reorderMachineCondition', { machineId: machine.id, transitionId: transition.id, conditionId: condition.id, index: index + 1 }, `Move condition ${condition.id}`)));
+    controls.appendChild(graphInspectorButton('×', () => projectCommand('removeMachineCondition', { machineId: machine.id, transitionId: transition.id, conditionId: condition.id }, `Remove condition ${condition.id}`), 'graphInspectorButton graphDanger'));
+    row.append(detail, controls); body.appendChild(row);
+  });
+  const numeric = machine.inputs.find((candidate) => candidate.type === 'number');
+  const trigger = machine.inputs.find((candidate) => candidate.type === 'trigger');
+  const add = graphInspectorButton(numeric || trigger ? '+ Condition' : '+ Condition (add input first)', () => {
+    const input = numeric || trigger;
+    if (!input) return;
+    const overrides = input.type === 'trigger'
+      ? { input: { kind: 'machineInput', id: input.id }, op: 'fired' }
+      : { input: { kind: 'machineInput', id: input.id }, op: '>', value: 0 };
+    projectCommand('addMachineCondition', { machineId: machine.id, transitionId: transition.id, overrides }, `Add condition ${transition.id}`);
+  });
+  add.disabled = !numeric && !trigger;
+  body.appendChild(add);
+  container.appendChild(section);
+}
+
+function renderGraphInspector(machine, layer, evaluation) {
+  if (!machineRuntimeReadout || !machineOwnershipReadout) return;
+  if (!machine) {
+    machineRuntimeReadout.textContent = 'No state machine yet';
+    machineOwnershipReadout.textContent = 'Create a machine or import a Lottie/dotLottie file to start authoring logic.';
+    return;
+  }
+  const runtime = machineInteractionBridge.runtimeFor(machine.id);
+  const live = evaluation || runtime?.evaluate?.();
+  const liveLayer = live?.layers?.find((candidate) => candidate.layer?.id === layer?.id || candidate.layerId === layer?.id);
+  const liveState = liveLayer?.stateName || live?.stateName || 'Idle';
+  const stateTime = Number(liveLayer?.stateTime ?? live?.stateTime ?? 0);
+  const liveTransition = liveLayer?.transition || live?.transition;
+  machineRuntimeReadout.textContent = `${liveState} · ${stateTime.toFixed(2)}s${liveTransition ? ` · → ${liveTransition.toId || liveTransition.to || 'transition'}` : ''}`;
+  machineOwnershipReadout.replaceChildren();
+
+  const selected = graphEditorState.selected;
+  if (!selected) {
+    const note = document.createElement('div');
+    note.className = 'graphInspectorNote';
+    note.textContent = 'Select a state or transition to inspect its stable identity and edit metadata.';
+    machineOwnershipReadout.appendChild(note);
+    const layerHeading = document.createElement('strong');
+    layerHeading.textContent = `${layer.name} · ${layer.enabled === false ? 'disabled' : 'enabled'} · weight ${Number(layer.weight ?? 1).toFixed(2)}`;
+    machineOwnershipReadout.appendChild(layerHeading);
+    return;
+  }
+
+  if (selected.kind === 'machineState') {
+    const state = layer.states.find((candidate) => candidate.id === selected.id);
+    if (!state) return;
+    const heading = document.createElement('strong');
+    heading.textContent = `${state.name} · ${state.type}`;
+    machineOwnershipReadout.appendChild(heading);
+    const id = document.createElement('code');
+    id.textContent = `machineState:${state.id}`;
+    machineOwnershipReadout.appendChild(id);
+    const name = document.createElement('input');
+    name.className = 'graphInspectorInput';
+    name.value = state.name;
+    name.setAttribute('aria-label', 'State name');
+    name.addEventListener('change', () => projectCommand('updateMachineState', { machineId: machine.id, stateId: state.id, changes: { name: name.value } }, `Rename state ${state.id}`));
+    machineOwnershipReadout.appendChild(name);
+    const actions = document.createElement('div');
+    actions.className = 'graphInspectorActions';
+    actions.appendChild(graphInspectorButton('Delete state', () => {
+      if (confirm(`Delete state “${state.name}”?`)) projectCommand('removeMachineState', { machineId: machine.id, stateId: state.id }, `Delete state ${state.name}`);
+    }, 'graphInspectorButton graphDanger'));
+    machineOwnershipReadout.appendChild(actions);
+    appendBlendChildInspector(machineOwnershipReadout, machine, layer, state);
+    appendMachineActionInspector(machineOwnershipReadout, machine, 'state', state);
+    return;
+  }
+
+  const transition = layer.transitions.find((candidate) => candidate.id === selected.id);
+  if (!transition) return;
+  const from = layer.states.find((state) => state.id === transition.from?.id)?.name || transition.from?.id;
+  const to = layer.states.find((state) => state.id === transition.to?.id)?.name || transition.to?.id;
+  const heading = document.createElement('strong');
+  heading.textContent = `${from} → ${to}`;
+  machineOwnershipReadout.appendChild(heading);
+  const id = document.createElement('code');
+  id.textContent = `machineTransition:${transition.id}`;
+  machineOwnershipReadout.appendChild(id);
+  const endpoints = document.createElement('div');
+  endpoints.className = 'graphInspectorEndpoints';
+  for (const [labelText, key, currentId] of [['From', 'from', transition.from?.id], ['To', 'to', transition.to?.id]]) {
+    const field = document.createElement('label');
+    field.textContent = labelText;
+    const select = document.createElement('select');
+    select.className = 'graphInspectorInput';
+    select.setAttribute('aria-label', `${labelText} state`);
+    for (const state of layer.states) {
+      const option = document.createElement('option');
+      option.value = state.id;
+      option.textContent = state.name;
+      option.selected = state.id === currentId;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      const nextFrom = key === 'from' ? select.value : transition.from?.id;
+      const nextTo = key === 'to' ? select.value : transition.to?.id;
+      if (nextFrom === nextTo) { showToast('A transition needs two distinct states'); renderMachineGraphPanel(); return; }
+      projectCommand('reconnectMachineTransition', { machineId: machine.id, transitionId: transition.id, from: nextFrom, to: nextTo }, `Reconnect transition ${transition.id}`);
+    });
+    field.appendChild(select);
+    endpoints.appendChild(field);
+  }
+  machineOwnershipReadout.appendChild(endpoints);
+  const duration = document.createElement('input');
+  duration.className = 'graphInspectorInput';
+  duration.type = 'number'; duration.min = '0'; duration.step = '0.01'; duration.value = transition.duration;
+  duration.setAttribute('aria-label', 'Transition duration in seconds');
+  duration.addEventListener('change', () => projectCommand('updateMachineTransition', { machineId: machine.id, transitionId: transition.id, changes: { duration: Number(duration.value) } }, `Set transition ${transition.id} duration`));
+  machineOwnershipReadout.appendChild(duration);
+  const enabled = document.createElement('label');
+  enabled.className = 'graphInspectorCheck';
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = transition.enabled !== false;
+  checkbox.addEventListener('change', () => projectCommand('updateMachineTransition', { machineId: machine.id, transitionId: transition.id, changes: { enabled: checkbox.checked } }, `Toggle transition ${transition.id}`));
+  enabled.append(checkbox, document.createTextNode('Enabled'));
+  machineOwnershipReadout.appendChild(enabled);
+  appendConditionInspector(machineOwnershipReadout, machine, transition);
+  appendMachineActionInspector(machineOwnershipReadout, machine, 'transition', transition);
+  const actions = document.createElement('div'); actions.className = 'graphInspectorActions';
+  actions.appendChild(graphInspectorButton('Delete transition', () => {
+    if (confirm('Delete this transition?')) projectCommand('removeMachineTransition', { machineId: machine.id, transitionId: transition.id }, `Delete transition ${transition.id}`);
+  }, 'graphInspectorButton graphDanger'));
+  machineOwnershipReadout.appendChild(actions);
+}
+
+function renderMachineGraphPanel() {
+  if (!machineGraphPanel) return;
+  const { machine, layer } = syncGraphSnapshot();
+  const hasMachine = Boolean(machine && layer);
+  machineSelect.replaceChildren();
+  if (!hasMachine) {
+    const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No machines'; machineSelect.appendChild(empty);
+    machineLayerSelect.replaceChildren();
+    const layerEmpty = document.createElement('option'); layerEmpty.value = ''; layerEmpty.textContent = 'No layers'; machineLayerSelect.appendChild(layerEmpty);
+    machineGraphStatus.textContent = 'Create a machine to begin';
+    machineGraphCanvas.innerHTML = '<div class="machineGraphEmpty"><strong>AI-readable state graph</strong><span>Create a machine, import a Lottie, or use <code>veyra.createMachine()</code>.</span></div>';
+    machineRuntimeReadout.textContent = 'No state machine yet';
+    machineOwnershipReadout.textContent = 'The graph, runtime, manifest, and command bus share stable IDs.';
+  } else {
+    for (const candidate of store.document.stateMachines || []) {
+      const option = document.createElement('option'); option.value = candidate.id; option.textContent = candidate.name; option.selected = candidate.id === machine.id; machineSelect.appendChild(option);
+    }
+    machineLayerSelect.replaceChildren();
+    for (const candidate of machine.layers || []) {
+      const option = document.createElement('option'); option.value = candidate.id; option.textContent = `${candidate.name}${candidate.enabled === false ? ' · off' : ''}`; option.selected = candidate.id === layer.id; machineLayerSelect.appendChild(option);
+    }
+    machineGraphStatus.textContent = `${machine.layers.length} layer${machine.layers.length === 1 ? '' : 's'} · ${layer.states.length} states · ${layer.transitions.length} transitions · AI-readable`;
+    renderGraphSvgOnly();
+    const runtime = machineInteractionBridge.runtimeFor(machine.id);
+    renderGraphInspector(machine, layer, runtime?.evaluate?.());
+  }
+  for (const control of [machineLayerSelect, machineRenameLayer, machineLayerUp, machineLayerDown, machineLayerToggle, machineRemoveLayer, machineAddState, machineAddTransition]) control.disabled = !hasMachine;
+  machineAddTransition.disabled = !hasMachine || graphEditorState.selection.length !== 2;
+  machineLayerToggle.textContent = hasMachine && layer.enabled !== false ? 'Disable' : 'Enable';
+  machineRemoveLayer.disabled = !hasMachine || machine.layers.length <= 1;
+}
+
+function graphSelectedStateIds() { return graphEditorState.selection.map((ref) => ref.id); }
+
+function wireMachineGraph() {
+  if (!machineGraphCanvas) return;
+  machineSelect?.addEventListener('change', () => {
+    graphMachineId = machineSelect.value || null;
+    graphLayerId = machineById(store.document, graphMachineId)?.layers?.[0]?.id || null;
+    renderMachineGraphPanel();
+  });
+  machineLayerSelect?.addEventListener('change', () => {
+    graphLayerId = machineLayerSelect.value || null;
+    renderMachineGraphPanel();
+  });
+  machineAddMachine?.addEventListener('click', () => {
+    const name = prompt('State machine name:', `Machine ${(store.document.stateMachines || []).length + 1}`);
+    if (!name) return;
+    const id = projectCommand('addStateMachine', { overrides: { name } }, `Create state machine ${name}`);
+    if (id) { graphMachineId = id; graphLayerId = null; renderMachineGraphPanel(); showToast(`State machine “${name}” created`); }
+  });
+  machineAddLayer?.addEventListener('click', () => {
+    const machine = graphMachine(); if (!machine) return;
+    const name = prompt('Layer name:', `Layer ${machine.layers.length + 1}`); if (!name) return;
+    const id = projectCommand('addMachineLayer', { machineId: machine.id, overrides: { name } }, `Add layer ${name}`);
+    if (id) { graphLayerId = id; renderMachineGraphPanel(); }
+  });
+  machineRenameLayer?.addEventListener('click', () => {
+    const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer) return;
+    const name = prompt('Layer name:', layer.name); if (!name || name === layer.name) return;
+    projectCommand('updateMachineLayer', { machineId: machine.id, layerId: layer.id, changes: { name } }, `Rename layer ${layer.id}`);
+  });
+  const moveLayer = (delta) => {
+    const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer) return;
+    const index = machine.layers.findIndex((candidate) => candidate.id === layer.id);
+    if (index < 0) return;
+    projectCommand('reorderMachineLayer', { machineId: machine.id, layerId: layer.id, index: index + delta }, `Reorder layer ${layer.id}`);
+  };
+  machineLayerUp?.addEventListener('click', () => moveLayer(-1));
+  machineLayerDown?.addEventListener('click', () => moveLayer(1));
+  machineLayerToggle?.addEventListener('click', () => {
+    const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer) return;
+    projectCommand('updateMachineLayer', { machineId: machine.id, layerId: layer.id, changes: { enabled: layer.enabled === false } }, `${layer.enabled === false ? 'Enable' : 'Disable'} layer ${layer.name}`);
+  });
+  machineRemoveLayer?.addEventListener('click', () => {
+    const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer || machine.layers.length <= 1) return;
+    if (confirm(`Remove layer “${layer.name}”?`)) projectCommand('removeMachineLayer', { machineId: machine.id, layerId: layer.id }, `Remove layer ${layer.name}`);
+  });
+  machineAddState?.addEventListener('click', () => {
+    const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer) return;
+    if (!activeTimelineId) return showToast('Create a timeline before adding an animation state', true);
+    const index = layer.states.length;
+    const id = projectCommand('addMachineState', { machineId: machine.id, layerId: layer.id, overrides: { name: `State ${index + 1}`, type: 'animation', timelineId: activeTimelineId, graph: { x: 48 + (index % 4) * 208, y: 48 + Math.floor(index / 4) * 104 } } }, `Add state ${index + 1}`);
+    if (id) { graphEditorState.select(id); renderMachineGraphPanel(); }
+  });
+  machineAddTransition?.addEventListener('click', () => {
+    const machine = graphMachine(); const layer = graphLayer(machine); const ids = graphSelectedStateIds();
+    if (!machine || !layer || ids.length !== 2) return showToast('Shift-select exactly two states first', true);
+    const id = projectCommand('addMachineTransition', { machineId: machine.id, layerId: layer.id, overrides: { from: { kind: 'machineState', id: ids[0] }, to: { kind: 'machineState', id: ids[1] }, duration: 0.2 } }, `Connect ${ids[0]} → ${ids[1]}`);
+    if (id) { graphEditorState.selectTransition(id); renderMachineGraphPanel(); }
+  });
+  machineGraphToggle?.addEventListener('click', () => {
+    const collapsed = machineGraphPanel.dataset.collapsed === 'true';
+    machineGraphPanel.dataset.collapsed = String(!collapsed);
+    machineGraphToggle.setAttribute('aria-expanded', String(collapsed));
+    machineGraphToggle.setAttribute('aria-label', collapsed ? 'Collapse state machine graph' : 'Expand state machine graph');
+    machineGraphToggle.title = collapsed ? 'Collapse state machine graph' : 'Expand state machine graph';
+  });
+  machineGraphCanvas.addEventListener('click', (event) => {
+    const stateId = event.target.closest?.('[data-state-id]')?.dataset.stateId;
+    const transitionId = event.target.closest?.('[data-transition-id]')?.dataset.transitionId;
+    if (stateId) graphEditorState.select(stateId, event.shiftKey);
+    else if (transitionId) graphEditorState.selectTransition(transitionId);
+    else return;
+    renderGraphSvgOnly();
+    const machine = graphMachine(); renderGraphInspector(machine, graphLayer(machine));
+    machineAddTransition.disabled = graphSelectedStateIds().length !== 2;
+  });
+  machineGraphCanvas.addEventListener('pointerdown', (event) => {
+    const stateId = event.target.closest?.('[data-state-id]')?.dataset.stateId;
+    if (!stateId || event.button !== 0) return;
+    const point = graphPointerPoint(event);
+    if (!graphEditorState.beginDrag(stateId, point)) return;
+    graphDrag = { stateId, machineId: graphMachine()?.id, pointerId: event.pointerId };
+    machineGraphCanvas.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  machineGraphCanvas.addEventListener('pointermove', (event) => {
+    if (!graphDrag || event.pointerId !== graphDrag.pointerId) return;
+    graphEditorState.dragTo(graphPointerPoint(event));
+    renderGraphSvgOnly();
+  });
+  const finishGraphDrag = (event) => {
+    if (!graphDrag || (event.pointerId != null && event.pointerId !== graphDrag.pointerId)) return;
+    const pending = graphDrag; graphDrag = null;
+    const graph = graphEditorState.endDrag();
+    if (graph && pending.machineId) projectCommand('moveMachineState', { machineId: pending.machineId, stateId: pending.stateId, graph }, `Move state ${pending.stateId}`);
+    renderMachineGraphPanel();
+  };
+  machineGraphCanvas.addEventListener('pointerup', finishGraphDrag);
+  machineGraphCanvas.addEventListener('pointercancel', finishGraphDrag);
+  machineGraphCanvas.addEventListener('wheel', (event) => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      graphEditorState.zoomAt(event.deltaY < 0 ? 1.1 : 0.9, graphPointerPoint(event));
+    } else graphEditorState.panBy({ x: event.shiftKey ? -event.deltaY : -event.deltaX, y: event.shiftKey ? 0 : -event.deltaY });
+    renderGraphSvgOnly();
+  }, { passive: false });
+  machineGraphCanvas.addEventListener('keydown', (event) => {
+    if (event.key === '+' || event.key === '=') graphEditorState.zoomAt(1.1);
+    else if (event.key === '-' || event.key === '_') graphEditorState.zoomAt(0.9);
+    else if (event.key === '0') graphEditorState.setPan({ x: 0, y: 0 });
+    else if (event.key === 'Delete' || event.key === 'Backspace') {
+      const selected = graphEditorState.selected; const machine = graphMachine();
+      if (selected?.kind === 'machineState' && machine && confirm('Delete selected state?')) projectCommand('removeMachineState', { machineId: machine.id, stateId: selected.id }, 'Delete selected state');
+      if (selected?.kind === 'machineTransition' && machine && confirm('Delete selected transition?')) projectCommand('removeMachineTransition', { machineId: machine.id, transitionId: selected.id }, 'Delete selected transition');
+    }
+    renderMachineGraphPanel();
+  });
+}
+
 function renderAll(reason = 'change') {
   documentName.value = store.document.name;
   const itemCount = store.document.nodes.length
@@ -2444,6 +2902,7 @@ function renderAll(reason = 'change') {
   renderHierarchy();
   renderInspector();
   renderTimeline();
+  renderMachineGraphPanel();
 
   const selected = store.selectedObject;
   const selectedLabel = store.selectedKind === 'constraint' ? selected?.type : store.selectedKind;
@@ -2741,6 +3200,44 @@ $('exportSvg').onclick = () => {
     showToast(error.message || String(error), true);
   }
 };
+
+function downloadJsonArtifact(value, extension, mime = 'application/json') {
+  downloadBlob(JSON.stringify(value, null, 2), safeFilename(store.document.name, extension), mime);
+}
+
+importLottieButton?.addEventListener('click', () => lottieFile?.click());
+lottieFile?.addEventListener('change', async () => {
+  const picked = lottieFile.files?.[0];
+  if (!picked) return;
+  try {
+    const text = await picked.text();
+    const raw = JSON.parse(text);
+    const imported = raw?.manifest && raw?.animations
+      ? importDotLottie(raw, { name: picked.name.replace(/\.(lottie|json)$/i, '') })
+      : importLottie(raw, { name: picked.name.replace(/\.json$/i, '') });
+    store.replaceDocument(imported.document, `imported ${picked.name}`);
+    activeArtboardId = store.document.artboards[0]?.id || null;
+    activeTimelineId = store.document.timelines[0]?.id || null;
+    graphMachineId = store.document.stateMachines?.[0]?.id || null;
+    graphLayerId = null;
+    savedRevision = store.revision;
+    fitCanvas();
+    const unsupported = imported.diagnostics?.unsupported?.length || 0;
+    showToast(`Imported ${picked.name}${unsupported ? ` · ${unsupported} unsupported item${unsupported === 1 ? '' : 's'} preserved` : ''}`);
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  } finally {
+    lottieFile.value = '';
+  }
+});
+exportLottieButton?.addEventListener('click', () => {
+  try { downloadJsonArtifact(exportLottie(store.document), '.json'); showToast('Lottie JSON exported'); }
+  catch (error) { showToast(error.message || String(error), true); }
+});
+exportDotLottieButton?.addEventListener('click', () => {
+  try { downloadJsonArtifact(exportDotLottie(store.document), '.lottie.json'); showToast('dotLottie package exported'); }
+  catch (error) { showToast(error.message || String(error), true); }
+});
 
 undoButton.onclick = () => store.undo();
 redoButton.onclick = () => store.redo();
@@ -3647,6 +4144,39 @@ globalThis.veyra = Object.freeze({
   fitSelection: () => fitSelection(),
   focusReference: (ref) => focusEditorReference(ref),
   getManifest: (options = {}) => controlPlane.getManifest(options),
+  getFeatureGraph: (options = {}) => {
+    const graph = featureGraphSummary(store.document);
+    const collections = Object.fromEntries(Object.entries(featureCollections(store.document)).map(([key, records]) => [key, cloneValue(records)]));
+    const includeFeatureData = options.includeFeatureData !== false;
+    return {
+      ...graph,
+      collections,
+      ...(includeFeatureData ? {
+        records: featureRecords(store.document).map(({ kind, ref, owner, record }) => ({
+          kind, ref, ...(owner ? { owner } : {}), ...cloneValue(record),
+        })),
+      } : {}),
+    };
+  },
+  addFeature: (kind, overrides = {}) => dispatchCompatibilityCommand('addFeature', { kind, overrides }, { label: `Add ${kind}`, source: 'script' }),
+  updateFeature: (kind, featureId, changes = {}) => Boolean(dispatchCompatibilityCommand('updateFeature', { kind, featureId, changes }, { label: `Update ${kind} ${featureId}`, source: 'script' })),
+  removeFeature: (kind, featureId) => Boolean(dispatchCompatibilityCommand('removeFeature', { kind, featureId }, { label: `Remove ${kind} ${featureId}`, source: 'script' })),
+  reorderFeature: (kind, featureId, index) => Boolean(dispatchCompatibilityCommand('reorderFeature', { kind, featureId, index }, { label: `Reorder ${kind} ${featureId}`, source: 'script' })),
+  importLottie: (payload, options = {}) => importLottie(payload, options),
+  importDotLottie: (payload, options = {}) => importDotLottie(payload, options),
+  loadLottie: (payload, options = {}) => {
+    const imported = options.dotLottie ? importDotLottie(payload, options) : importLottie(payload, options);
+    store.replaceDocument(imported.document, 'imported Lottie document');
+    activeArtboardId = store.document.artboards[0]?.id || null;
+    activeTimelineId = store.document.timelines[0]?.id || null;
+    graphMachineId = store.document.stateMachines?.[0]?.id || null;
+    graphLayerId = null;
+    fitCanvas();
+    return cloneValue(imported);
+  },
+  exportLottie: (options = {}) => cloneValue(exportLottie(store.document, options)),
+  exportDotLottie: (options = {}) => cloneValue(exportDotLottie(store.document, options)),
+  createPlayer: (options = {}) => createVeyraPlayer(() => store.document, options),
   queryEntities: (query = {}, options = {}) => controlPlane.queryEntities(query, options),
   resolveSemantic: (intent, options = {}) => controlPlane.resolveSemantic(intent, options),
   read: (refOrAddress, options = {}) => controlPlane.read(refOrAddress, runtimeHost.readOptions(options)),
@@ -3800,6 +4330,48 @@ globalThis.veyra = Object.freeze({
       label: `Update machine transition ${transitionId}`, source: 'script',
     }));
   },
+  reconnectMachineTransition: (machineId, transitionId, from, to) => Boolean(dispatchCompatibilityCommand('reconnectMachineTransition', { machineId, transitionId, from, to }, {
+    label: `Reconnect machine transition ${transitionId}`, source: 'script',
+  })),
+  moveMachineState: (machineId, stateId, graph) => Boolean(dispatchCompatibilityCommand('moveMachineState', { machineId, stateId, graph }, {
+    label: `Move machine state ${stateId}`, source: 'script',
+  })),
+  addMachineBlendChild: (machineId, stateId, overrides = {}) => dispatchCompatibilityCommand('addMachineBlendChild', { machineId, stateId, overrides }, {
+    label: `Add blend child ${stateId}`, source: 'script',
+  }),
+  updateMachineBlendChild: (machineId, stateId, childId, changes = {}) => Boolean(dispatchCompatibilityCommand('updateMachineBlendChild', { machineId, stateId, childId, changes }, {
+    label: `Update blend child ${childId}`, source: 'script',
+  })),
+  removeMachineBlendChild: (machineId, stateId, childId) => Boolean(dispatchCompatibilityCommand('removeMachineBlendChild', { machineId, stateId, childId }, {
+    label: `Remove blend child ${childId}`, source: 'script',
+  })),
+  reorderMachineBlendChild: (machineId, stateId, childId, index) => Boolean(dispatchCompatibilityCommand('reorderMachineBlendChild', { machineId, stateId, childId, index }, {
+    label: `Reorder blend child ${childId}`, source: 'script',
+  })),
+  addMachineCondition: (machineId, transitionId, overrides = {}) => dispatchCompatibilityCommand('addMachineCondition', { machineId, transitionId, overrides }, {
+    label: `Add transition condition ${transitionId}`, source: 'script',
+  }),
+  updateMachineCondition: (machineId, transitionId, conditionId, changes = {}) => Boolean(dispatchCompatibilityCommand('updateMachineCondition', { machineId, transitionId, conditionId, changes }, {
+    label: `Update condition ${conditionId}`, source: 'script',
+  })),
+  removeMachineCondition: (machineId, transitionId, conditionId) => Boolean(dispatchCompatibilityCommand('removeMachineCondition', { machineId, transitionId, conditionId }, {
+    label: `Remove condition ${conditionId}`, source: 'script',
+  })),
+  reorderMachineCondition: (machineId, transitionId, conditionId, index) => Boolean(dispatchCompatibilityCommand('reorderMachineCondition', { machineId, transitionId, conditionId, index }, {
+    label: `Reorder condition ${conditionId}`, source: 'script',
+  })),
+  addMachineAction: (machineId, ownerKind, ownerId, overrides = {}) => dispatchCompatibilityCommand('addMachineAction', { machineId, ownerKind, ownerId, overrides }, {
+    label: `Add ${ownerKind} lifecycle action`, source: 'script',
+  }),
+  updateMachineAction: (machineId, ownerKind, ownerId, actionId, changes = {}) => Boolean(dispatchCompatibilityCommand('updateMachineAction', { machineId, ownerKind, ownerId, actionId, changes }, {
+    label: `Update machine action ${actionId}`, source: 'script',
+  })),
+  removeMachineAction: (machineId, ownerKind, ownerId, actionId) => Boolean(dispatchCompatibilityCommand('removeMachineAction', { machineId, ownerKind, ownerId, actionId }, {
+    label: `Remove machine action ${actionId}`, source: 'script',
+  })),
+  reorderMachineAction: (machineId, ownerKind, ownerId, actionId, index) => Boolean(dispatchCompatibilityCommand('reorderMachineAction', { machineId, ownerKind, ownerId, actionId, index }, {
+    label: `Reorder machine action ${actionId}`, source: 'script',
+  })),
   setMachineInput: (machineId, nameOrId, value) => machineRuntime(machineId).setInput(nameOrId, value),
   fireMachineInput: (machineId, nameOrId) => machineRuntime(machineId).fire(nameOrId),
   stepMachine: (machineId, deltaSeconds = 1 / 30) => machineRuntime(machineId).step(deltaSeconds),
@@ -3811,5 +4383,6 @@ globalThis.veyra = Object.freeze({
 setTool('select', false);
 setZoom(1);
 initializeTimeline();
+wireMachineGraph();
 renderAll(restored ? 'autosave restored' : 'Veyra document ready');
 if (restored) showToast('Autosaved Veyra document restored');

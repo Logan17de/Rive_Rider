@@ -6,6 +6,7 @@ import { evaluateRig } from './rigging.js';
 import { artboardById } from './projectGraph.js';
 import { evaluateComponentContent } from './components.js';
 import { createVeyraDataRuntime } from './dataGraph.js';
+import { featureCollections, featureRecords } from './featureGraph.js';
 
 // Internal observation handoff. JSON options cannot spoof an evaluated context.
 export const OBSERVED_EVALUATION_CONTEXT = Symbol('veyra-observed-evaluation-context');
@@ -143,6 +144,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     meshes: cloneValue(rig.meshes.filter(owned)),
     controls: cloneValue(rig.controls.filter(owned)),
     constraints: cloneValue(rig.constraints.filter(owned)),
+    ...(featureRecords(evaluatedDocument).length ? { features: { ...featureCollections(evaluatedDocument), records: featureRecords(evaluatedDocument).map(({ kind, ref, owner, record }) => ({ kind, ref, ...(owner ? { owner } : {}), ...cloneValue(record) })) } } : {}),
     diagnostics: cloneValue({
       ...rig.diagnostics,
       collisions: [

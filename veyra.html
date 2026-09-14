@@ -74,6 +74,10 @@
         <input id="openFile" type="file" accept=".veyra,application/vnd.veyra+json,application/json" hidden>
         <button class="actionButton" id="saveDocument" aria-label="Save .veyra"><svg><use href="#i-save"/></svg><span>Save .veyra</span></button>
         <button class="iconButton" id="exportSvg" title="Export SVG" aria-label="Export SVG"><svg><use href="#i-export"/></svg></button>
+        <button class="iconButton" id="importLottie" title="Import Lottie or dotLottie JSON" aria-label="Import Lottie"><span class="formatGlyph">L</span></button>
+        <input id="lottieFile" type="file" accept=".json,.lottie.json,application/json" hidden>
+        <button class="iconButton" id="exportLottie" title="Export Lottie JSON" aria-label="Export Lottie"><span class="formatGlyph">L↗</span></button>
+        <button class="iconButton" id="exportDotLottie" title="Export dotLottie package JSON" aria-label="Export dotLottie"><span class="formatGlyph">d↗</span></button>
         <span class="toolbarDivider"></span>
         <button class="iconButton" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg><use href="#i-undo"/></svg></button>
         <button class="iconButton" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><svg><use href="#i-redo"/></svg></button>
@@ -209,6 +213,33 @@
               <div class="timelineGrid" id="timelineGrid"></div>
               <div class="playhead" id="playhead" aria-hidden="true"></div>
             </div>
+          </div>
+        </section>
+        <section class="machineGraphPanel" id="machineGraphPanel" aria-label="State machine graph" data-collapsed="false">
+          <div class="machineGraphBar">
+            <div class="machineGraphTitle"><span class="eyebrow">Logic</span><h2>State machine</h2><span id="machineGraphStatus" class="machineGraphStatus">AI-readable graph</span></div>
+            <div class="machineGraphControls">
+              <label><span class="srOnly">Machine</span><select id="machineSelect" aria-label="State machine"></select></label>
+              <label><span class="srOnly">Layer</span><select id="machineLayerSelect" aria-label="State machine layer"></select></label>
+              <button class="graphButton" id="machineAddMachine" title="Create state machine">+ Machine</button>
+              <button class="graphButton" id="machineAddLayer" title="Add layer">+ Layer</button>
+              <button class="graphButton" id="machineRenameLayer" title="Rename selected layer">Rename</button>
+              <button class="graphButton" id="machineLayerUp" title="Move selected layer up">↑</button>
+              <button class="graphButton" id="machineLayerDown" title="Move selected layer down">↓</button>
+              <button class="graphButton" id="machineLayerToggle" title="Enable or disable selected layer">Disable</button>
+              <button class="graphButton graphDanger" id="machineRemoveLayer" title="Remove selected layer">− Layer</button>
+              <button class="graphButton" id="machineAddState" title="Add animation state">+ State</button>
+              <button class="graphButton" id="machineAddTransition" title="Connect selected states">+ Transition</button>
+              <button class="iconButton" id="machineGraphToggle" title="Collapse state machine graph" aria-label="Collapse state machine graph" aria-expanded="true"><svg><use href="#i-minus"/></svg></button>
+            </div>
+          </div>
+          <div class="machineGraphBody" id="machineGraphBody">
+            <div class="machineGraphCanvas" id="machineGraphCanvas" role="application" aria-label="Visual state machine graph" tabindex="0"></div>
+            <aside class="machineGraphInspector" id="machineGraphInspector" aria-label="State machine debug">
+              <div class="machineDebugHeading">Runtime</div>
+              <output id="machineRuntimeReadout" class="machineRuntimeReadout">No machine selected</output>
+              <div id="machineOwnershipReadout" class="machineOwnershipReadout">Select a state to inspect ownership.</div>
+            </aside>
           </div>
         </section>
       </main>

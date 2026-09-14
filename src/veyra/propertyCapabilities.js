@@ -54,6 +54,7 @@ function fillProperties(fill) {
 
 const GEOMETRY_PROPERTIES = Object.freeze({
   group: [],
+  image: ['geometry.width', 'geometry.height', 'geometry.fit', 'asset'],
   rectangle: ['geometry.width', 'geometry.height', 'geometry.cornerRadius'],
   ellipse: ['geometry.width', 'geometry.height'],
   polygon: ['geometry.radius', 'geometry.sides'],
@@ -84,7 +85,7 @@ export function nodeCapabilities(node) {
   return {
     transform: true,
     style: node.type !== 'group',
-    resize: ['rectangle', 'ellipse', 'polygon', 'star'].includes(node.type),
+    resize: ['image', 'rectangle', 'ellipse', 'polygon', 'star'].includes(node.type),
     editVertices: node.type === 'path',
     groupChildren: node.type === 'group',
     writable: [...commonWritable, ...fill, ...geometry],

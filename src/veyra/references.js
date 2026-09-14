@@ -40,6 +40,18 @@ export const VEYRA_REFERENCE_KINDS = Object.freeze([
   'propertyGroupProperty',
   'list',
   'listItem',
+  'text',
+  'textRun',
+  'textModifier',
+  'layout',
+  'layoutItem',
+  'event',
+  'eventAction',
+  'accessibility',
+  'script',
+  'shader',
+  'renderPreset',
+  'interchangeAsset',
   'semanticRecord',
 ]);
 
@@ -127,6 +139,18 @@ export function createPropertyGroupRef(id) { return createReference('propertyGro
 export function createPropertyGroupPropertyRef(id) { return createReference('propertyGroupProperty', id); }
 export function createListRef(id) { return createReference('list', id); }
 export function createListItemRef(id) { return createReference('listItem', id); }
+export function createTextRef(id) { return createReference('text', id); }
+export function createTextRunRef(id) { return createReference('textRun', id); }
+export function createTextModifierRef(id) { return createReference('textModifier', id); }
+export function createLayoutRef(id) { return createReference('layout', id); }
+export function createLayoutItemRef(id) { return createReference('layoutItem', id); }
+export function createEventRef(id) { return createReference('event', id); }
+export function createEventActionRef(id) { return createReference('eventAction', id); }
+export function createAccessibilityRef(id) { return createReference('accessibility', id); }
+export function createScriptRef(id) { return createReference('script', id); }
+export function createShaderRef(id) { return createReference('shader', id); }
+export function createRenderPresetRef(id) { return createReference('renderPreset', id); }
+export function createInterchangeAssetRef(id) { return createReference('interchangeAsset', id); }
 export function createSemanticRecordRef(id) { return createReference('semanticRecord', id); }
 
 export function createSemanticTargetRef(kindOrRefOrId, id = null) {

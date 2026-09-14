@@ -1,4 +1,5 @@
 import { parsePropertyAddress } from './propertyAddress.js';
+import { normalizeReference } from './references.js';
 
 // Shared scalar primitives for authored normalization and runtime property-binding
 // validation. model.js imports these helpers, so runtime bindings and persisted
@@ -104,6 +105,9 @@ function validatePaint(object, segments, value, path, fallback, strokeWidthDefau
 
 function validateNode(node, segments, value, path) {
   const [root, key] = segments;
+  if (root === 'asset' && segments.length === 1 && node.type === 'image') {
+    return value == null || value === '' ? null : normalizeReference(value, 'asset', path);
+  }
   if (root === 'visible' && segments.length === 1) return value !== false;
   if (root === 'opacity' && segments.length === 1) return bounded(value ?? 1, path, 0, 1);
   if (root === 'transform' && segments.length === 2) {
@@ -113,6 +117,10 @@ function validateNode(node, segments, value, path) {
   }
   if (root === 'paint') return validatePaint(node, segments, value, path, '#ec4899', 0);
   if (root === 'geometry') {
+    if (node.type === 'image') {
+      if (['width', 'height'].includes(key)) return bounded(value, path, 0.01, 100000);
+      if (key === 'fit' && ['contain', 'cover', 'fill', 'none'].includes(String(value))) return String(value);
+    }
     if (node.type === 'rectangle') {
       if (['width', 'height'].includes(key)) return bounded(value, path, 0.01, 100000);
       if (key === 'cornerRadius') return bounded(value ?? 0, path, 0, 100000);

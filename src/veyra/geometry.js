@@ -138,6 +138,13 @@ export function pathData(geometry) {
 export function localBounds(node) {
   const geometry = node?.geometry;
   switch (node?.type) {
+    case 'image':
+      return {
+        minX: -geometry.width / 2,
+        minY: -geometry.height / 2,
+        maxX: geometry.width / 2,
+        maxY: geometry.height / 2,
+      };
     case 'rectangle':
     case 'ellipse':
       return {
@@ -176,6 +183,17 @@ export function localBounds(node) {
 
 export function geometryDescriptor(node) {
   switch (node.type) {
+    case 'image':
+      return {
+        tag: 'image',
+        attributes: {
+          x: -node.geometry.width / 2,
+          y: -node.geometry.height / 2,
+          width: node.geometry.width,
+          height: node.geometry.height,
+          preserveAspectRatio: node.geometry.fit === 'cover' ? 'xMidYMid slice' : node.geometry.fit === 'fill' ? 'none' : 'xMidYMid meet',
+        },
+      };
     case 'rectangle':
       return {
         tag: 'rect',
@@ -260,23 +278,50 @@ function gradientMarkup(fill, id) {
   return `<${descriptor.tag} ${attributes}>${stops}</${descriptor.tag}>`;
 }
 
-function svgNode(node, childrenByParent) {
+function textMarkupForNode(node, textsByNode) {
+  const records = textsByNode.get(node.id) || [];
+  return records.map((text) => {
+    const lines = [];
+    let y = 0;
+    for (const run of text.runs || []) {
+      const content = String(run.text || '').split('\n');
+      for (const line of content) {
+        lines.push(`<tspan x="0" dy="${y === 0 ? 0 : Number(run.lineHeight || 1.2) * Number(run.fontSize || 16)}" font-family="${escapeXml(run.fontFamily || 'Inter')}" font-size="${Number(run.fontSize || 16)}" font-weight="${Number(run.fontWeight || 400)}" letter-spacing="${Number(run.letterSpacing || 0)}" fill="${escapeXml(run.fill || '#ffffff')}" stroke="${escapeXml(run.stroke || 'none')}" stroke-width="${Number(run.strokeWidth || 0)}">${escapeXml(line)}</tspan>`);
+        y += 1;
+      }
+    }
+    const attrs = `text-anchor="${text.align === 'center' ? 'middle' : text.align === 'end' ? 'end' : 'start'}" aria-label="${escapeXml((text.runs || []).map((run) => run.text || '').join(''))}"`;
+    return `<text ${attrs}>${lines.join('')}</text>`;
+  }).join('');
+}
+
+function svgNode(node, childrenByParent, textsByNode, assetsById) {
   if (!node.visible) return '';
   const transform = escapeXml(transformAttribute(node.localMatrix));
   const opacity = Math.max(0, Math.min(1, Number(node.opacity)));
   const childMarkup = (childrenByParent.get(node.id) || [])
-    .map((child) => svgNode(child, childrenByParent))
+    .map((child) => svgNode(child, childrenByParent, textsByNode, assetsById))
     .join('');
+  const textMarkup = textMarkupForNode(node, textsByNode);
   if (node.type === 'group') {
-    return `<g id="${escapeXml(node.id)}" transform="${transform}" opacity="${opacity}">${childMarkup}</g>`;
+    return `<g id="${escapeXml(node.id)}" transform="${transform}" opacity="${opacity}">${textMarkup}${childMarkup}</g>`;
   }
   const descriptor = geometryDescriptor(node);
   const attributes = Object.entries(descriptor.attributes)
+    .filter(([name]) => descriptor.tag !== 'image' || name !== 'preserveAspectRatio')
     .map(([name, value]) => `${name}="${escapeXml(value)}"`)
     .join(' ');
   const fill = fillPaintValue(node.paint.fill, paintServerId('node', node.id));
+  if (descriptor.tag === 'image') {
+    const asset = assetsById.get(referenceId(node.asset, 'asset'));
+    const source = asset?.source?.kind === 'embedded'
+      ? `data:${asset.mimeType || 'application/octet-stream'};base64,${asset.source.data || ''}`
+      : asset?.source?.uri || '';
+    const shape = `<image ${attributes} href="${escapeXml(source)}" preserveAspectRatio="${escapeXml(descriptor.attributes.preserveAspectRatio)}"/>`;
+    return `<g id="${escapeXml(node.id)}" transform="${transform}" opacity="${opacity}">${shape}${textMarkup}${childMarkup}</g>`;
+  }
   const shape = `<${descriptor.tag} ${attributes} fill="${escapeXml(fill)}" stroke="${escapeXml(node.paint.stroke)}" stroke-width="${node.paint.strokeWidth}"/>`;
-  return `<g id="${escapeXml(node.id)}" transform="${transform}" opacity="${opacity}">${shape}${childMarkup}</g>`;
+  return `<g id="${escapeXml(node.id)}" transform="${transform}" opacity="${opacity}">${shape}${textMarkup}${childMarkup}</g>`;
 }
 
 export function renderSvgString(scene) {
@@ -289,6 +334,14 @@ export function renderSvgString(scene) {
     if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
     childrenByParent.get(parentId).push(node);
   }
+  const textsByNode = new Map();
+  const assetsById = new Map((scene.assets || []).map((asset) => [asset.id, asset]));
+  for (const text of scene.features?.texts || scene.texts || []) {
+    const nodeId = referenceId(text.node, 'node');
+    if (!nodeId) continue;
+    if (!textsByNode.has(nodeId)) textsByNode.set(nodeId, []);
+    textsByNode.get(nodeId).push(text);
+  }
   const definitions = [
     ...scene.nodes
       .filter((node) => node.type !== 'group')
@@ -297,7 +350,7 @@ export function renderSvgString(scene) {
       .map((mesh) => gradientMarkup(mesh.paint.fill, paintServerId('mesh', mesh.id))),
   ].filter(Boolean).join('');
   const content = (childrenByParent.get('__root__') || [])
-    .map((node) => svgNode(node, childrenByParent))
+    .map((node) => svgNode(node, childrenByParent, textsByNode, assetsById))
     .join('');
   const meshContent = (scene.meshes || []).filter((mesh) => mesh.visible).map((mesh) => {
     const vertices = new Map(mesh.deformedVertices.map((vertex) => [vertex.id, vertex]));

@@ -51,6 +51,7 @@ import {
   listItemById as dataListItemById,
   normalizeBindingEndpoint,
 } from './dataGraph.js';
+import { normalizeFeatureGraphDocument } from './featureGraph.js';
 
 export { VEYRA_PROJECT_VERSION, VEYRA_DATA_VERSION };
 
@@ -82,6 +83,7 @@ export const VEYRA_CONSTRAINT_TYPES = Object.freeze([
 ]);
 export const VEYRA_NODE_TYPES = Object.freeze([
   'group',
+  'image',
   'path',
   'rectangle',
   'ellipse',
@@ -101,7 +103,7 @@ export const VEYRA_EASING_TYPES = Object.freeze([
 export const VEYRA_LOOP_MODES = Object.freeze(['none', 'loop', 'pingpong']);
 export const VEYRA_FILL_TYPES = Object.freeze(['solid', 'linearGradient', 'radialGradient']);
 export const VEYRA_MACHINE_INPUT_TYPES = Object.freeze(['number', 'bool', 'trigger']);
-export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend']);
+export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend', 'additiveBlend']);
 export const VEYRA_MACHINE_LAYER_VERSION = 1;
 export const VEYRA_CONDITION_OPS = Object.freeze([
   '<',
@@ -226,6 +228,8 @@ function baseNode(type) {
 
 function defaultGeometry(type) {
   switch (type) {
+    case 'image':
+      return { width: 160, height: 120, fit: 'contain' };
     case 'rectangle':
       return { width: 180, height: 120, cornerRadius: 24 };
     case 'ellipse':
@@ -271,6 +275,11 @@ export function createNode(type, overrides = {}) {
       ? null
       : { ...defaultGeometry(type), ...(overrides.geometry || {}) },
   };
+  if (type === 'image') {
+    const asset = overrides.asset ?? overrides.assetId;
+    node.asset = asset == null || asset === '' ? null : normalizeReference(asset, 'asset', 'image.asset');
+    delete node.assetId;
+  }
   if (type === 'path' && overrides.geometry?.vertices) {
     node.geometry.vertices = cloneValue(overrides.geometry.vertices);
   }
@@ -617,7 +626,12 @@ export function createMachineBlendChild(overrides = {}) {
     speed,
   };
   if (overrides.threshold != null) child.threshold = finite(overrides.threshold, 'blendChild.threshold');
-  if (overrides.input != null || overrides.inputId != null) child.input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'blendChild.input');
+  if (overrides.input != null || overrides.inputId != null) {
+    const input = overrides.input ?? overrides.inputId;
+    child.input = input && typeof input === 'object' && input.kind === 'data'
+      ? normalizeMachineDataEndpoint(input, 'blendChild.input')
+      : normalizeReference(input, 'machineInput', 'blendChild.input');
+  }
   return child;
 }
 
@@ -627,7 +641,7 @@ export function createMachineState(overrides = {}) {
   const timelineValue = overrides.timeline ?? overrides.timelineId;
   const timeline = timelineValue == null || timelineValue === '' ? null : normalizeReference(timelineValue, 'timeline', 'state.timeline');
   if (type === 'animation' && !timeline) throw new TypeError('animation states require a timeline reference.');
-  if (['entry', 'exit', 'any', 'blend1d', 'directBlend'].includes(type) && timeline) throw new TypeError(`${type} states cannot own a direct timeline.`);
+  if (['entry', 'exit', 'any', 'blend1d', 'directBlend', 'additiveBlend'].includes(type) && timeline) throw new TypeError(`${type} states cannot own a direct timeline.`);
   const speed = finite(overrides.speed ?? 1, 'state.speed');
   if (speed === 0) throw new TypeError('state.speed cannot be zero.');
   const graph = overrides.graph && typeof overrides.graph === 'object' && !Array.isArray(overrides.graph)
@@ -650,14 +664,17 @@ export function createMachineState(overrides = {}) {
   if (['entry', 'exit', 'any'].includes(type) && actions.length) throw new TypeError(`${type} pseudo-states cannot own lifecycle actions.`);
   if (actions.length) result.actions = actions;
   if (type === 'blend1d') {
-    result.input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'state.input');
+    const input = overrides.input ?? overrides.inputId;
+    result.input = input && typeof input === 'object' && input.kind === 'data'
+      ? normalizeMachineDataEndpoint(input, 'state.input')
+      : normalizeReference(input, 'machineInput', 'state.input');
     if (!result.input) throw new TypeError('blend1d states require a numeric machine input reference.');
     result.children = (overrides.children || []).map(createMachineBlendChild);
     if (result.children.length < 2) throw new TypeError('blend1d states require at least two children.');
-  } else if (type === 'directBlend') {
+  } else if (type === 'directBlend' || type === 'additiveBlend') {
     result.children = (overrides.children || []).map(createMachineBlendChild);
-    if (!result.children.length) throw new TypeError('directBlend states require at least one child.');
-    if (result.children.some(child => !child.input)) throw new TypeError('directBlend children require numeric machine input references.');
+    if (!result.children.length) throw new TypeError(`${type} states require at least one child.`);
+    if (result.children.some(child => !child.input)) throw new TypeError(`${type} children require numeric machine input references.`);
   }
   if (result.children) {
     const ids = new Set();
@@ -908,6 +925,15 @@ function normalizeTransform(transform, path, anglesUseDegrees) {
 
 function normalizeGeometry(type, geometry, path) {
   switch (type) {
+    case 'image': {
+      const fit = String(geometry?.fit || 'contain');
+      if (!['contain', 'cover', 'fill', 'none'].includes(fit)) throw new TypeError(`${path}.fit must be contain, cover, fill, or none.`);
+      return {
+        width: bounded(geometry?.width, `${path}.width`, 0.01, 100000),
+        height: bounded(geometry?.height, `${path}.height`, 0.01, 100000),
+        fit,
+      };
+    }
     case 'group':
       return null;
     case 'rectangle':
@@ -982,7 +1008,7 @@ function normalizeNode(node, index, anglesUseDegrees, inputVersion) {
   if (!VEYRA_POINTER_EVENT_MODES.includes(pointerEvents)) {
     throw new TypeError(`nodes[${index}].pointerEvents must be one of ${VEYRA_POINTER_EVENT_MODES.join(', ')}.`);
   }
-  return {
+  const result = {
     id,
     type,
     name: String(node.name || type),
@@ -999,6 +1025,8 @@ function normalizeNode(node, index, anglesUseDegrees, inputVersion) {
     },
     geometry: normalizeGeometry(type, node.geometry, `nodes[${index}].geometry`),
   };
+  if (type === 'image') result.asset = normalizeReference(node.asset ?? node.assetId, 'asset', `nodes[${index}].asset`);
+  return result;
 }
 
 function normalizeAsset(asset, index) {
@@ -1522,6 +1550,9 @@ function validateMachineDataActions(document) {
 }
 
 function resolveMachineNumberInput(value, path, inputsById) {
+  if (value && typeof value === 'object' && value.kind === 'data') {
+    return normalizeMachineDataEndpoint(value, path);
+  }
   const ref = requiredReference(value, 'machineInput', path);
   const key = referenceId(ref, 'machineInput');
   const input = inputsById.get(key) || [...inputsById.values()].find(candidate => candidate.name === key) || null;
@@ -1541,7 +1572,7 @@ function normalizeBlendChild(child, index, path, timelineIds, inputsById, type) 
   if (speed === 0) throw new TypeError(`${childPath}.speed cannot be zero.`);
   const result = { id, timeline, speed };
   if (type === 'blend1d') result.threshold = finite(child?.threshold, `${childPath}.threshold`);
-  if (type === 'directBlend') result.input = resolveMachineNumberInput(child?.input ?? child?.inputId, `${childPath}.input`, inputsById);
+  if (type === 'directBlend' || type === 'additiveBlend') result.input = resolveMachineNumberInput(child?.input ?? child?.inputId, `${childPath}.input`, inputsById);
   return result;
 }
 
@@ -1582,7 +1613,7 @@ function normalizeMachineState(state, index, layerPath, timelineIds, inputsById)
   const timeline = timelineValue == null || timelineValue === '' ? null : requiredReference(timelineValue, 'timeline', `${path}.timeline`);
   if (type === 'animation' && !timeline) throw new TypeError(`${path}.timeline is required for animation states.`);
   if (timeline && !timelineIds.has(referenceId(timeline, 'timeline'))) throw new TypeError(`${path}.timeline references missing timeline ${referenceId(timeline, 'timeline')}.`);
-  if (['entry', 'exit', 'any', 'blend1d', 'directBlend'].includes(type) && timeline) throw new TypeError(`${path}.${type} state cannot own a direct timeline.`);
+  if (['entry', 'exit', 'any', 'blend1d', 'directBlend', 'additiveBlend'].includes(type) && timeline) throw new TypeError(`${path}.${type} state cannot own a direct timeline.`);
   const speed = finite(state?.speed ?? 1, `${path}.speed`);
   if (speed === 0) throw new TypeError(`${path}.speed cannot be zero.`);
   const graph = state?.graph && typeof state.graph === 'object' && !Array.isArray(state.graph)
@@ -1595,7 +1626,7 @@ function normalizeMachineState(state, index, layerPath, timelineIds, inputsById)
   const actions = (Array.isArray(state.actions) ? state.actions : []).map((action,i)=>normalizeMachineAction(action,i,path,'state',timelineIds,inputsById));
   if (['entry', 'exit', 'any'].includes(type) && actions.length) throw new TypeError(`${path}.${type} pseudo-state cannot own lifecycle actions.`);
   if (actions.length) result.actions = actions;
-  if (type === 'blend1d' || type === 'directBlend') {
+  if (type === 'blend1d' || type === 'directBlend' || type === 'additiveBlend') {
     if (!Array.isArray(state?.children)) throw new TypeError(`${path}.children must be an array.`);
     result.children = state.children.map((child,i)=>normalizeBlendChild(child,i,path,timelineIds,inputsById,type));
     const childIds = new Set();
@@ -1609,7 +1640,7 @@ function normalizeMachineState(state, index, layerPath, timelineIds, inputsById)
       for (let i=1;i<result.children.length;i+=1) if (!(result.children[i].threshold > result.children[i-1].threshold)) {
         throw new TypeError(`${path}.blend1d child thresholds must be strictly increasing in authored order.`);
       }
-    } else if (!result.children.length) throw new TypeError(`${path}.directBlend requires at least one child.`);
+    } else if (!result.children.length) throw new TypeError(`${path}.${type} requires at least one child.`);
   }
   return result;
 }
@@ -1830,6 +1861,7 @@ function validateStableIdentities(document) {
       register('machineLayer', layer.id, `stateMachines[${machineIndex}].layers[${layerIndex}]`);
       layer.states.forEach((state, stateIndex) => {
         register('machineState', state.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}]`);
+        (state.children || []).forEach((child, childIndex) => register('machineBlendChild', child.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}].children[${childIndex}]`));
         (state.actions || []).forEach((action, actionIndex) => register('machineAction', action.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}].actions[${actionIndex}]`));
       });
       layer.transitions.forEach((transition, transitionIndex) => {
@@ -1859,6 +1891,20 @@ function validateStableIdentities(document) {
     list.items.forEach((item, itemIndex) => register('listItem', item.id, `lists[${listIndex}].items[${itemIndex}]`));
   });
   document.bindings.forEach((binding, index) => register('binding', binding.id, `bindings[${index}]`));
+  for (const [collection, kind] of [
+    ['texts', 'text'], ['layouts', 'layout'], ['events', 'event'], ['accessibility', 'accessibility'],
+    ['scripts', 'script'], ['shaders', 'shader'], ['renderPresets', 'renderPreset'], ['interchangeAssets', 'interchangeAsset'],
+  ]) {
+    (document[collection] || []).forEach((item, index) => {
+      register(kind, item.id, `${collection}[${index}]`);
+      if (kind === 'text') {
+        (item.runs || []).forEach((run, runIndex) => register('textRun', run.id, `${collection}[${index}].runs[${runIndex}]`));
+        (item.modifiers || []).forEach((modifier, modifierIndex) => register('textModifier', modifier.id, `${collection}[${index}].modifiers[${modifierIndex}]`));
+      }
+      if (kind === 'layout') (item.items || []).forEach((child, childIndex) => register('layoutItem', child.id, `${collection}[${index}].items[${childIndex}]`));
+      if (kind === 'event') (item.actions || []).forEach((action, actionIndex) => register('eventAction', action.id, `${collection}[${index}].actions[${actionIndex}]`));
+    });
+  }
 }
 
 export function normalizeDocument(input) {
@@ -1909,6 +1955,12 @@ export function normalizeDocument(input) {
   for (const asset of assets) {
     if (assetIds.has(asset.id)) throw new TypeError(`Duplicate asset id ${asset.id}.`);
     assetIds.add(asset.id);
+  }
+  for (const [index, node] of nodes.entries()) {
+    if (node.type !== 'image' || !node.asset) continue;
+    if (!assetIds.has(node.asset.id)) throw new TypeError(`nodes[${index}].asset references missing asset ${node.asset.id}.`);
+    const asset = assets.find((candidate) => candidate.id === node.asset.id);
+    if (asset.type !== 'image') throw new TypeError(`nodes[${index}].asset must reference an image asset, not ${asset.type}.`);
   }
 
   const semantics = normalizeSemanticRecords(input.semantics || [], { nodes, meshes });
@@ -1978,13 +2030,18 @@ export function normalizeDocument(input) {
   const dataDocument = normalizeDataGraphDocument(input, projectDocument);
   validateMachineDataConditions(dataDocument);
   validateMachineDataActions(dataDocument);
-  validateStableIdentities(dataDocument);
-  validateSemanticRecords(dataDocument);
+  // Feature families are an additive graph layer, but they still participate
+  // in the universal identity and semantic registries. Normalize them before
+  // those validators so feature targets can be annotated and duplicate IDs
+  // cannot slip through merely because they live in a nested collection.
+  const featureDocument = normalizeFeatureGraphDocument(input, dataDocument);
+  validateStableIdentities(featureDocument);
+  validateSemanticRecords(featureDocument);
   // A machine document is always persisted in the canonical layered schema.
   // Data-free/non-machine projects retain their existing v5/v6 generation so
   // existing interchange and golden fixtures remain byte-compatible.
-  if (dataDocument.stateMachines?.length) dataDocument.version = VEYRA_LAYERED_MACHINE_VERSION;
-  return dataDocument;
+  if (featureDocument.stateMachines?.length) featureDocument.version = VEYRA_LAYERED_MACHINE_VERSION;
+  return featureDocument;
 }
 
 export function semanticsFor(document, targetOrNodeId) {

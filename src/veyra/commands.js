@@ -9,6 +9,7 @@ import {
   VEYRA_PROPERTY_BOUNDS,
 } from './model.js';
 import { VEYRA_SEMANTIC_COMMAND_ACTIONS } from './semantics.js';
+import { VEYRA_FEATURE_KINDS } from './featureGraph.js';
 
 // Serializable command bus over the VeyraStore public API.
 //
@@ -356,6 +357,96 @@ const COMMAND_TABLE = {
     summary: 'Update a transition duration, after gate, or conditions. Conditions are replaced wholesale and validated against the operator/type matrix; endpoints are immutable.',
     params: [param('machineId', 'string', true), param('transitionId', 'string', true), param('changes', 'object', false)],
     run: (store, args, command) => store.updateMachineTransition(args.machineId, args.transitionId, args.changes ?? {}, command ?? {}),
+  },
+  reconnectMachineTransition: {
+    summary: 'Reconnect a transition to two distinct states in the same layer.',
+    params: [param('machineId', 'string', true), param('transitionId', 'string', true), param('from', 'string', true), param('to', 'string', true)],
+    run: (store, args, command) => store.reconnectMachineTransition(args.machineId, args.transitionId, args.from, args.to, command ?? {}),
+  },
+  moveMachineState: {
+    summary: 'Move a machine state in the graph without changing behavioral identity.',
+    params: [param('machineId', 'string', true), param('stateId', 'string', true), param('graph', 'object', true)],
+    run: (store, args, command) => store.moveMachineState(args.machineId, args.stateId, args.graph, command ?? {}),
+  },
+  addMachineBlendChild: {
+    summary: 'Add a persistent timeline child to a 1D or direct blend state.',
+    params: [param('machineId', 'string', true), param('stateId', 'string', true), param('overrides', 'object', true)],
+    run: (store, args, command) => store.addMachineBlendChild(args.machineId, args.stateId, args.overrides, command ?? {}),
+  },
+  updateMachineBlendChild: {
+    summary: 'Update a blend child timeline, speed, threshold, or input.',
+    params: [param('machineId', 'string', true), param('stateId', 'string', true), param('childId', 'string', true), param('changes', 'object', true)],
+    run: (store, args, command) => store.updateMachineBlendChild(args.machineId, args.stateId, args.childId, args.changes ?? {}, command ?? {}),
+  },
+  removeMachineBlendChild: {
+    summary: 'Remove a persistent blend child.',
+    params: [param('machineId', 'string', true), param('stateId', 'string', true), param('childId', 'string', true)],
+    run: (store, args, command) => store.removeMachineBlendChild(args.machineId, args.stateId, args.childId, command ?? {}),
+  },
+  reorderMachineBlendChild: {
+    summary: 'Reorder blend children while preserving stable ids.',
+    params: [param('machineId', 'string', true), param('stateId', 'string', true), param('childId', 'string', true), param('index', 'number', true)],
+    run: (store, args, command) => store.reorderMachineBlendChild(args.machineId, args.stateId, args.childId, args.index, command ?? {}),
+  },
+  addMachineCondition: {
+    summary: 'Append a validated condition to a transition.',
+    params: [param('machineId', 'string', true), param('transitionId', 'string', true), param('overrides', 'object', true)],
+    run: (store, args, command) => store.addMachineCondition(args.machineId, args.transitionId, args.overrides, command ?? {}),
+  },
+  updateMachineCondition: {
+    summary: 'Update a transition condition by stable id.',
+    params: [param('machineId', 'string', true), param('transitionId', 'string', true), param('conditionId', 'string', true), param('changes', 'object', true)],
+    run: (store, args, command) => store.updateMachineCondition(args.machineId, args.transitionId, args.conditionId, args.changes ?? {}, command ?? {}),
+  },
+  removeMachineCondition: {
+    summary: 'Delete a transition condition by stable id.',
+    params: [param('machineId', 'string', true), param('transitionId', 'string', true), param('conditionId', 'string', true)],
+    run: (store, args, command) => store.removeMachineCondition(args.machineId, args.transitionId, args.conditionId, command ?? {}),
+  },
+  reorderMachineCondition: {
+    summary: 'Reorder conditions without changing their stable ids.',
+    params: [param('machineId', 'string', true), param('transitionId', 'string', true), param('conditionId', 'string', true), param('index', 'number', true)],
+    run: (store, args, command) => store.reorderMachineCondition(args.machineId, args.transitionId, args.conditionId, args.index, command ?? {}),
+  },
+  addMachineAction: {
+    summary: 'Add a validated lifecycle action to a state or transition.',
+    params: [param('machineId', 'string', true), param('ownerKind', 'string', true), param('ownerId', 'string', true), param('overrides', 'object', true)],
+    run: (store, args, command) => store.addMachineAction(args.machineId, args.ownerKind, args.ownerId, args.overrides, command ?? {}),
+  },
+  updateMachineAction: {
+    summary: 'Update a lifecycle action by stable id.',
+    params: [param('machineId', 'string', true), param('ownerKind', 'string', true), param('ownerId', 'string', true), param('actionId', 'string', true), param('changes', 'object', true)],
+    run: (store, args, command) => store.updateMachineAction(args.machineId, args.ownerKind, args.ownerId, args.actionId, args.changes ?? {}, command ?? {}),
+  },
+  removeMachineAction: {
+    summary: 'Delete a lifecycle action by stable id.',
+    params: [param('machineId', 'string', true), param('ownerKind', 'string', true), param('ownerId', 'string', true), param('actionId', 'string', true)],
+    run: (store, args, command) => store.removeMachineAction(args.machineId, args.ownerKind, args.ownerId, args.actionId, command ?? {}),
+  },
+  reorderMachineAction: {
+    summary: 'Reorder lifecycle actions without changing stable ids.',
+    params: [param('machineId', 'string', true), param('ownerKind', 'string', true), param('ownerId', 'string', true), param('actionId', 'string', true), param('index', 'number', true)],
+    run: (store, args, command) => store.reorderMachineAction(args.machineId, args.ownerKind, args.ownerId, args.actionId, args.index, command ?? {}),
+  },
+  addFeature: {
+    summary: 'Add a typed AI-readable feature-graph record.',
+    params: [param('kind', 'string', true), param('overrides', 'object', true)],
+    run: (store, args, command) => store.addFeature(args.kind, args.overrides, command ?? {}),
+  },
+  updateFeature: {
+    summary: 'Update a typed feature-graph record by stable id.',
+    params: [param('kind', 'string', true), param('featureId', 'string', true), param('changes', 'object', true)],
+    run: (store, args, command) => store.updateFeature(args.kind, args.featureId, args.changes, command ?? {}),
+  },
+  removeFeature: {
+    summary: 'Delete a typed feature-graph record by stable id.',
+    params: [param('kind', 'string', true), param('featureId', 'string', true)],
+    run: (store, args, command) => store.removeFeature(args.kind, args.featureId, command ?? {}),
+  },
+  reorderFeature: {
+    summary: 'Reorder a typed feature-graph record without changing its stable id.',
+    params: [param('kind', 'string', true), param('featureId', 'string', true), param('index', 'number', true)],
+    run: (store, args, command) => store.reorderFeature(args.kind, args.featureId, args.index, command ?? {}),
   },
   addBone: {
     summary: 'Add a bone (createBone overrides) and select it.',
@@ -983,6 +1074,48 @@ const COMMAND_MANIFEST_OVERRIDES = {
     ],
     capabilities: ['transactional', 'undoable'],
   },
+  addFeature: {
+    manifestId: 'add-feature',
+    name: 'Add feature record',
+    targetKind: 'feature',
+    parameters: [
+      manifestParameter('kind', 'enum', true, 'Feature record kind.', { enum: [...VEYRA_FEATURE_KINDS] }),
+      manifestParameter('overrides', 'object', true, 'Typed feature record fields.'),
+    ],
+    capabilities: ['typed-feature', 'transactional', 'undoable', 'returns-id'],
+  },
+  updateFeature: {
+    manifestId: 'update-feature',
+    name: 'Update feature record',
+    targetKind: 'feature',
+    parameters: [
+      manifestParameter('kind', 'enum', true, 'Feature record kind.', { enum: [...VEYRA_FEATURE_KINDS] }),
+      manifestParameter('featureId', 'string', true, 'Stable feature record id.'),
+      manifestParameter('changes', 'object', true, 'Typed feature record patch.'),
+    ],
+    capabilities: ['typed-feature', 'transactional', 'undoable'],
+  },
+  removeFeature: {
+    manifestId: 'remove-feature',
+    name: 'Remove feature record',
+    targetKind: 'feature',
+    parameters: [
+      manifestParameter('kind', 'enum', true, 'Feature record kind.', { enum: [...VEYRA_FEATURE_KINDS] }),
+      manifestParameter('featureId', 'string', true, 'Stable feature record id.'),
+    ],
+    capabilities: ['typed-feature', 'transactional', 'undoable'],
+  },
+  reorderFeature: {
+    manifestId: 'reorder-feature',
+    name: 'Reorder feature record',
+    targetKind: 'feature',
+    parameters: [
+      manifestParameter('kind', 'enum', true, 'Feature record kind.', { enum: [...VEYRA_FEATURE_KINDS] }),
+      manifestParameter('featureId', 'string', true, 'Stable feature record id.'),
+      manifestParameter('index', 'number', true, 'Zero-based feature order.'),
+    ],
+    capabilities: ['typed-feature', 'transactional', 'undoable'],
+  },
   addBone: {
     targetKind: 'bone',
     capabilities: ['transactional', 'undoable', 'selects-result'],
@@ -1051,6 +1184,11 @@ const COMMAND_DESCRIPTIONS = Object.freeze({
   removeMachineInput: 'Delete an input. Refused while any transition condition references it — remove those conditions first.',
   updateMachineState: 'Rename a state or retarget its timeline, in place; the state id is immutable.',
   updateMachineTransition: 'Update duration, after gate, or conditions (replaced wholesale, validated against the operator/type matrix). Endpoints are immutable — re-add the transition to re-point.',
+  reconnectMachineTransition: 'Reconnect a transition to stable state ids without changing the transition identity.',
+  addFeature: 'Add a typed feature-graph record for text, layout, events, accessibility, scripts, shaders, render presets, or interchange metadata.',
+  updateFeature: 'Update a feature-graph record by stable typed id; display names remain advisory.',
+  removeFeature: 'Remove a feature-graph record by stable typed id.',
+  reorderFeature: 'Reorder a feature-graph record without changing its stable identity.',
 });
 
 function kebabCase(value) {
@@ -1136,9 +1274,35 @@ for (const action of VEYRA_SEMANTIC_COMMAND_ACTIONS) {
   if (!COMMAND_TABLE[action]) throw new TypeError(`Missing semantic command-bus action: ${action}`);
 }
 
-export const VEYRA_COMMAND_TABLE = Object.freeze(COMMAND_TABLE);
+// M9 graph editing commands were added after the original public catalog was
+// shipped. Keep the legacy enumerable surface stable for older manifest
+// consumers, while exposing the new commands as direct properties and via an
+// explicit extension catalog. Dispatch still accepts every command.
+export const VEYRA_EXTENDED_COMMAND_ACTIONS = Object.freeze([
+  'moveMachineState', 'reconnectMachineTransition', 'addMachineBlendChild', 'updateMachineBlendChild', 'removeMachineBlendChild',
+  'reorderMachineBlendChild', 'addMachineCondition', 'updateMachineCondition', 'removeMachineCondition',
+  'reorderMachineCondition', 'addMachineAction', 'updateMachineAction', 'removeMachineAction',
+  'reorderMachineAction', 'addFeature', 'updateFeature', 'removeFeature', 'reorderFeature',
+]);
 
-export const VEYRA_COMMAND_ACTIONS = Object.freeze(Object.keys(COMMAND_TABLE).sort());
+const extendedCommandSet = new Set(VEYRA_EXTENDED_COMMAND_ACTIONS);
+const publicCommandTable = {};
+for (const [name, entry] of Object.entries(COMMAND_TABLE)) {
+  Object.defineProperty(publicCommandTable, name, {
+    value: entry,
+    enumerable: !extendedCommandSet.has(name),
+    configurable: false,
+    writable: false,
+  });
+}
+
+export const VEYRA_COMMAND_TABLE = Object.freeze(publicCommandTable);
+export const VEYRA_EXTENDED_COMMAND_TABLE = Object.freeze(Object.fromEntries(
+  VEYRA_EXTENDED_COMMAND_ACTIONS.map((name) => [name, COMMAND_TABLE[name]]),
+));
+export const VEYRA_ALL_COMMAND_TABLE = Object.freeze(COMMAND_TABLE);
+
+export const VEYRA_COMMAND_ACTIONS = Object.freeze(Object.keys(publicCommandTable).sort());
 
 export const VEYRA_COMMAND_PROVENANCE_AUDIT = Object.freeze(Object.fromEntries(
   VEYRA_COMMAND_ACTIONS.map((action) => [action, VEYRA_COMMAND_TABLE[action].provenance]),
@@ -1170,7 +1334,7 @@ export function dispatchVeyraCommand(store, descriptor) {
     return fail(null, 'Command descriptor must be a plain object.');
   }
   const action = descriptor.action;
-  const entry = typeof action === 'string' ? VEYRA_COMMAND_TABLE[action] : undefined;
+  const entry = typeof action === 'string' ? COMMAND_TABLE[action] : undefined;
   if (!entry) {
     return fail(
       typeof action === 'string' ? action : null,

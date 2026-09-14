@@ -11,6 +11,8 @@ import {
   createId,
   createKeyframe,
   createMachineCondition,
+  createMachineAction,
+  createMachineBlendChild,
   createMachineInput,
   createMachineLayer,
   createMachineState,
@@ -68,6 +70,39 @@ import {
   removeSemanticRelationInDocument,
   cascadeDeletedSemanticRefs,
 } from './semantics.js';
+import { createFeatureRecord, featureById, featureCollectionForKind } from './featureGraph.js';
+
+function nestedFeatureLocation(document, kind, id) {
+  const value = String(id);
+  if (kind === 'textRun' || kind === 'textModifier') {
+    for (const owner of document.texts || []) {
+      const collection = kind === 'textRun' ? owner.runs : owner.modifiers;
+      const index = (collection || []).findIndex((item) => item.id === value);
+      if (index >= 0) return { owner, collection, index, ownerKind: 'text' };
+    }
+  }
+  if (kind === 'layoutItem') {
+    for (const owner of document.layouts || []) {
+      const collection = owner.items || [];
+      const index = collection.findIndex((item) => item.id === value);
+      if (index >= 0) return { owner, collection, index, ownerKind: 'layout' };
+    }
+  }
+  if (kind === 'eventAction') {
+    for (const owner of document.events || []) {
+      const collection = owner.actions || [];
+      const index = collection.findIndex((item) => item.id === value);
+      if (index >= 0) return { owner, collection, index, ownerKind: 'event' };
+    }
+  }
+  return null;
+}
+
+function featureOwnerCollection(kind) {
+  return kind === 'textRun' || kind === 'textModifier' ? 'texts'
+    : kind === 'layoutItem' ? 'layouts'
+      : kind === 'eventAction' ? 'events' : null;
+}
 
 export const VEYRA_COMMAND_SOURCES = Object.freeze(['user', 'ai', 'script', 'import']);
 
@@ -1214,8 +1249,18 @@ export class VeyraStore {
       const target = machineStates(machineById(document, machineId)).find((candidate) => candidate.id === stateId);
       if (changes.name !== undefined) target.name = changes.name;
       if (changes.timelineId !== undefined) target.timeline = createTimelineRef(changes.timelineId);
+      for (const key of ['caption', 'speed', 'type', 'randomizeExit', 'graph', 'input', 'children']) {
+        if (changes[key] !== undefined) target[key] = cloneValue(changes[key]);
+      }
+      if (changes.timeline !== undefined) target.timeline = cloneValue(changes.timeline);
+      if (changes.actions !== undefined) target.actions = changes.actions.map((action) => createMachineAction({ ...action, id: action.id }));
     });
     return true;
+  }
+
+  moveMachineState(machineId, stateId, graph, commandDescriptor = {}) {
+    if (!graph || typeof graph !== 'object' || Array.isArray(graph)) throw new TypeError('Machine state graph metadata must be an object.');
+    return this.updateMachineState(machineId, stateId, { graph: { x: Number(graph.x ?? 0), y: Number(graph.y ?? 0) } }, commandDescriptor);
   }
 
   updateMachineInput(machineId, inputId, changes = {}, commandDescriptor = {}) {
@@ -1312,9 +1357,297 @@ export class VeyraStore {
       const target = machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === transitionId);
       if (changes.duration !== undefined) target.duration = changes.duration;
       if (changes.after !== undefined) target.after = changes.after;
+      for (const key of ['enabled', 'exitTime', 'pauseSource', 'allowExitDuringTransition', 'easing', 'easingParams', 'randomWeight']) {
+        if (changes[key] !== undefined) target[key] = cloneValue(changes[key]);
+      }
       if (changes.conditions !== undefined) {
         target.conditions = changes.conditions.map((condition) => createMachineCondition(condition));
       }
+      if (changes.actions !== undefined) target.actions = changes.actions.map((action) => createMachineAction({ ...action, id: action.id }));
+    });
+    return true;
+  }
+
+  reconnectMachineTransition(machineId, transitionId, from, to, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const transition = machineTransitions(machine).find((candidate) => candidate.id === transitionId);
+    if (!transition) return false;
+    const fromId = referenceId(from, 'machineState') || String(from || '');
+    const toId = referenceId(to, 'machineState') || String(to || '');
+    if (!fromId || !toId || fromId === toId) throw new TypeError('Transition endpoints must be two distinct machine states.');
+    const layer = machineLayerForTransition(machine, transitionId);
+    if (!layer?.states?.some((state) => state.id === fromId) || !layer.states.some((state) => state.id === toId)) {
+      throw new TypeError('Transition endpoints must belong to the same machine layer.');
+    }
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Reconnect machine transition ${transitionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === transitionId);
+      target.from = createReference('machineState', fromId);
+      target.to = createReference('machineState', toId);
+    });
+    return true;
+  }
+
+  addMachineBlendChild(machineId, stateId, overrides = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const state = machineStates(machine).find((candidate) => candidate.id === stateId);
+    if (!state || !['blend1d', 'directBlend', 'additiveBlend'].includes(state.type)) throw new TypeError(`Machine state ${stateId} is not a blend state.`);
+    const child = createMachineBlendChild(overrides);
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Add blend child ${child.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineStates(machineById(document, machineId)).find((candidate) => candidate.id === stateId);
+      target.children = [...(target.children || []), child];
+    });
+    return child.id;
+  }
+
+  updateMachineBlendChild(machineId, stateId, childId, changes = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const state = machineStates(machine).find((candidate) => candidate.id === stateId);
+    const child = state?.children?.find((candidate) => candidate.id === childId);
+    if (!child) return false;
+    if (changes.id !== undefined && changes.id !== childId) throw new TypeError('Machine blend child id is immutable.');
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Update blend child ${childId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineStates(machineById(document, machineId)).find((candidate) => candidate.id === stateId).children.find((candidate) => candidate.id === childId);
+      for (const key of ['timeline', 'timelineId', 'speed', 'threshold', 'input', 'inputId']) {
+        if (changes[key] !== undefined) target[key] = cloneValue(changes[key]);
+      }
+      if (changes.timelineId !== undefined) target.timeline = createTimelineRef(changes.timelineId);
+      if (changes.inputId !== undefined) target.input = { kind: 'machineInput', id: String(changes.inputId) };
+    });
+    return true;
+  }
+
+  removeMachineBlendChild(machineId, stateId, childId, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const state = machineStates(machine).find((candidate) => candidate.id === stateId);
+    if (!state?.children?.some((candidate) => candidate.id === childId)) return false;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Delete blend child ${childId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineStates(machineById(document, machineId)).find((candidate) => candidate.id === stateId);
+      target.children = target.children.filter((candidate) => candidate.id !== childId);
+    });
+    return true;
+  }
+
+  reorderMachineBlendChild(machineId, stateId, childId, index, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const state = machineStates(machine).find((candidate) => candidate.id === stateId);
+    const from = state?.children?.findIndex((candidate) => candidate.id === childId) ?? -1;
+    if (from < 0) return false;
+    const to = Math.max(0, Math.min(state.children.length - 1, Math.trunc(Number(index))));
+    if (!Number.isFinite(to)) throw new TypeError('Blend child order index must be finite.');
+    if (from === to) return true;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Reorder blend child ${childId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineStates(machineById(document, machineId)).find((candidate) => candidate.id === stateId);
+      const current = target.children.findIndex((candidate) => candidate.id === childId);
+      const [item] = target.children.splice(current, 1); target.children.splice(to, 0, item);
+    });
+    return true;
+  }
+
+  addMachineCondition(machineId, transitionId, overrides = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const transition = machineTransitions(machine).find((candidate) => candidate.id === transitionId);
+    if (!transition) return null;
+    const condition = createMachineCondition(overrides);
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Add machine condition ${condition.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === transitionId);
+      target.conditions = [...(target.conditions || []), condition];
+    });
+    return condition.id;
+  }
+
+  updateMachineCondition(machineId, transitionId, conditionId, changes = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const transition = machineTransitions(machine).find((candidate) => candidate.id === transitionId);
+    const condition = transition?.conditions?.find((candidate) => candidate.id === conditionId);
+    if (!condition) return false;
+    if (changes.id !== undefined && changes.id !== conditionId) throw new TypeError('Machine condition id is immutable.');
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Update machine condition ${conditionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === transitionId).conditions.find((candidate) => candidate.id === conditionId);
+      for (const key of ['input', 'inputId', 'source', 'op', 'value', 'compare']) if (changes[key] !== undefined) target[key] = cloneValue(changes[key]);
+    });
+    return true;
+  }
+
+  removeMachineCondition(machineId, transitionId, conditionId, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const transition = machineTransitions(machine).find((candidate) => candidate.id === transitionId);
+    if (!transition?.conditions?.some((candidate) => candidate.id === conditionId)) return false;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Delete machine condition ${conditionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === transitionId);
+      target.conditions = target.conditions.filter((candidate) => candidate.id !== conditionId);
+    });
+    return true;
+  }
+
+  reorderMachineCondition(machineId, transitionId, conditionId, index, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId), transition = machineTransitions(machine).find((candidate) => candidate.id === transitionId);
+    const from = transition?.conditions?.findIndex((candidate) => candidate.id === conditionId) ?? -1;
+    if (from < 0) return false;
+    const to = Math.max(0, Math.min(transition.conditions.length - 1, Math.trunc(Number(index))));
+    if (!Number.isFinite(to)) throw new TypeError('Machine condition order index must be finite.');
+    if (from === to) return true;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Reorder machine condition ${conditionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === transitionId);
+      const current = target.conditions.findIndex((candidate) => candidate.id === conditionId); const [item] = target.conditions.splice(current, 1); target.conditions.splice(to, 0, item);
+    });
+    return true;
+  }
+
+  #machineActionOwner(machineId, ownerKind, ownerId) {
+    const machine = machineById(this.document, machineId);
+    if (!machine) return null;
+    if (ownerKind === 'state') return machineStates(machine).find((candidate) => candidate.id === ownerId) || null;
+    if (ownerKind === 'transition') return machineTransitions(machine).find((candidate) => candidate.id === ownerId) || null;
+    return null;
+  }
+
+  addMachineAction(machineId, ownerKind, ownerId, overrides = {}, commandDescriptor = {}) {
+    const owner = this.#machineActionOwner(machineId, ownerKind, ownerId);
+    if (!owner) return null;
+    const action = createMachineAction(overrides);
+    const allowed = ownerKind === 'state' ? ['state-start', 'state-end'] : ['transition-start', 'transition-end'];
+    if (!allowed.includes(action.phase)) throw new TypeError(`Machine ${ownerKind} action phase must be ${allowed.join(' or ')}.`);
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Add machine action ${action.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = ownerKind === 'state' ? machineStates(machineById(document, machineId)).find((candidate) => candidate.id === ownerId) : machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === ownerId);
+      target.actions = [...(target.actions || []), action];
+    });
+    return action.id;
+  }
+
+  updateMachineAction(machineId, ownerKind, ownerId, actionId, changes = {}, commandDescriptor = {}) {
+    const owner = this.#machineActionOwner(machineId, ownerKind, ownerId), action = owner?.actions?.find((candidate) => candidate.id === actionId);
+    if (!action) return false;
+    if (changes.id !== undefined && changes.id !== actionId) throw new TypeError('Machine action id is immutable.');
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Update machine action ${actionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const targetOwner = ownerKind === 'state' ? machineStates(machineById(document, machineId)).find((candidate) => candidate.id === ownerId) : machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === ownerId);
+      const target = targetOwner.actions.find((candidate) => candidate.id === actionId);
+      const next = createMachineAction({ ...target, ...changes, id: actionId });
+      targetOwner.actions[targetOwner.actions.findIndex((candidate) => candidate.id === actionId)] = next;
+    });
+    return true;
+  }
+
+  removeMachineAction(machineId, ownerKind, ownerId, actionId, commandDescriptor = {}) {
+    const owner = this.#machineActionOwner(machineId, ownerKind, ownerId);
+    if (!owner?.actions?.some((candidate) => candidate.id === actionId)) return false;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Delete machine action ${actionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const targetOwner = ownerKind === 'state' ? machineStates(machineById(document, machineId)).find((candidate) => candidate.id === ownerId) : machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === ownerId);
+      targetOwner.actions = targetOwner.actions.filter((candidate) => candidate.id !== actionId);
+    });
+    return true;
+  }
+
+  reorderMachineAction(machineId, ownerKind, ownerId, actionId, index, commandDescriptor = {}) {
+    const owner = this.#machineActionOwner(machineId, ownerKind, ownerId), from = owner?.actions?.findIndex((candidate) => candidate.id === actionId) ?? -1;
+    if (from < 0) return false;
+    const to = Math.max(0, Math.min(owner.actions.length - 1, Math.trunc(Number(index))));
+    if (!Number.isFinite(to)) throw new TypeError('Machine action order index must be finite.');
+    if (from === to) return true;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Reorder machine action ${actionId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const targetOwner = ownerKind === 'state' ? machineStates(machineById(document, machineId)).find((candidate) => candidate.id === ownerId) : machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === ownerId);
+      const current = targetOwner.actions.findIndex((candidate) => candidate.id === actionId); const [item] = targetOwner.actions.splice(current, 1); targetOwner.actions.splice(to, 0, item);
+    });
+    return true;
+  }
+
+  // Generic feature-graph CRUD keeps text, layout, event, accessibility,
+  // script, shader, render-preset, and interchange records on the same
+  // transactional/undoable command path as scene and machine entities.
+  addFeature(kind, overrides = {}, commandDescriptor = {}) {
+    const collection = featureCollectionForKind(kind);
+    const ownerCollection = featureOwnerCollection(kind);
+    if (!collection && !ownerCollection) throw new TypeError(`Unsupported feature kind: ${kind}.`);
+    const ownerId = overrides.ownerId || overrides.textId || overrides.layoutId || overrides.eventId;
+    const owner = ownerCollection ? (this.document[ownerCollection] || []).find((candidate) => candidate.id === String(ownerId)) : null;
+    if (ownerCollection && !owner) throw new TypeError(`${kind} features require a valid ownerId.`);
+    const recordInput = { ...overrides };
+    delete recordInput.ownerId; delete recordInput.textId; delete recordInput.layoutId; delete recordInput.eventId;
+    const record = createFeatureRecord(kind, recordInput);
+    const targetRecords = ownerCollection ? (owner[kind === 'textRun' ? 'runs' : kind === 'textModifier' ? 'modifiers' : kind === 'layoutItem' ? 'items' : 'actions'] || []) : (this.document[collection] || []);
+    if (targetRecords.some((candidate) => candidate.id === record.id)) throw new TypeError(`Feature ${kind}:${record.id} already exists.`);
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Add ${kind} ${record.name || record.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      if (ownerCollection) {
+        const nextOwner = document[ownerCollection].find((candidate) => candidate.id === String(ownerId));
+        const key = kind === 'textRun' ? 'runs' : kind === 'textModifier' ? 'modifiers' : kind === 'layoutItem' ? 'items' : 'actions';
+        nextOwner[key] = [...(nextOwner[key] || []), record];
+      } else document[collection] = [...(document[collection] || []), record];
+    });
+    return record.id;
+  }
+
+  updateFeature(kind, featureId, changes = {}, commandDescriptor = {}) {
+    const collection = featureCollectionForKind(kind);
+    const ownerCollection = featureOwnerCollection(kind);
+    if (!collection && !ownerCollection) throw new TypeError(`Unsupported feature kind: ${kind}.`);
+    const current = featureById(this.document, kind, featureId);
+    if (!current) return false;
+    if (changes.id !== undefined && String(changes.id) !== String(featureId)) throw new TypeError(`Feature ${kind} id is immutable.`);
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Update ${kind} ${featureId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = featureById(document, kind, featureId);
+      const next = createFeatureRecord(kind, { ...target, ...cloneValue(changes), id: featureId });
+      if (collection) {
+        const index = document[collection].findIndex((candidate) => candidate.id === featureId);
+        document[collection][index] = next;
+      } else {
+        const location = nestedFeatureLocation(document, kind, featureId);
+        location.collection[location.index] = next;
+      }
+    });
+    return true;
+  }
+
+  removeFeature(kind, featureId, commandDescriptor = {}) {
+    const collection = featureCollectionForKind(kind);
+    const ownerCollection = featureOwnerCollection(kind);
+    if (!collection && !ownerCollection) throw new TypeError(`Unsupported feature kind: ${kind}.`);
+    const current = featureById(this.document, kind, featureId);
+    if (!current) return false;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Delete ${kind} ${featureId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      if (collection) document[collection] = (document[collection] || []).filter((candidate) => candidate.id !== String(featureId));
+      else {
+        const location = nestedFeatureLocation(document, kind, featureId);
+        location.collection.splice(location.index, 1);
+      }
+    });
+    return true;
+  }
+
+  reorderFeature(kind, featureId, index, commandDescriptor = {}) {
+    const collection = featureCollectionForKind(kind);
+    const ownerCollection = featureOwnerCollection(kind);
+    if (!collection && !ownerCollection) throw new TypeError(`Unsupported feature kind: ${kind}.`);
+    const location = ownerCollection ? nestedFeatureLocation(this.document, kind, featureId) : null;
+    const records = collection ? this.document[collection] || [] : location?.collection || [];
+    const from = records.findIndex((candidate) => candidate.id === String(featureId));
+    if (from < 0) return false;
+    if (!Number.isFinite(Number(index))) throw new TypeError('Feature order index must be finite.');
+    const to = Math.max(0, Math.min(records.length - 1, Math.trunc(Number(index))));
+    if (from === to) return true;
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Reorder ${kind} ${featureId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = collection ? document[collection] : nestedFeatureLocation(document, kind, featureId)?.collection;
+      if (!target) return;
+      const currentIndex = target.findIndex((candidate) => candidate.id === String(featureId));
+      const [item] = target.splice(currentIndex, 1);
+      target.splice(to, 0, item);
     });
     return true;
   }

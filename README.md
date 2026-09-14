@@ -87,6 +87,43 @@ stable stops, animation semantics, SVG mapping, and inspector controls are
 specified in [`docs/VEYRA_PAINT.md`](docs/VEYRA_PAINT.md). Version 1 and 2 files
 load in memory and the next save writes canonical version 3 JSON.
 
+## M10 AI-readable animation surface
+
+The current implementation adds a shared feature graph (`featureVersion: 8`)
+for rich text, layout records, events/markers, accessibility, script/shader
+contracts, render presets and interchange metadata. These records use typed
+stable refs, nested owner refs, semantic/dependency indexing and the same
+transactional command bus as vector and state-machine edits. Image nodes are
+asset-backed and render to SVG; text runs render as accessible SVG spans.
+
+The Logic panel in `veyra.html` is backed by the canonical layered machine
+model. The browser surface and scripts can use the same operations:
+
+```js
+const machineId = veyra.createMachine({ name: 'Hero' });
+const layerId = veyra.addMachineLayer(machineId, { name: 'Base' });
+const stateId = veyra.addMachineState(machineId, { name: 'Idle', timelineId, layerId });
+veyra.moveMachineState(machineId, stateId, { x: 80, y: 64 });
+const player = veyra.createPlayer({ timelineId, loop: 'loop' });
+player.seek(0.5);
+player.play();
+```
+
+`createVeyraPlayer()` and the `<veyra-player>` custom element provide
+deterministic seek/advance, loop/ping-pong playback, machine inputs, lifecycle
+events, snapshots and SVG render callbacks. `importLottie()`/`exportLottie()`
+cover common shape, path, text, marker and image layers with diagnostics and
+stable mappings. `exportDotLottie()` emits a dependency-free JSON package
+(`manifest`, `animations`, `images`, `fonts`, and Veyra extensions); a host that
+needs the binary `.lottie` ZIP can wrap this package with its own ZIP writer.
+
+The feature graph and interchange layer are intentionally explicit about
+remaining boundaries: scripts and shaders are authored contracts rather than
+executed code, there is no `.riv` binary importer/exporter in this milestone,
+and production GPU/raster/video encoders and full vendor-runtime parity remain
+future work. See [`milestone.md`](milestone.md) for the verification evidence
+and exact acceptance boundary.
+
 Local scripts and agents can use the running editor through `globalThis.veyra`:
 
 ```js
