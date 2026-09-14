@@ -4,14 +4,14 @@
 
 Complete only the tasks below. Follow-up ideas belong in `suggestions`. Do not start M9. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed after independent M8-C4 verification
+## Progress snapshot — refreshed after M8-C5 implementation handoff
 
-These are carry-forward approximate planning estimates, not measured vendor-parity scores, line-count metrics or test-pass percentages. C4's seven reproduced regressions now pass independently. Two remaining runtime integration families prevent acceptance of M8 as a whole; no new overall verified-completion increment is claimed.
+These are carry-forward approximate planning estimates, not measured vendor-parity scores, line-count metrics or test-pass percentages. M8-C5 now has a worker implementation with clean full-suite evidence for both remaining runtime integration families. Independent acceptance is still required, so no new overall verified-completion increment is claimed.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation. C3 and covered C4 fixes pass; the two-way runtime write must agree with effective read/graph identity. |
-| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; all 45 existing suites remain green. Invalid visual binding output still needs safe frame isolation. |
+| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation. C3/C4 remain green; the C5 worker now resolves reverse writes from the effective scoped graph, pending independent verification. |
+| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; the C5 worker passes all 46 current suites and isolates invalid visual binding output before scene publication, pending independent verification. |
 | Modern Rive editor/runtime parity | **~53–57%** | No new feature-family completion credit until M8 acceptance. |
 | Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No new interchange capability accepted. |
 | Full Veyra superset target | **~46–49%** | Rive-class capability + Lottie/dotLottie interoperability + AI-native semantics, subject to quality/modularity gates. |
@@ -22,7 +22,7 @@ These are carry-forward approximate planning estimates, not measured vendor-pari
 - Implementation M0–M7: previously VERIFIED, with documented limitations preserved.
 - `plan.md` M3 / implementation M8: **CORRECTIONS REQUIRED**.
 - C3's ten reproduced failures and C4's seven reproduced failures: **FIXES CONFIRMED in their tested cases**. Preserve these fixes; do not restart their implementations.
-- Current implementation work: **M8-C5 — READY**, below.
+- Current implementation work: **M8-C5 — AWAITING VERIFICATION**, below.
 - M9 / layered state machines: **NOT STARTED; blocked on M8 acceptance**.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
@@ -52,7 +52,7 @@ The review branch is evidence, not a second implementation milestone. Convert de
 **Topic:** Two-Way Binding Identity, Actual Value Validation, Error Isolation & Event Safety  
 **Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding  
 **M8 verdict:** `CORRECTIONS REQUIRED`  
-**Implementation status:** `READY`
+**Implementation status:** `AWAITING VERIFICATION`
 
 ## Goal
 
@@ -152,15 +152,15 @@ No new feature family, runtime rewrite, broad UI redesign, scripting, Layout, Lo
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commits:
-- Final clean main SHA / exact standard Tests run:
-- Five verifier failures -> permanent test mapping:
-- Effective two-way terminal / pending retarget / Component-scope proof:
-- Event/notification/history non-mutation during resolution proof:
-- Canonical ordinary-property value validation proof:
-- Invalid-branch isolation / event delivery / valid replacement proof:
-- Preview/dispatch/converter failure consistency proof:
-- All prior suites / syntax checks:
-- Actual validation/resolution/output work and size impact:
-- Cleanup / compatibility / browser-acceptance limitations:
+- Implementation commit: `3011838ad931d8f3bae1e18e4765e20d61a64c0e` on the clean worker tree; promotion is intentionally squash-based so temporary transport history does not enter main.
+- Worker CI evidence: Actions run `34797443968`, job `103833181034` — syntax/contract checks PASS, all 46 discovered suites PASS, diff hygiene PASS. Exact-main standard Tests must still run after promotion.
+- Five verifier failures -> permanent test mapping: `tests/veyra-m8-c5-effective-writes.test.mjs` covers derived-terminal reverse writes, immediate scoped retargets, invalid scalar output/event delivery, invalid converter color isolation/recovery, geometry bounds, and safe preview/dispatch evaluation; prior C4 positive controls remain in normal discovery.
+- Effective two-way terminal / pending retarget / Component-scope proof: reverse mutation settles the same scoped binding graph on a fork, reads the binding's effective resolved source, validates that effective endpoint, then mutates only that scoped terminal. The regression changes A from child2 to child3 and writes immediately before any render/read while B remains isolated.
+- Event/notification/history non-mutation during resolution proof: endpoint discovery runs on a forked runtime, so live event queues/caches/work counters are not advanced merely to choose the terminal; authored serialization/revision/history stay unchanged by runtime-only edits.
+- Canonical ordinary-property value validation proof: canonical finite/bounded/integer/color primitives are shared with document normalization through `src/veyra/propertyValueContract.js`; ordinary binding outputs are value-validated before override publication without cloning/normalizing the whole project per binding.
+- Invalid-branch isolation / event delivery / valid replacement proof: opacity 2, invalid converter color and polygon sides 2 are diagnosed/suppressed; independent output and the valid trigger-bearing scene still return; valid replacement recovers. Published nullable converter sentinels remain unrewritten for C3 compatibility.
+- Preview/dispatch/converter failure consistency proof: an accepted runtime-dependent graph can no longer leave canonical evaluation crashable; bad runtime outputs become structured binding diagnostics. Invalid converter branches are isolated by the same ordinary-property contract.
+- All prior suites / syntax checks: PASS on the clean worker tree in run `34797443968`; C1/C2/C3/C4 and M0-M7 suites remained green.
+- Actual validation/resolution/output work and size impact: reverse-write endpoint discovery performs one private forked graph settle per two-way mutation, not per settled frame; ordinary output validation is targeted per produced property and shares scalar primitives with authored normalization. No new steady-frame polling or project-wide clone was added.
+- Cleanup / compatibility / browser-acceptance limitations: temporary worker scripts/workflows/failure logs were removed from the promoted tree. Existing nullable list-converter publication semantics are preserved. This is Node/runtime/control-plane coverage; real-browser visual/usability acceptance remains separate.
 ```
