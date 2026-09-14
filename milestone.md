@@ -4,9 +4,9 @@
 
 Complete only the tasks below. Follow-up ideas belong in `suggestions`. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed after exact-head M9/M10 integration CI and sequencing review
+## Progress snapshot — refreshed after exact-head production-hardening CI and sequencing review
 
-These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. The verified estimates remain anchored to the independently accepted M0–M8 baseline. M9 has advanced materially on `main`, and a broader feature-graph/player/interchange implementation has also landed, but **M9 is still `IN PROGRESS` and has not had independent milestone acceptance**. Per `QUALITY.md` and the milestone workflow, none of that unverified work increases verified completion percentages or advances the active roadmap milestone.
+These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. The verified estimates remain anchored to the independently accepted M0–M8 baseline. M9 has advanced materially on `main`, and a broader feature-graph/player/interchange implementation plus production hardening has also landed, but **M9 is still `IN PROGRESS` and has not had independent milestone acceptance**. Per `QUALITY.md` and the milestone workflow, none of that unverified work increases verified completion percentages or advances the active roadmap milestone.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
@@ -23,21 +23,22 @@ These are approximate engineering planning estimates, not vendor-certified parit
 - `plan.md` M3 / implementation M8 — View Models & Data Binding: **VERIFIED**.
 - M8-C1 through M8-C5 corrections: **VERIFIED as part of M8**; preserve their regression suites and contracts.
 - **Current active implementation work: M9 — State Machine parity + visual graph editor. Status: `IN PROGRESS`; independent acceptance remains open.**
-- The feature-graph/player/interchange change labeled M10 has landed on `main` and is recorded below as **deferred implementation evidence only**. It is not the active milestone and is not VERIFIED because M9 has not passed its acceptance boundary.
+- The feature-graph/player/interchange change labeled M10 and its production-hardening follow-up have landed on `main` and are recorded below as **deferred implementation evidence only**. They are not the active milestone and are not VERIFIED because M9 has not passed its acceptance boundary.
 - `plan.md` M5+ remains queued until M9 is independently accepted. Do not start or credit another roadmap milestone merely because later-family code already exists on `main`.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
 
 ## Latest main-head evidence and sequencing blocker
 
-- Current integration baseline before the milestone-only sequencing correction: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`.
+- Earlier integrated baseline before production hardening: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`.
 - Standard repository `Tests` #195, run `34866362425`, job `104051088061`: **SUCCESS on that exact integration SHA** with **55/55 source syntax checks PASS and 59/59 suites PASS**.
-- Current clean `main` before this CI-evidence-only refresh: `82f6a1b59c41b1c1e118efc0af6bdda2190dd5a7`.
-- Standard repository `Tests` #196, run `34867613727`, job `104055300606`: **SUCCESS on that exact current-main SHA** with **55/55 source syntax checks PASS and 59/59 suites PASS**.
-- The green suite includes all existing M0–M8 regressions, the current M9 suites, `tests/veyra-m9-c1-layers.test.mjs`, `tests/veyra-m9-layer-schema.test.mjs`, and `tests/veyra-m10-features.test.mjs`.
-- The post-M9 implementation commit `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde` and its follow-up docs were merged into `main`; standard exact-head CI therefore proves the integrated tree is green, **not** that M9 or the later feature families are independently accepted.
-- No independent M9 verifier branch/evidence was found in the repository during this review. M9 still has open acceptance gates below, including Additive Blend, built-in runtime-value transition sources, complete ownership/dependency/name-invariance evidence, Component-scoped machine runtime isolation, bounded per-layer runtime errors, settled-layer sleeping/performance gates, and real browser visual-graph acceptance.
-- Sequencing blocker: the landed feature-graph/player/Lottie work touches later roadmap families that M9 explicitly lists as non-goals. Keep it regression-covered, but do not treat it as a second active milestone or verified progress. Finish and independently accept M9 first.
+- Production-hardening implementation: `0495feea9d68bf97125ac72b28bd49c0f1c0dc82`, merged with the milestone sequencing line through `2b7d3fe28d1d948b9cc0c4f7c712dbff311e8d34`.
+- Exact current evidence head before this milestone-only refresh: `402b03f7bfe35c81db933b8ba3bfab9fdd4866c6`.
+- Standard repository `Tests` #198, run `34891527516`, job `104135148380`: **SUCCESS on that exact head** with **56/56 source syntax checks PASS and 61/61 suites PASS**.
+- The green suite includes all existing M0–M8 regressions, all discovered current M9 suites, `tests/veyra-m10-features.test.mjs`, `tests/veyra-production-hardening.test.mjs`, `tests/veyra-static-server.test.mjs`, and the responsive-layout coverage introduced by production hardening.
+- Standard exact-head CI proves the integrated tree is green, **not** that M9 or the later feature families are independently accepted.
+- No independent M9 verifier branch/evidence was found in the repository during this review. M9 still has open acceptance gates below, including Additive Blend, built-in runtime-value transition sources, complete ownership/dependency/name-invariance evidence, Component-scoped machine runtime isolation, bounded per-layer runtime errors, settled-layer sleeping/performance gates, and complete real-browser visual-graph acceptance.
+- Sequencing blocker: the landed feature-graph/player/Lottie/layout/production-hardening work touches later roadmap families that M9 explicitly lists as non-goals. Keep it regression-covered, but do not treat it as a second active milestone or verified progress. Finish and independently accept M9 first.
 
 ## Independent M8 acceptance evidence
 
@@ -121,7 +122,7 @@ Requirements:
 - `tests/veyra-m9-layer-schema.test.mjs` proves deterministic legacy-flat → one-default-layer migration, stable compatibility-layer identity, deterministic save/load round-trip, layer CRUD/reorder/undo/redo, blocked unsafe removals, and rename/graph-metadata identity stability.
 - `tests/veyra-m9-c1-layers.test.mjs` adds strict global layer/state identity, same-layer transition validation, layer weights, canonical layer commands, summary/manifest/resolver `machineLayer` refs, dependency guards across layers, deterministic artboard-duplication remapping and compatibility-layer preservation.
 - `tests/veyra-m10-features.test.mjs` additionally exercises stable-ID state graph movement and transition reconnection through canonical commands. This contributes M9 implementation evidence even though the broader feature commit itself is deferred from roadmap advancement.
-- All of those suites pass on exact-head standard Tests #196. Remaining Task 1 proof is full persistent-subobject semantic/dependency coverage and an explicit regression that advances runtime clocks/transitions before save/serialize and proves no ephemeral machine state enters authored data.
+- All of those suites pass on exact-head standard Tests #198. Remaining Task 1 proof is full persistent-subobject semantic/dependency coverage and an explicit regression that advances runtime clocks/transitions before save/serialize and proves no ephemeral machine state enters authored data.
 
 ## Task 2 — Complete state families
 
@@ -176,7 +177,7 @@ Implement concurrent ordered layer evaluation with an explicit property-composit
 - Entry/Exit/Any pseudo states, animation state speed (including reverse), state captions/graph metadata, deterministic later-layer property priority and layered ownership evidence are covered by `tests/veyra-m9-layered-runtime.test.mjs`.
 - Layer weights now blend each layer's evaluated contribution against the previously composed/authored value; ownership evidence records layer ref, state, contribution timelines, `layerWeight` and effective winner status. This is useful partial evidence, but the Task 3 owner-stack checkbox remains open until the public ownership surface proves the complete authored → binding/timeline/blend → layer winner chain.
 - Disabled layers are skipped and contribute no ownership; runtime work counters distinguish active/inactive layer work and reset with runtime reset so deterministic scrub/replay remains comparable.
-- Worker Actions run `34810074334`, job `103869484723`: syntax checks PASS, **48/48 suites PASS**, diff hygiene PASS. Current exact-head Tests #196 also keeps the layered runtime and M9-C1 suites green.
+- Worker Actions run `34810074334`, job `103869484723`: syntax checks PASS, **48/48 suites PASS**, diff hygiene PASS. Current exact-head Tests #198 also keeps the layered runtime and M9-C1 suites green.
 - Capability honesty: steady 1D/Direct Blend evaluation and blend transition composition are implemented; Additive Blend and full blend authoring/UI remain open. M9 remains `IN PROGRESS`.
 
 ## Task 4 — Rive-class transition contract
@@ -248,7 +249,7 @@ Unsupported future action types must fail with capabilities/diagnostics rather t
 - Persistent machine actions have stable typed identity and explicit lifecycle phase. Implemented runtime transports cover View Model/data updates, legacy input updates, emitted typed effects and timeline/runtime requests without direct authored mutation.
 - Lifecycle actions execute exactly once for actual state/transition lifecycle events, including zero-duration transitions and snapshot-safe interruption. Forks isolate action side effects.
 - Deterministic Randomize Exit is replayable under a seed and composes with the same selected-transition trigger consumption and lifecycle-action path.
-- Permanent suites now include `veyra-m9-transition-interruption`, `veyra-m9-data-condition-sources`, `veyra-m9-trigger-consumption`, `veyra-m9-lifecycle-actions` and `veyra-m9-randomize-exit`; all are in standard discovery and pass on current exact-head Tests #196.
+- Permanent suites now include `veyra-m9-transition-interruption`, `veyra-m9-data-condition-sources`, `veyra-m9-trigger-consumption`, `veyra-m9-lifecycle-actions` and `veyra-m9-randomize-exit`; all are in standard discovery and pass on current exact-head Tests #198.
 - Built-in artboard/runtime values remain unimplemented as condition sources; unsupported future source/action kinds must continue to fail closed through canonical capabilities/normalization.
 
 ## Task 6 — Runtime correctness and lifecycle
@@ -295,8 +296,9 @@ Graph positions, captions and layout metadata are editor-facing properties; chan
 ### M9 visual-graph implementation evidence — acceptance still open
 
 - The landed graph-editor/Logic-panel code supports machine/layer selection, layer create/rename/reorder/enable/remove, state and transition creation, stable-ID selection, endpoint reconnection, graph movement, pan/zoom, typed pseudo/animation/blend rendering, runtime readout and inspector edits.
-- `tests/veyra-m10-features.test.mjs` exercises the shared graph controller, SVG graph rendering, state movement, transition creation/reconnection and graph-camera non-mutation. Standard Tests #196 keeps that suite green on the integrated head.
-- **Task 7 checkboxes remain open** because current permanent coverage is controller/fake-DOM oriented and does not yet prove the complete browser interaction surface: delete/reconnect UX, snapping behavior, all inspectors, runtime highlighting/owner contributions and pan/zoom/selection through real DOM events. M9 acceptance explicitly requires honest browser/headless coverage rather than source-only or controller-only claims.
+- `tests/veyra-m10-features.test.mjs` exercises the shared graph controller, SVG graph rendering, state movement, transition creation/reconnection and graph-camera non-mutation. Standard Tests #198 keeps that suite green on the integrated head.
+- Production hardening also adds a live browser smoke path that creates a machine through the custom modal, Shift-selects two states, creates a transition and inspects it without current-bundle console errors. This is useful browser evidence, but it is not the complete Task 7 interaction/inspector/debug acceptance surface.
+- **Task 7 checkboxes remain open** because permanent coverage still does not prove the complete browser interaction surface: delete/reconnect UX, snapping behavior, all inspectors, runtime highlighting/owner contributions and pan/zoom/selection through real DOM events. M9 acceptance explicitly requires honest browser/headless coverage rather than source-only or controller-only claims.
 
 ## Task 8 — Canonical UI/AI command parity
 
@@ -396,7 +398,7 @@ Add permanent tests covering at minimum:
 23. existing M0–M8 regression suites stay green;
 24. headless/browser DOM tests exercise actual visual-graph interactions rather than source-regex-only checks.
 
-Current permanent coverage now directly exercises legacy migration/layer CRUD/identity and weighted layered runtime (#1, substantial parts of #2–#6), transition/runtime families #8–#13, and portions of #19–#21 through the M9-C1/layer-schema and graph-controller tests. Additive composition (#7), runtime reconciliation/isolation/ownership/name-invariance (#14–#18), settled/no-machine performance (#22) and real browser graph interaction (#24) remain acceptance blockers. All M0–M8 suites remain green on exact-head Tests #196 (#23).
+Current permanent coverage now directly exercises legacy migration/layer CRUD/identity and weighted layered runtime (#1, substantial parts of #2–#6), transition/runtime families #8–#13, and portions of #19–#21 through the M9-C1/layer-schema and graph-controller tests. Additive composition (#7), runtime reconciliation/isolation/ownership/name-invariance (#14–#18), settled/no-machine performance (#22) and complete real-browser graph interaction (#24) remain acceptance blockers. All M0–M8 suites remain green on exact-head Tests #198 (#23). The production-hardening live-browser smoke narrows #24 but does not close its full interaction/inspector/debug contract.
 
 ## Explicit non-goals
 
@@ -459,7 +461,7 @@ Handoff
 
 # Deferred post-M9 implementation evidence — Feature Graph, Player + Interchange
 
-**Roadmap mapping:** touches later `plan.md` families (including listener/event/accessibility, text/assets, layout, scripting/runtime and Lottie/dotLottie work)
+**Roadmap mapping:** touches later `plan.md` families (including listener/event/accessibility, text/assets, layout, scripting/runtime and Lottie/dotLottie work)  
 **Status:** `LANDED ON MAIN — OUT OF SEQUENCE; NOT ACTIVE; NOT INDEPENDENTLY VERIFIED`
 
 ## Purpose of this record
@@ -477,28 +479,15 @@ Keep already-landed implementation evidence visible without turning it into a se
 
 ## Integrated CI evidence
 
-- Implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`.
-- Production-hardening commit: `0495feea9d68bf97125ac72b28bd49c0f1c0dc82` (bounded inputs, layout evaluation,
-  renderer/player parity, static server, browser-safe modal and regression
-  coverage).
-- Integrated production baseline: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`.
-- Standard Tests #195, run `34866362425`, job `104051088061`: **SUCCESS on that exact integrated SHA**.
-- Exact integrated-head log: **55/55 source syntax checks PASS; 59/59 repository suites PASS**, including `tests/veyra-m10-features.test.mjs` and all discovered M0–M9 regressions.
-- Current docs-only sequencing head `82f6a1b59c41b1c1e118efc0af6bdda2190dd5a7` also passed standard Tests #196, run `34867613727`, job `104055300606`, with the same **55/55 syntax + 59/59 suites PASS**; this adds exact-current-head CI evidence but no new feature or verification credit.
+- Original implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`.
+- Production-hardening commit: `0495feea9d68bf97125ac72b28bd49c0f1c0dc82` (bounded inputs, layout evaluation, renderer/player parity, static server, browser-safe modal and regression coverage).
+- Sequencing/integration merge: `2b7d3fe28d1d948b9cc0c4f7c712dbff311e8d34`.
+- Earlier integrated production baseline: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`; Tests #195 (`34866362425`, job `104051088061`) passed there with **55/55 syntax + 59/59 suites**.
+- Exact production-hardening evidence head: `402b03f7bfe35c81db933b8ba3bfab9fdd4866c6`; standard Tests #198, run `34891527516`, job `104135148380`: **SUCCESS with 56/56 syntax checks and 61/61 suites PASS**.
 - Direct feature-suite coverage includes nested feature identity/undo, graph camera non-mutation, state movement/reconnect, deterministic player stepping, Lottie text/marker/image/path mapping, SVG text output and JSON-safe dotLottie round-trip.
-- Production hardening on the current implementation: `npm run check` is
-  **56/56** and `npm test` is **61/61**, including layout, hardening and
-  static-server suites plus all M0–M9 regressions.
-- Direct coverage additionally proves additive Shift-selection, gradient/text/
-  marker/image mapping, SVG text/image output, bounded import/export payloads,
-  and JSON-safe dotLottie round-trip.
-- The dependency-free server passes GET/HEAD, redirect, traversal/symlink,
-  ETag/304, cache-policy and security-header tests; mutable source assets
-  revalidate with `Cache-Control: no-cache`.
-- Live browser smoke (Codex in-app browser): the editor loads from the static
-  server, the custom modal creates a machine (including Enter-to-submit), two
-  states can be Shift-selected, and a transition is created and inspected
-  without current-bundle console errors.
+- Direct hardening coverage additionally proves additive Shift-selection, gradient/text/marker/image mapping, SVG text/image output, bounded import/export payloads, deterministic layout evaluation, production static-server behavior and JSON-safe dotLottie round-trip.
+- The dependency-free server passes GET/HEAD, redirect, traversal/symlink, ETag/304, cache-policy and security-header tests; mutable source assets revalidate with `Cache-Control: no-cache`.
+- Live browser smoke (Codex in-app browser): the editor loads from the static server, the custom modal creates a machine (including Enter-to-submit), two states can be Shift-selected, and a transition is created and inspected without current-bundle console errors.
 - `git diff --check`: clean (line-ending normalization warnings only).
 
 ## Sequencing and acceptance boundary
@@ -515,15 +504,15 @@ Do not add further post-M9 feature-family scope merely to elaborate this record.
 - Status: DEFERRED PENDING M9 ACCEPTANCE
 - Original implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`
 - Production-hardening commit: `0495feea9d68bf97125ac72b28bd49c0f1c0dc82`
-- Integrated production baseline: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`
-- Exact integrated Tests evidence: #195 / run `34866362425` / job `104051088061` — 55/55 syntax, 59/59 suites PASS
-- Exact current-main Tests evidence: #196 / run `34867613727` / job `104055300606` on `82f6a1b59c41b1c1e118efc0af6bdda2190dd5a7` — 55/55 syntax, 59/59 suites PASS
+- Sequencing/integration merge: `2b7d3fe28d1d948b9cc0c4f7c712dbff311e8d34`
+- Exact current evidence head: `402b03f7bfe35c81db933b8ba3bfab9fdd4866c6`
+- Exact standard Tests evidence: #198 / run `34891527516` / job `104135148380` — 56/56 syntax, 61/61 suites PASS
 - Feature graph / nested stable identity proof: tests/veyra-m10-features.test.mjs
 - Canonical command + UI evidence: src/veyra/commands.js, src/veyra/serviceRegistry.js, veyra.js
 - Player/custom-element evidence: src/veyra/player.js + M10 suite
-- Graph-editor evidence contributing to M9: src/veyra/graphEditor.js + Logic panel + M10 suite
+- Graph-editor evidence contributing to M9: src/veyra/graphEditor.js + Logic panel + M10 suite + live browser smoke
 - Lottie/dotLottie evidence: src/veyra/lottie.js + M10 suite
-- Local production hardening evidence: 56/56 syntax, 61/61 suites, static-server checks and live browser smoke are green.
-- Browser acceptance: current controller/fake-DOM coverage and live Codex in-app browser smoke are green; exhaustive visual/accessibility acceptance remains open.
+- Production hardening evidence: tests/veyra-production-hardening.test.mjs + tests/veyra-static-server.test.mjs + responsive-layout coverage
+- Browser acceptance: controller/fake-DOM coverage and live Codex in-app browser smoke are green; exhaustive visual/accessibility/cross-browser acceptance remains open.
 - Compatibility/size limitations: JSON dotLottie package only; no .riv binary or production encoder/runtime parity
 ```
