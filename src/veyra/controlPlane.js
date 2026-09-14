@@ -160,6 +160,7 @@ function prepareCommandDescriptor(document, descriptor, salt = '0') {
   if (next.action === 'addControl') next.args.overrides = withId(next.args.overrides, 'control', seed, 'control');
   if (next.action === 'addConstraint') next.args.overrides = withId(next.args.overrides, 'constraint', seed, 'constraint');
   if (next.action === 'addAsset') next.args.overrides = withId(next.args.overrides, 'asset', seed, 'asset');
+  if (next.action === 'addMachineLayer') next.args.overrides = withId(next.args.overrides, 'machineLayer', seed, 'machineLayer');
   if (next.action === 'addMachineInput') next.args.overrides = withId(next.args.overrides, 'machineInput', seed, 'machineInput');
   if (next.action === 'addMachineState') next.args.overrides = withId(next.args.overrides, 'machineState', seed, 'machineState');
   if (next.action === 'addMachineTransition') {
@@ -183,6 +184,18 @@ function prepareCommandDescriptor(document, descriptor, salt = '0') {
           prepared.conditions = prepared.conditions.map((condition, conditionIndex) => withId(condition, 'machineCondition', seed, `transition:${index}:condition:${conditionIndex}`));
         }
         return prepared;
+      });
+    }
+    if (Array.isArray(next.args.overrides.layers)) {
+      next.args.overrides.layers = next.args.overrides.layers.map((layer, layerIndex) => {
+        const preparedLayer = withId(layer, 'machineLayer', seed, `layer:${layerIndex}`);
+        if (Array.isArray(preparedLayer.states)) preparedLayer.states = preparedLayer.states.map((state, stateIndex) => withId(state, 'machineState', seed, `layer:${layerIndex}:state:${stateIndex}`));
+        if (Array.isArray(preparedLayer.transitions)) preparedLayer.transitions = preparedLayer.transitions.map((transition, transitionIndex) => {
+          const prepared = withId(transition, 'machineTransition', seed, `layer:${layerIndex}:transition:${transitionIndex}`);
+          if (Array.isArray(prepared.conditions)) prepared.conditions = prepared.conditions.map((condition, conditionIndex) => withId(condition, 'machineCondition', seed, `layer:${layerIndex}:transition:${transitionIndex}:condition:${conditionIndex}`));
+          return prepared;
+        });
+        return preparedLayer;
       });
     }
   }
@@ -259,9 +272,9 @@ function trackControllers(document, address) {
   for (const timeline of document.timelines || []) {
     for (const track of timeline.tracks || []) {
       if (track.address !== address) continue;
-      const machineStates = (document.stateMachines || []).flatMap((machine) => machine.states
+      const machineStates = (document.stateMachines || []).flatMap((machine) => (machine.layers || []).flatMap((layer) => layer.states
         .filter((state) => referenceId(state.timeline, 'timeline') === timeline.id)
-        .map((state) => ({ machine: { kind: 'stateMachine', id: machine.id }, state: { kind: 'machineState', id: state.id } })));
+        .map((state) => ({ machine: { kind: 'stateMachine', id: machine.id }, layer: { kind: 'machineLayer', id: layer.id }, state: { kind: 'machineState', id: state.id } }))));
       controllers.push({
         kind: 'animation-track',
         ref: { kind: 'track', id: track.id },

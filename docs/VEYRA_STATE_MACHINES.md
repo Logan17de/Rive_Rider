@@ -1,16 +1,18 @@
 # Veyra state machine contract
 
-Status: implemented as Phase 3.1 (core) in `.veyra` version 3.
+Status: layered foundation implemented in `.veyra` version 7; rich state and transition semantics are the next M9 slice.
 
 State machines are authored data stored in the document's root
 `stateMachines` registry. A machine selects and blends the timelines already
-in place — it never duplicates animation data. Runtime state (current state,
-state time, input values, active transition) lives outside the document in a
-per-machine `MachineRuntime`, so the document stays a pure description and
+in place — it never duplicates animation data. Runtime state (per-layer current
+state, state time, input values, active transitions) lives outside the document
+in a per-machine `MachineRuntime`, so the document stays a pure description and
 every runtime decision is reproducible by re-simulating.
 
 This is an additive schema: legacy documents without `stateMachines`
-normalize to `stateMachines: []` and keep version 3.
+normalize to `stateMachines: []`. Legacy machines migrate deterministically to
+one stable `machineLayer`; the root fields remain compatibility views of the
+first authored layer while new code and persistence use `layers`.
 
 ## State machine records
 
@@ -24,13 +26,34 @@ A state machine has a stable `id`, human-readable `name`, an optional
   "name": "Button",
   "initial": { "kind": "machineState", "id": "state_idle" },
   "inputs": [],
+  "layers": [
+    {
+      "id": "layer_base",
+      "name": "Base Layer",
+      "enabled": true,
+      "weight": 1,
+      "initial": { "kind": "machineState", "id": "state_idle" },
+      "states": [],
+      "transitions": []
+    }
+  ],
   "states": [],
   "transitions": []
 }
 ```
 
 `initial` may be `null`; the first state in the array is then the initial
-state. Machines without states are legal (they evaluate to nothing).
+state. Machines without states are legal (they evaluate to nothing). Layers
+are ordered from low to high property priority. Every enabled layer advances
+from the same input snapshot; armed triggers are consumed only after all
+enabled layers have sampled them. `weight` blends a layer's output over lower
+layers and a disabled layer's clock is frozen. The stable
+`machineLayer:<id>` reference, not its display name or graph position,
+identifies a layer.
+
+For source compatibility, `machine.initial`, `machine.states`, and
+`machine.transitions` still expose the first layer. They are synchronized by
+the normalizer and store commands; layer-aware APIs use `machine.layers`.
 
 ### Inputs
 
@@ -247,6 +270,11 @@ runtime.reset();        // initial state, authored input values, time 0
 runtime.scrub(seconds); // reset + step(seconds) — deterministic re-simulation
 runtime.onInvalidate(listener); // subscribe to structural resets; → unsubscribe fn
 ```
+
+`runtime.evaluate().layers` contains one record per authored layer, including
+its `machineLayer` ref, enabled/weight metadata, current state and clock,
+transition, evaluated timeline list, and layer-local overrides. The top-level
+fields remain the base-layer compatibility projection.
 
 `evaluate().overrides` uses the same property-address keys as
 `evaluateTimelines`, so it plugs straight into

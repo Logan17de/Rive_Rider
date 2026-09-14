@@ -78,7 +78,7 @@ check('1 schema generation is additive and old projects stay pre-M8', () => {
   assert.equal(old.version, 5);
   const store = baseStore(); addCoreData(store);
   assert.equal(store.document.version, 6);
-  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5, 6, 7]);
 });
 
 check('2 all required property types normalize with stable typed identity', () => {

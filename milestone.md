@@ -22,8 +22,8 @@ These are carry-forward approximate planning estimates, not measured vendor-pari
 - Implementation M0–M7: previously VERIFIED, with documented limitations preserved.
 - `plan.md` M3 / implementation M8: **VERIFIED**.
 - C3, C4 and C5 reproduced failures: **FIXES CONFIRMED**. Preserve these fixes; do not restart their implementations.
-- Current implementation work: **M8-C5 — VERIFIED**, below. Reproducible evidence is recorded in `docs/M8-C5-runtime-contract.md`.
-- M9 / layered state machines: **IN PROGRESS — C1 layer model/runtime/control surface is the active milestone**.
+- Current implementation work: **M9-C1 — VERIFIED**, below. Reproducible evidence is recorded in `docs/M9-C1-layered-machine-contract.md`.
+- M9 / layered state machines: **C1 VERIFIED; C2 rich state/transition semantics is active**.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
 
@@ -33,7 +33,7 @@ Every verification/correction/advance must refresh this snapshot. Selected probe
 
 **Topic:** Canonical layers, deterministic legacy migration, simultaneous evaluation, stable AI control
 **Roadmap mapping:** first implementation slice of `plan.md` M4 — State Machine parity + visual graph editor
-**Implementation status:** IN PROGRESS
+**Implementation status:** VERIFIED
 
 ## Goal
 
@@ -41,15 +41,15 @@ Replace the single-clock machine core with an ordered layer model without breaki
 
 ## Tasks
 
-- [ ] Add a versioned `machineLayer` record with stable id, display name, enabled flag, weight, initial state, states and transitions. Migrate legacy root graphs deterministically to one base layer.
-- [ ] Preserve legacy `machine.initial/states/transitions` as a first-layer compatibility view while making `layers` authoritative for new code and serialized round trips.
-- [ ] Validate globally unique layer/state/transition/condition identities and same-layer transition endpoints. Reject duplicate or cross-layer graph references loudly.
-- [ ] Add transactional add/update/remove/reorder layer commands. Existing state/transition commands default to the base layer and accept an explicit stable layer id.
-- [ ] Advance all enabled layers simultaneously from one input snapshot and consume triggers only after every layer samples them.
-- [ ] Evaluate layers in authored order. Later enabled layers override earlier properties; layer weight blends against accumulated output and authored values through the canonical animation evaluator.
-- [ ] Expose per-layer clocks, active state/transition, evaluated timelines and stable refs through runtime results, scene summary, manifest capabilities, resolver, semantics and dependency graph.
-- [ ] Preserve component runtimes, listener dispatch, undo/redo, project duplication, timeline deletion guards and legacy public machine reads.
-- [ ] Add permanent migration/model/command/runtime/AI-surface regressions, then run all standard syntax and test gates on the exact final clean commit.
+- [x] Add a versioned `machineLayer` record with stable id, display name, enabled flag, weight, initial state, states and transitions. Migrate legacy root graphs deterministically to one base layer.
+- [x] Preserve legacy `machine.initial/states/transitions` as a first-layer compatibility view while making `layers` authoritative for new code and serialized round trips.
+- [x] Validate globally unique layer/state/transition/condition identities and same-layer transition endpoints. Reject duplicate or cross-layer graph references loudly.
+- [x] Add transactional add/update/remove/reorder layer commands. Existing state/transition commands default to the base layer and accept an explicit stable layer id.
+- [x] Advance all enabled layers simultaneously from one input snapshot and consume triggers only after every layer samples them.
+- [x] Evaluate layers in authored order. Later enabled layers override earlier properties; layer weight blends against accumulated output and authored values through the canonical animation evaluator.
+- [x] Expose per-layer clocks, active state/transition, evaluated timelines and stable refs through runtime results, scene summary, manifest capabilities, resolver, semantics and dependency graph.
+- [x] Preserve component runtimes, listener dispatch, undo/redo, project duplication, timeline deletion guards and legacy public machine reads.
+- [x] Add permanent migration/model/command/runtime/AI-surface regressions, then run all standard syntax and test gates on the exact final clean commit.
 
 ## Explicitly deferred to the next M9 slices
 
@@ -58,6 +58,29 @@ Entry/Exit/Any nodes, blend states, state actions/speed/editor metadata, data-bo
 ## Acceptance
 
 M9-C1 is accepted only when a legacy single-layer file round-trips deterministically, a multi-layer machine advances all layers using the same trigger, disabled layers remain frozen, ordered priority and partial layer weights evaluate correctly, every layer is addressable without names, all authoring operations are undoable, and all existing suites remain green.
+
+---
+
+# MILESTONE M9-C2 — Rich State and Transition Semantics
+
+**Topic:** Rive-style pseudo states, blend states, speed, exit/entry controls, actions and data-aware conditions
+**Roadmap mapping:** remaining runtime semantics in `plan.md` M4
+**Implementation status:** IN PROGRESS
+
+## Goal
+
+Make the layered runtime expressive enough for real interactive animation graphs while retaining deterministic IDs, authored-vs-runtime separation, legacy machine inputs, and AI-readable diagnostics.
+
+## Tasks
+
+- [ ] Add entry, exit and any pseudo-state behavior plus explicit single-animation state speed (including reverse playback), captions and editor metadata.
+- [ ] Add 1D, direct and additive blend states with validated source references and deterministic weight evaluation.
+- [ ] Add state start/end actions and transition start/end actions as typed, ordered records with runtime event evidence.
+- [ ] Add enabled transitions, exit-time gates, pause-source and allow-exit-during-transition controls, and authored interpolation.
+- [ ] Add fixed and data-bound condition sources using canonical View Model property references, compatible events and built-in artboard values.
+- [ ] Add weighted randomized exits with seeded deterministic selection and replay-safe runtime evidence.
+- [ ] Surface all new fields through commands, manifest, summary, resolver, dependency graph, browser API and component runtime mappings.
+- [ ] Add permanent adversarial tests and refresh the GitHub milestone with exact gate output before advancing to the visual graph editor slice.
 
 ## Independent M8-C4 evidence
 

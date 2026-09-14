@@ -446,10 +446,13 @@ function buildIndexData(input) {
     const machineRef = createReference('stateMachine', machine.id);
     add(makeEntity(machineRef, machine, { type: 'stateMachine', displayName: machine.name }));
     for (const input of machine.inputs || []) add(makeEntity(createReference('machineInput', input.id), input, { type: input.type, displayName: input.name }));
-    for (const state of machine.states || []) add(makeEntity(createReference('machineState', state.id), state, { type: state.type, displayName: state.name }));
-    for (const transition of machine.transitions || []) {
-      add(makeEntity(createReference('machineTransition', transition.id), transition, { type: 'machineTransition' }));
-      for (const condition of transition.conditions || []) add(makeEntity(createReference('machineCondition', condition.id), condition, { type: condition.op }));
+    for (const layer of machine.layers || []) {
+      add(makeEntity(createReference('machineLayer', layer.id), layer, { type: 'machineLayer', displayName: layer.name }));
+      for (const state of layer.states || []) add(makeEntity(createReference('machineState', state.id), state, { type: state.type, displayName: state.name }));
+      for (const transition of layer.transitions || []) {
+        add(makeEntity(createReference('machineTransition', transition.id), transition, { type: 'machineTransition' }));
+        for (const condition of transition.conditions || []) add(makeEntity(createReference('machineCondition', condition.id), condition, { type: condition.op }));
+      }
     }
   }
 
@@ -556,24 +559,28 @@ function buildIndexData(input) {
     const machineRef = createReference('stateMachine', machine.id);
     link(byKey, machineRef, 'owner', machine.artboard, 'owns');
     for (const input of machine.inputs || []) link(byKey, createReference('machineInput', input.id), 'owner', machineRef, 'input');
-    for (const state of machine.states || []) {
-      const stateRef = createReference('machineState', state.id);
-      link(byKey, stateRef, 'owner', machineRef, 'state');
-      const timelineId = referenceId(state.timeline, 'timeline');
-      if (timelineId) link(byKey, stateRef, 'uses_timeline', createReference('timeline', timelineId), 'used_by_state');
-    }
-    for (const transition of machine.transitions || []) {
-      const transitionRef = createReference('machineTransition', transition.id);
-      link(byKey, transitionRef, 'owner', machineRef, 'transition');
-      const from = referenceId(transition.from, 'machineState');
-      const to = referenceId(transition.to, 'machineState');
-      if (from) link(byKey, transitionRef, 'from_state', createReference('machineState', from), 'outgoing_transition');
-      if (to) link(byKey, transitionRef, 'to_state', createReference('machineState', to), 'incoming_transition');
-      for (const condition of transition.conditions || []) {
-        const conditionRef = createReference('machineCondition', condition.id);
-        link(byKey, conditionRef, 'owner', transitionRef, 'condition');
-        const inputId = referenceId(condition.input, 'machineInput');
-        if (inputId) link(byKey, conditionRef, 'uses_input', createReference('machineInput', inputId), 'used_by_condition');
+    for (const layer of machine.layers || []) {
+      const layerRef = createReference('machineLayer', layer.id);
+      link(byKey, layerRef, 'owner', machineRef, 'layer');
+      for (const state of layer.states || []) {
+        const stateRef = createReference('machineState', state.id);
+        link(byKey, stateRef, 'owner', layerRef, 'state');
+        const timelineId = referenceId(state.timeline, 'timeline');
+        if (timelineId) link(byKey, stateRef, 'uses_timeline', createReference('timeline', timelineId), 'used_by_state');
+      }
+      for (const transition of layer.transitions || []) {
+        const transitionRef = createReference('machineTransition', transition.id);
+        link(byKey, transitionRef, 'owner', layerRef, 'transition');
+        const from = referenceId(transition.from, 'machineState');
+        const to = referenceId(transition.to, 'machineState');
+        if (from) link(byKey, transitionRef, 'from_state', createReference('machineState', from), 'outgoing_transition');
+        if (to) link(byKey, transitionRef, 'to_state', createReference('machineState', to), 'incoming_transition');
+        for (const condition of transition.conditions || []) {
+          const conditionRef = createReference('machineCondition', condition.id);
+          link(byKey, conditionRef, 'owner', transitionRef, 'condition');
+          const inputId = referenceId(condition.input, 'machineInput');
+          if (inputId) link(byKey, conditionRef, 'uses_input', createReference('machineInput', inputId), 'used_by_condition');
+        }
       }
     }
   }

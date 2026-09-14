@@ -55,7 +55,7 @@ export function applyEasing(t, easing, easingParams) {
   }
 }
 
-function interpolateValue(valueA, valueB, t) {
+export function interpolateValue(valueA, valueB, t) {
   if (typeof valueA === 'number' && typeof valueB === 'number') {
     return valueA + (valueB - valueA) * t;
   }

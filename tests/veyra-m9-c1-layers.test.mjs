@@ -15,7 +15,7 @@ import { createMachineRuntime } from '../src/veyra/stateMachine.js';
 import { VeyraStore } from '../src/veyra/store.js';
 import { dispatchVeyraCommand } from '../src/veyra/commands.js';
 import { createSceneSummary } from '../src/veyra/summary.js';
-import { createVeyraManifest } from '../src/veyra/manifest.js';
+import { createProjectManifest } from '../src/veyra/manifest.js';
 import { buildSemanticIndex } from '../src/veyra/resolver.js';
 import { parseVeyra, serializeVeyra } from '../src/veyra/io.js';
 
@@ -110,7 +110,8 @@ function fixture() {
 {
   const { document } = fixture();
   const raw = JSON.parse(serializeVeyra(document));
-  raw.stateMachines[0].layers[1].states[0].id = 'base_idle';
+  raw.stateMachines[0].layers[1].states[1].id = 'base_active';
+  raw.stateMachines[0].layers[1].transitions[0].to = ref('machineState', 'base_active');
   assert.throws(() => normalizeDocument(raw), /Duplicate machine state id/);
 
   const cross = JSON.parse(serializeVeyra(document));
@@ -173,11 +174,55 @@ function fixture() {
   const summary = createSceneSummary(document).stateMachines[0];
   assert.deepEqual(summary.layers.map((layer) => layer.ref), [ref('machineLayer', 'base'), ref('machineLayer', 'overlay')]);
   assert.ok(summary.capabilities.graph.includes('add-layer'));
-  const manifest = createVeyraManifest(document);
+  const manifest = createProjectManifest(document);
   assert.deepEqual(manifest.scene.stateMachines[0].layers[1].ref, ref('machineLayer', 'overlay'));
-  assert.equal(manifest.authoringContract.machineLayer.identity, 'stable machineLayer ref; display name and order are advisory');
+  assert.equal(manifest.authoring.machineLayer.identity, 'stable machineLayer ref; display name and order are advisory');
   const indexed = buildSemanticIndex(document).entities.find((entity) => entity.ref.kind === 'machineLayer' && entity.ref.id === 'overlay');
   assert.equal(indexed.relationships.some((relation) => relation.relation === 'owner' && relation.target.id === 'layer_machine'), true);
+}
+
+// State/transition commands can target a non-base layer and guards scan every layer.
+{
+  const { document } = fixture();
+  const store = new VeyraStore(document);
+  store.addMachineLayer('layer_machine', { id: 'secondary', name: 'Secondary' });
+  const first = dispatchVeyraCommand(store, {
+    action: 'addMachineState',
+    args: { machineId: 'layer_machine', layerId: 'secondary', overrides: { id: 'secondary_a', name: 'Secondary A', timelineId: 'base_idle' } },
+  });
+  const second = dispatchVeyraCommand(store, {
+    action: 'addMachineState',
+    args: { machineId: 'layer_machine', layerId: 'secondary', overrides: { id: 'secondary_b', name: 'Secondary B', timelineId: 'base_active' } },
+  });
+  assert.deepEqual([first.ok, second.ok], [true, true]);
+  const transition = dispatchVeyraCommand(store, {
+    action: 'addMachineTransition',
+    args: {
+      machineId: 'layer_machine',
+      layerId: 'secondary',
+      overrides: { id: 'secondary_go', from: 'secondary_a', to: 'secondary_b', conditions: [{ id: 'secondary_condition', input: 'go', op: 'fired' }] },
+    },
+  });
+  assert.equal(transition.ok, true);
+  assert.equal(machineLayerById(store.document, 'layer_machine', 'secondary').transitions[0].id, 'secondary_go');
+  assert.throws(() => store.removeMachineInput('layer_machine', 'go'), /secondary_condition/);
+  assert.throws(() => store.removeTimeline('base_active'), /Secondary B/);
+}
+
+// Artboard duplication remaps layer-owned identities and graph references together.
+{
+  const { document } = fixture();
+  const store = new VeyraStore(document);
+  const sourceArtboardId = store.document.artboards[0].id;
+  const duplicated = store.duplicateArtboard(sourceArtboardId, { id: 'layer_copy', seed: 'layer-copy' });
+  const copiedMachineId = duplicated.idMap['stateMachine:layer_machine'];
+  const copiedMachine = store.document.stateMachines.find((machine) => machine.id === copiedMachineId);
+  assert.ok(copiedMachine);
+  assert.deepEqual(copiedMachine.layers.map((layer) => layer.id), [
+    duplicated.idMap['machineLayer:base'], duplicated.idMap['machineLayer:overlay'],
+  ]);
+  assert.equal(copiedMachine.layers[1].transitions[0].from.id, duplicated.idMap['machineState:overlay_idle']);
+  assert.equal(copiedMachine.layers[1].transitions[0].conditions[0].input.id, duplicated.idMap['machineInput:go']);
 }
 
 // Public constructor keeps stable ids and normalized layer defaults.
@@ -188,4 +233,4 @@ function fixture() {
   });
 }
 
-console.log('M9-C1 layered machine contract: 7 groups passed');
+console.log('M9-C1 layered machine contract: 9 groups passed');

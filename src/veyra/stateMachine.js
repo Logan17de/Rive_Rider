@@ -1,6 +1,7 @@
-import { cloneValue, machineById } from './model.js';
+import { cloneValue, machineById, machineLayers } from './model.js';
 import { referenceId } from './references.js';
-import { evaluateTimelines } from './animation.js';
+import { evaluateTimelines, interpolateValue } from './animation.js';
+import { readProperty } from './properties.js';
 
 export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
   'transition-start',
@@ -18,6 +19,10 @@ export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   graph: Object.freeze([
     'set-name',
     'set-initial',
+    'add-layer',
+    'update-layer',
+    'remove-layer',
+    'reorder-layer',
     'add-input',
     'remove-input',
     'update-input',
@@ -45,16 +50,53 @@ const NO_MACHINE = 'no-machine';
 
 function machineSignature(machine) {
   if (!machine) return NO_MACHINE;
+  const layers = machineLayers(machine)
+    .map((layer) => [
+      layer.id,
+      layer.initial ? referenceId(layer.initial, 'machineState') : null,
+      layer.states.map((state) => state.id),
+      layer.transitions.map((transition) => [
+        transition.id,
+        referenceId(transition.from, 'machineState'),
+        referenceId(transition.to, 'machineState'),
+      ]),
+    ])
+    .sort((left, right) => left[0].localeCompare(right[0]));
   return JSON.stringify([
-    machine.initial ? referenceId(machine.initial, 'machineState') : null,
     machine.inputs.map((input) => [input.id, input.type]),
-    machine.states.map((state) => state.id),
-    machine.transitions.map((transition) => [
-      transition.id,
-      referenceId(transition.from, 'machineState'),
-      referenceId(transition.to, 'machineState'),
-    ]),
+    layers,
   ]);
+}
+
+function transitionView(position) {
+  if (!position?.transition) return null;
+  const { transitionId, fromId, toId, duration, startedAt } = position.transition;
+  const elapsed = position.stateTime - startedAt;
+  return {
+    id: transitionId,
+    fromId,
+    toId,
+    duration,
+    progress: duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1,
+  };
+}
+
+function mergeLayerOverrides(document, target, source, weight) {
+  if (weight <= 0) return target;
+  for (const [address, value] of Object.entries(source || {})) {
+    if (weight >= 1) {
+      target[address] = value;
+    } else if (target[address] !== undefined) {
+      target[address] = interpolateValue(target[address], value, weight);
+    } else {
+      try {
+        target[address] = interpolateValue(readProperty(document, address), value, weight);
+      } catch {
+        target[address] = value;
+      }
+    }
+  }
+  return target;
 }
 
 function resolveDocument(documentOrGetter) {
@@ -138,9 +180,7 @@ export class MachineRuntime {
   #documentOrGetter = null;
   #machineId = null;
   #overrideValues = new Map();
-  #stateId = null;
-  #stateTime = 0;
-  #transition = null;
+  #layers = new Map();
   #signature = NO_MACHINE;
   #invalidateListeners = new Set();
 
@@ -159,8 +199,8 @@ export class MachineRuntime {
   fork() {
     const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId);
     snapshot.#overrideValues = new Map([...this.#overrideValues].map(([key, value]) => [key, cloneValue(value)]));
-    snapshot.#stateId = this.#stateId; snapshot.#stateTime = this.#stateTime;
-    snapshot.#transition = cloneValue(this.#transition); snapshot.#signature = this.#signature;
+    snapshot.#layers = new Map([...this.#layers].map(([key, value]) => [key, cloneValue(value)]));
+    snapshot.#signature = this.#signature;
     return snapshot;
   }
 
@@ -186,33 +226,25 @@ export class MachineRuntime {
   }
 
   get stateId() {
-    this.#reconcile();
-    return this.#stateId;
+    const machine = this.#reconcile();
+    return this.#layers.get(machineLayers(machine)[0]?.id)?.stateId || null;
   }
 
   get state() {
-    this.#reconcile();
-    return this.machine?.states.find((state) => state.id === this.#stateId) || null;
+    const machine = this.#reconcile();
+    const layer = machineLayers(machine)[0];
+    const stateId = this.#layers.get(layer?.id)?.stateId;
+    return layer?.states.find((state) => state.id === stateId) || null;
   }
 
   get stateTime() {
-    this.#reconcile();
-    return this.#stateTime;
+    const machine = this.#reconcile();
+    return this.#layers.get(machineLayers(machine)[0]?.id)?.stateTime || 0;
   }
 
   get transition() {
-    this.#reconcile();
-    if (!this.#transition) return null;
-    const { transitionId, fromId, toId, duration, startedAt } = this.#transition;
-    const elapsed = this.#stateTime - startedAt;
-    const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
-    return {
-      id: transitionId,
-      fromId,
-      toId,
-      duration,
-      progress,
-    };
+    const machine = this.#reconcile();
+    return transitionView(this.#layers.get(machineLayers(machine)[0]?.id));
   }
 
   get inputs() {
@@ -227,15 +259,13 @@ export class MachineRuntime {
 
   #resetRuntime(machine) {
     this.#overrideValues = new Map();
-    const states = machine ? machine.states : [];
-    const initial = machine
-      ? (machine.initial
-        ? states.find((state) => state.id === referenceId(machine.initial, 'machineState'))
-        : states[0])
-      : null;
-    this.#stateId = initial?.id || null;
-    this.#stateTime = 0;
-    this.#transition = null;
+    this.#layers = new Map();
+    for (const layer of machineLayers(machine)) {
+      const initial = layer.initial
+        ? layer.states.find((state) => state.id === referenceId(layer.initial, 'machineState'))
+        : layer.states[0];
+      this.#layers.set(layer.id, { stateId: initial?.id || null, stateTime: 0, transition: null });
+    }
     this.#signature = machineSignature(machine);
   }
 
@@ -267,15 +297,15 @@ export class MachineRuntime {
     return new Map(this.inputs.map((input) => [input.id, input.value]));
   }
 
-  #completeTransition(events) {
-    const { transitionId, fromId, toId, startedAt } = this.#transition;
+  #completeTransition(layer, position, events) {
+    const { transitionId, fromId, toId, startedAt } = position.transition;
     // The incoming state kept running during the blend, so it owns the
     // elapsed time when the blend finishes and its timeline continues
     // seamlessly from there.
-    this.#stateTime = this.#stateTime - startedAt;
-    this.#stateId = toId;
-    this.#transition = null;
-    events.push({ type: 'transition-end', transitionId, fromId, toId });
+    position.stateTime -= startedAt;
+    position.stateId = toId;
+    position.transition = null;
+    events.push({ type: 'transition-end', layerId: layer.id, transitionId, fromId, toId });
   }
 
   /**
@@ -290,50 +320,56 @@ export class MachineRuntime {
     }
     const events = [];
     const machine = this.#reconcile();
-    if (!machine || !machine.states.length) return events;
+    if (!machine) return events;
     if (delta === 0) {
       this.#clearTriggers();
       return events;
     }
 
     const inputsById = this.#inputsById();
-    if (this.#transition) {
-      this.#stateTime += delta;
-      if (this.#stateTime - this.#transition.startedAt >= this.#transition.duration - 1e-9) {
-        this.#completeTransition(events);
-      }
-    } else {
-      this.#stateTime += delta;
-      const outgoing = machine.transitions.filter(
-        (transition) => referenceId(transition.from, 'machineState') === this.#stateId
-      );
-      for (const transition of outgoing) {
-        if (!transitionSatisfied(transition, this.#stateTime, inputsById)) continue;
-        const toId = referenceId(transition.to, 'machineState');
-        if (transition.duration > 0) {
-          this.#transition = {
-            transitionId: transition.id,
-            fromId: this.#stateId,
-            toId,
-            duration: transition.duration,
-            startedAt: this.#stateTime,
-          };
-          events.push({
-            type: 'transition-start',
-            transitionId: transition.id,
-            fromId: this.#stateId,
-            toId,
-          });
-        } else {
-          const fromId = this.#stateId;
-          this.#stateId = toId;
-          this.#stateTime = 0;
-          events.push(
-            { type: 'transition-start', transitionId: transition.id, fromId, toId },
-            { type: 'transition-end', transitionId: transition.id, fromId, toId },
-          );
+    for (const layer of machineLayers(machine)) {
+      if (!layer.enabled || !layer.states.length) continue;
+      const position = this.#layers.get(layer.id);
+      if (!position) continue;
+      if (position.transition) {
+        position.stateTime += delta;
+        if (position.stateTime - position.transition.startedAt >= position.transition.duration - 1e-9) {
+          this.#completeTransition(layer, position, events);
         }
-        break;
+      } else {
+        position.stateTime += delta;
+        const outgoing = layer.transitions.filter(
+          (transition) => referenceId(transition.from, 'machineState') === position.stateId
+        );
+        for (const transition of outgoing) {
+          if (!transitionSatisfied(transition, position.stateTime, inputsById)) continue;
+          const toId = referenceId(transition.to, 'machineState');
+          if (transition.duration > 0) {
+            position.transition = {
+              transitionId: transition.id,
+              fromId: position.stateId,
+              toId,
+              duration: transition.duration,
+              startedAt: position.stateTime,
+            };
+            events.push({
+              type: 'transition-start',
+              layerId: layer.id,
+              transitionId: transition.id,
+              fromId: position.stateId,
+              toId,
+            });
+          } else {
+            const fromId = position.stateId;
+            position.stateId = toId;
+            position.stateTime = 0;
+            events.push(
+              { type: 'transition-start', layerId: layer.id, transitionId: transition.id, fromId, toId },
+              { type: 'transition-end', layerId: layer.id, transitionId: transition.id, fromId, toId },
+            );
+          }
+          break;
+        }
       }
     }
     this.#clearTriggers();
@@ -390,53 +426,62 @@ export class MachineRuntime {
    */
   evaluate() {
     const machine = this.#reconcile();
+    const layers = [];
+    const overrides = {};
+    const evaluatedTimelines = [];
+    for (const layer of machineLayers(machine)) {
+      const position = this.#layers.get(layer.id) || { stateId: null, stateTime: 0, transition: null };
+      const timelineStates = [];
+      if (layer.enabled && layer.weight > 0 && layer.states.length) {
+        if (position.transition) {
+          const { fromId, toId, startedAt, duration } = position.transition;
+          const elapsed = position.stateTime - startedAt;
+          const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
+          const outgoing = layer.states.find((state) => state.id === fromId);
+          const incoming = layer.states.find((state) => state.id === toId);
+          if (outgoing?.timeline) timelineStates.push({
+            timelineId: referenceId(outgoing.timeline, 'timeline'), time: position.stateTime, weight: 1,
+          });
+          if (incoming?.timeline) timelineStates.push({
+            timelineId: referenceId(incoming.timeline, 'timeline'), time: elapsed, weight: progress,
+          });
+        } else {
+          const current = layer.states.find((state) => state.id === position.stateId);
+          if (current?.timeline) timelineStates.push({
+            timelineId: referenceId(current.timeline, 'timeline'), time: position.stateTime, weight: 1,
+          });
+        }
+      }
+      const layerOverrides = evaluateTimelines(this.#document, timelineStates);
+      mergeLayerOverrides(this.#document, overrides, layerOverrides, layer.weight);
+      const observedTimelines = timelineStates.map((state) => ({ ...state, layerId: layer.id }));
+      evaluatedTimelines.push(...observedTimelines);
+      layers.push({
+        ref: { kind: 'machineLayer', id: layer.id },
+        id: layer.id,
+        name: layer.name,
+        enabled: layer.enabled,
+        weight: layer.weight,
+        stateId: position.stateId,
+        stateName: layer.states.find((state) => state.id === position.stateId)?.name || null,
+        stateTime: position.stateTime,
+        transition: transitionView(position),
+        overrides: layerOverrides,
+        evaluatedTimelines: observedTimelines,
+      });
+    }
+    const base = layers[0] || null;
     const result = {
       machineId: this.#machineId,
-      stateId: this.#stateId,
-      stateName: machine?.states.find((state) => state.id === this.#stateId)?.name || null,
-      stateTime: this.#stateTime,
-      transition: this.transition,
+      stateId: base?.stateId || null,
+      stateName: base?.stateName || null,
+      stateTime: base?.stateTime || 0,
+      transition: base?.transition || null,
       inputs: cloneValue(this.inputs),
-      overrides: {},
-      evaluatedTimelines: [],
+      overrides,
+      evaluatedTimelines,
+      layers,
     };
-    if (!machine || !machine.states.length) return result;
-
-    const timelineStates = [];
-    if (this.#transition) {
-      const { fromId, toId, startedAt, duration } = this.#transition;
-      const elapsed = this.#stateTime - startedAt;
-      const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
-      const outgoing = machine.states.find((state) => state.id === fromId);
-      const incoming = machine.states.find((state) => state.id === toId);
-      if (outgoing?.timeline) {
-        timelineStates.push({
-          timelineId: referenceId(outgoing.timeline, 'timeline'),
-          time: this.#stateTime,
-          weight: 1,
-        });
-      }
-      if (incoming?.timeline) {
-        timelineStates.push({
-          timelineId: referenceId(incoming.timeline, 'timeline'),
-          time: elapsed,
-          weight: progress,
-        });
-      }
-    } else {
-      const current = machine.states.find((state) => state.id === this.#stateId);
-      if (current?.timeline) {
-        timelineStates.push({
-          timelineId: referenceId(current.timeline, 'timeline'),
-          time: this.#stateTime,
-          weight: 1,
-        });
-      }
-    }
-    // The exact controllers/times used by this evaluation are also exposed to
-    // Component ownership. Observers do not reconstruct clocks from progress.
-    result.evaluatedTimelines = cloneValue(timelineStates);
-    result.overrides = evaluateTimelines(this.#document, timelineStates);
     return result;
   }
 

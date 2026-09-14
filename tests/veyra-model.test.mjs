@@ -222,7 +222,7 @@ assert.throws(() => parseVeyra('{broken'), /Invalid Veyra JSON/);
 
 // Test: every accepted historical/project/data format is loadable; v6 is the M8 data generation.
 {
-  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(VEYRA_SUPPORTED_VERSIONS, [1, 2, 3, 4, 5, 6, 7]);
   const target = createNode('rectangle', { id: 'version_target', name: 'Version target' });
   const timeline = createTimeline({ id: 'version_timeline', name: 'Version timeline' });
   const machine = createStateMachine({
@@ -233,14 +233,14 @@ assert.throws(() => parseVeyra('{broken'), /Invalid Veyra JSON/);
   const fixture = createDocument({ nodes: [target], timelines: [timeline], stateMachines: [machine] });
   for (const version of VEYRA_SUPPORTED_VERSIONS) {
     const plain = parseVeyra(JSON.stringify({ ...fixture, version }));
-    assert.equal(plain.version, 5, `canonical project output stamp for listener-free v${version}`);
+    assert.equal(plain.version, 7, `canonical layered-machine output stamp for listener-free v${version}`);
     const listener = createPointerListener({ id: `listener_v${version}`, target: target.id, machine: machine.id, input: 'Tap', event: 'pointerdown', action: 'fire' });
     const withListener = parseVeyra(JSON.stringify({ ...fixture, version, listeners: [listener] }));
-    assert.equal(withListener.version, 5, `canonical project output stamp for listener-bearing v${version}`);
+    assert.equal(withListener.version, 7, `canonical layered-machine output stamp for listener-bearing v${version}`);
   }
-  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 7 })), /Unsupported Veyra version/);
+  assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 8 })), /Unsupported Veyra version/);
   assert.throws(() => parseVeyra(JSON.stringify({ ...fixture, version: 99 })), /Unsupported Veyra version/);
-  console.log('✓ every accepted historical/project/data version loads; data-free documents canonicalize to v5');
+  console.log('✓ every accepted historical/project/data version loads; machine documents canonicalize to v7');
 }
 
 console.log('veyra model tests passed');

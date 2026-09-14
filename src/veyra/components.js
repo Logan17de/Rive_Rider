@@ -299,20 +299,30 @@ export class ComponentRuntimeRegistry {
       const state = runtime.evaluate();
       Object.assign(overrides, state.overrides);
       const machine = document.stateMachines.find(item => item.id === runtime.machineId);
-      const stateIds = state.transition ? [state.transition.fromId, state.transition.toId] : [state.stateId];
+      const allStates = (machine?.layers || []).flatMap(layer => layer.states || []);
       for (const address of Object.keys(state.overrides)) {
         const contributors = (state.evaluatedTimelines || []).flatMap(entry => {
           const timeline = document.timelines.find(item => item.id === entry.timelineId);
           return (timeline?.tracks || []).filter(item => item.address === address && item.keyframes.length).map(track => ({ ...entry, track }));
         });
-        const tracks = contributors.map((entry, index) => ({ timeSeconds: entry.time, blendWeight: entry.weight,
+        const tracks = contributors.map((entry, index) => {
+          const layerRuntime = state.layers?.find(layer => layer.id === entry.layerId);
+          const stateIds = layerRuntime?.transition
+            ? [layerRuntime.transition.fromId, layerRuntime.transition.toId]
+            : [layerRuntime?.stateId].filter(Boolean);
+          return { timeSeconds: entry.time, blendWeight: entry.weight * (layerRuntime?.weight ?? 1),
           contribution: entry.weight * contributors.slice(index + 1).reduce((weight, next) => weight * (1 - next.weight), 1),
           timeline: { kind: 'timeline', id: entry.timelineId }, ref: { kind: 'track', id: entry.track.id },
-          states: stateIds.filter(id => machine?.states.find(item => item.id === id)?.timeline?.id === entry.timelineId).map(id => ({ kind: 'machineState', id })) }));
+          layer: entry.layerId ? { kind: 'machineLayer', id: entry.layerId } : null,
+          states: stateIds.filter(id => allStates.find(item => item.id === id)?.timeline?.id === entry.timelineId).map(id => ({ kind: 'machineState', id })) };
+        });
 
+        const activeLayer = [...(state.layers || [])].reverse().find(layer => Object.prototype.hasOwnProperty.call(layer.overrides || {}, address));
         controllers[address] = { kind: 'state-machine-animation', machine: { kind: 'stateMachine', id: runtime.machineId }, controller: { kind: 'stateMachine', id: controllerId },
-          state: { kind: 'machineState', id: state.stateId }, timeSeconds: state.stateTime, transition: cloneValue(state.transition), tracks, source: 'animation', address,
-          evidence: [{ kind: 'component-machine-controller', machineId: runtime.machineId, stateId: state.stateId }] };
+          layer: activeLayer?.ref || null,
+          state: activeLayer?.stateId ? { kind: 'machineState', id: activeLayer.stateId } : null,
+          timeSeconds: activeLayer?.stateTime ?? state.stateTime, transition: cloneValue(activeLayer?.transition || null), tracks, source: 'animation', address,
+          evidence: [{ kind: 'component-machine-controller', machineId: runtime.machineId, layerId: activeLayer?.id || null, stateId: activeLayer?.stateId || null }] };
       }
       machineMappings.push({ controllerId, sourceMachineId: runtime.machineId });
     }

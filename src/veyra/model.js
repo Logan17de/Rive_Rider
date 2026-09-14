@@ -65,7 +65,8 @@ export const VEYRA_FORMAT = 'veyra';
 // listener-bearing documents are loud to readers that predate the registry.
 export const VEYRA_VERSION = 3;
 export const VEYRA_LISTENER_VERSION = 4;
-export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4, 5, 6]);
+export const VEYRA_LAYERED_MACHINE_VERSION = 7;
+export const VEYRA_SUPPORTED_VERSIONS = Object.freeze([1, 2, 3, 4, 5, 6, 7]);
 export const VEYRA_LISTENER_KINDS = Object.freeze(['pointer']);
 export const VEYRA_LISTENER_EVENTS = Object.freeze([
   'pointerdown', 'pointerup', 'pointermove', 'pointerenter', 'pointerleave', 'click',
@@ -126,6 +127,7 @@ export const VEYRA_PROPERTY_BOUNDS = Object.freeze({
   'timeline.workEnd': Object.freeze({ min: 1, max: 1000000, integer: true, note: 'must be greater than workStart and not exceed duration' }),
   'keyframe.frame': Object.freeze({ min: 0, max: 100000, integer: true }),
   'keyframe.easingParams.*': Object.freeze({ min: 0, max: 1 }),
+  'machineLayer.weight': Object.freeze({ min: 0, max: 1 }),
   'machineTransition.duration': Object.freeze({ min: 0, max: 10000 }),
   'machineTransition.after': Object.freeze({ min: 0, max: 100000 }),
 });
@@ -500,6 +502,15 @@ export function createMachineState(overrides = {}) {
   };
 }
 
+function deterministicMachineLayerId(machineId) {
+  let hash = 2166136261;
+  for (const character of String(machineId || 'machine')) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `machineLayer_${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 export function createMachineTransition(overrides = {}) {
   const from = normalizeReference(overrides.from, 'machineState', 'transition.from');
   const to = normalizeReference(overrides.to, 'machineState', 'transition.to');
@@ -521,17 +532,52 @@ export function createMachineTransition(overrides = {}) {
   return transition;
 }
 
-export function createStateMachine(overrides = {}) {
+export function createMachineLayer(overrides = {}) {
+  const weight = finite(overrides.weight ?? 1, 'machineLayer.weight');
+  if (weight < 0 || weight > 1) throw new RangeError('machineLayer.weight must be between 0 and 1.');
   return {
-    id: overrides.id || createId('machine'),
-    name: String(overrides.name || 'State Machine'),
+    id: overrides.id || createId('machineLayer'),
+    name: String(overrides.name || 'Layer'),
+    enabled: overrides.enabled !== false,
+    weight,
     initial: overrides.initial == null
       ? null
-      : normalizeReference(overrides.initial, 'machineState', 'machine.initial'),
-    inputs: (overrides.inputs || []).map((input) => createMachineInput(input)),
+      : normalizeReference(overrides.initial, 'machineState', 'machineLayer.initial'),
     states: (overrides.states || []).map((state) => createMachineState(state)),
     transitions: (overrides.transitions || []).map((transition) => createMachineTransition(transition)),
   };
+}
+
+function machineWithCompatibility(id, name, inputs, layers) {
+  const base = layers[0];
+  return {
+    id,
+    name,
+    initial: base.initial,
+    inputs,
+    states: base.states,
+    transitions: base.transitions,
+    layers,
+  };
+}
+
+export function createStateMachine(overrides = {}) {
+  const id = overrides.id || createId('machine');
+  const layers = Array.isArray(overrides.layers) && overrides.layers.length
+    ? overrides.layers.map((layer) => createMachineLayer(layer))
+    : [createMachineLayer({
+      id: deterministicMachineLayerId(id),
+      name: 'Base Layer',
+      initial: overrides.initial,
+      states: overrides.states,
+      transitions: overrides.transitions,
+    })];
+  return machineWithCompatibility(
+    id,
+    String(overrides.name || 'State Machine'),
+    (overrides.inputs || []).map((input) => createMachineInput(input)),
+    layers,
+  );
 }
 
 export function createPointerListener(overrides = {}) {
@@ -1198,6 +1244,41 @@ function normalizeMachineTransition(transition, index, machinePath, stateIds, in
   return { id, from, to, duration, after, conditions };
 }
 
+function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsById) {
+  const layerPath = `${machinePath}.layers[${index}]`;
+  const id = String(layer?.id || '');
+  if (!id) throw new TypeError(`${layerPath}.id is required.`);
+  const states = (Array.isArray(layer?.states) ? layer.states : []).map(
+    (state, stateIndex) => normalizeMachineState(state, stateIndex, layerPath, timelineIds)
+  );
+  const stateIds = new Set();
+  for (const state of states) {
+    if (stateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${layerPath}.`);
+    stateIds.add(state.id);
+  }
+  const transitions = (Array.isArray(layer?.transitions) ? layer.transitions : []).map(
+    (transition, transitionIndex) => normalizeMachineTransition(transition, transitionIndex, layerPath, stateIds, inputsById)
+  );
+  const transitionIds = new Set();
+  for (const transition of transitions) {
+    if (transitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${layerPath}.`);
+    transitionIds.add(transition.id);
+  }
+  const initial = normalizeReference(layer?.initial, 'machineState', `${layerPath}.initial`);
+  if (initial && !stateIds.has(referenceId(initial, 'machineState'))) {
+    throw new TypeError(`${layerPath}.initial references missing machine state ${referenceId(initial, 'machineState')}.`);
+  }
+  return {
+    id,
+    name: String(layer?.name || ''),
+    enabled: layer?.enabled !== false,
+    weight: bounded(layer?.weight ?? 1, `${layerPath}.weight`, 0, 1),
+    initial,
+    states,
+    transitions,
+  };
+}
+
 function normalizeStateMachine(machine, index, timelineIds) {
   const machinePath = `stateMachines[${index}]`;
   const id = String(machine?.id || '');
@@ -1215,34 +1296,41 @@ function normalizeStateMachine(machine, index, timelineIds) {
     inputsById.set(input.id, input);
     if (input.name) inputNames.add(input.name);
   }
-  const states = (Array.isArray(machine?.states) ? machine.states : []).map(
-    (state, stateIndex) => normalizeMachineState(state, stateIndex, machinePath, timelineIds)
-  );
+  if (machine?.layers !== undefined && !Array.isArray(machine.layers)) {
+    throw new TypeError(`${machinePath}.layers must be an array.`);
+  }
+  if (Array.isArray(machine?.layers) && machine.layers.length === 0) {
+    throw new TypeError(`${machinePath}.layers must contain at least one layer.`);
+  }
+  const rawLayers = Array.isArray(machine?.layers)
+    ? machine.layers
+    : [{
+      id: deterministicMachineLayerId(id),
+      name: 'Base Layer',
+      enabled: true,
+      weight: 1,
+      initial: machine?.initial,
+      states: machine?.states,
+      transitions: machine?.transitions,
+    }];
+  const layers = rawLayers.map((layer, layerIndex) =>
+    normalizeMachineLayer(layer, layerIndex, machinePath, timelineIds, inputsById));
+  const layerIds = new Set();
   const stateIds = new Set();
-  for (const state of states) {
-    if (stateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${machinePath}.`);
-    stateIds.add(state.id);
-  }
-  const transitions = (Array.isArray(machine?.transitions) ? machine.transitions : []).map(
-    (transition, transitionIndex) => normalizeMachineTransition(transition, transitionIndex, machinePath, stateIds, inputsById)
-  );
   const transitionIds = new Set();
-  for (const transition of transitions) {
-    if (transitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
-    transitionIds.add(transition.id);
+  for (const layer of layers) {
+    if (layerIds.has(layer.id)) throw new TypeError(`Duplicate machine layer id ${layer.id} in ${machinePath}.`);
+    layerIds.add(layer.id);
+    for (const state of layer.states) {
+      if (stateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${machinePath}.`);
+      stateIds.add(state.id);
+    }
+    for (const transition of layer.transitions) {
+      if (transitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
+      transitionIds.add(transition.id);
+    }
   }
-  const initial = normalizeReference(machine?.initial, 'machineState', `${machinePath}.initial`);
-  if (initial && !stateIds.has(referenceId(initial, 'machineState'))) {
-    throw new TypeError(`${machinePath}.initial references missing machine state ${referenceId(initial, 'machineState')}.`);
-  }
-  return {
-    id,
-    name: String(machine.name || ''),
-    initial,
-    inputs,
-    states,
-    transitions,
-  };
+  return machineWithCompatibility(id, String(machine.name || ''), inputs, layers);
 }
 
 function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) {
@@ -1269,7 +1357,7 @@ function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) 
     const machineId = referenceId(machineRef, 'stateMachine');
     const machine = machinesById.get(machineId);
     if (!machine) throw new TypeError(`${path}.machine references missing state machine ${machineId}.`);
-    if (!machine.states.length) console.warn(`${path} targets state machine ${machineId} with no playable state; interaction will be ignored at runtime. No playable animation is configured for this interaction.`);
+    if (!machineStates(machine).length) console.warn(`${path} targets state machine ${machineId} with no playable state; interaction will be ignored at runtime. No playable animation is configured for this interaction.`);
     const inputRef = requiredReference(inputValue, 'machineInput', `${path}.input`);
     const inputId = referenceId(inputRef, 'machineInput');
     const input = machine.inputs.find((candidate) => candidate.id === inputId || candidate.name === inputId);
@@ -1357,13 +1445,17 @@ function validateStableIdentities(document) {
   document.stateMachines.forEach((machine, machineIndex) => {
     register('stateMachine', machine.id, `stateMachines[${machineIndex}]`);
     machine.inputs.forEach((input, inputIndex) => register('machineInput', input.id, `stateMachines[${machineIndex}].inputs[${inputIndex}]`));
-    machine.states.forEach((state, stateIndex) => register('machineState', state.id, `stateMachines[${machineIndex}].states[${stateIndex}]`));
-    machine.transitions.forEach((transition, transitionIndex) => {
-      register('machineTransition', transition.id, `stateMachines[${machineIndex}].transitions[${transitionIndex}]`);
-      transition.conditions.forEach((condition, conditionIndex) => register(
-        'machineCondition', condition.id,
-        `stateMachines[${machineIndex}].transitions[${transitionIndex}].conditions[${conditionIndex}]`,
-      ));
+    machine.layers.forEach((layer, layerIndex) => {
+      const layerPath = `stateMachines[${machineIndex}].layers[${layerIndex}]`;
+      register('machineLayer', layer.id, layerPath);
+      layer.states.forEach((state, stateIndex) => register('machineState', state.id, `${layerPath}.states[${stateIndex}]`));
+      layer.transitions.forEach((transition, transitionIndex) => {
+        register('machineTransition', transition.id, `${layerPath}.transitions[${transitionIndex}]`);
+        transition.conditions.forEach((condition, conditionIndex) => register(
+          'machineCondition', condition.id,
+          `${layerPath}.transitions[${transitionIndex}].conditions[${conditionIndex}]`,
+        ));
+      });
     });
   });
   document.listeners.forEach((listener, index) => register('listener', listener.id, `listeners[${index}]`));
@@ -1503,6 +1595,7 @@ export function normalizeDocument(input) {
   };
   const projectDocument = normalizeProjectDocument(input, document);
   const dataDocument = normalizeDataGraphDocument(input, projectDocument);
+  if (stateMachines.length > 0) dataDocument.version = Math.max(dataDocument.version, VEYRA_LAYERED_MACHINE_VERSION);
   validateStableIdentities(dataDocument);
   validateSemanticRecords(dataDocument);
   return dataDocument;
@@ -1616,12 +1709,12 @@ export function keyframeById(document, keyframeId) {
 
 export function machineTransitionById(document, machineId, transitionId) {
   const machine = machineById(document, machineId);
-  return machine?.transitions.find((transition) => transition.id === transitionId) || null;
+  return machineTransitions(machine).find((transition) => transition.id === transitionId) || null;
 }
 
 export function machineConditionById(document, machineId, conditionId) {
   const machine = machineById(document, machineId);
-  for (const transition of machine?.transitions || []) {
+  for (const transition of machineTransitions(machine)) {
     const condition = transition.conditions.find((candidate) => candidate.id === conditionId);
     if (condition) return condition;
   }
@@ -1660,8 +1753,42 @@ export function machineById(document, machineId) {
   return (document.stateMachines || []).find((machine) => machine.id === machineId) || null;
 }
 
+export function machineLayers(machine) {
+  if (!machine) return [];
+  if (Array.isArray(machine.layers) && machine.layers.length) return machine.layers;
+  return [{
+    id: deterministicMachineLayerId(machine.id),
+    name: 'Base Layer',
+    enabled: true,
+    weight: 1,
+    initial: machine.initial || null,
+    states: machine.states || [],
+    transitions: machine.transitions || [],
+  }];
+}
+
+export function machineStates(machine) {
+  return machineLayers(machine).flatMap((layer) => layer.states || []);
+}
+
+export function machineTransitions(machine) {
+  return machineLayers(machine).flatMap((layer) => layer.transitions || []);
+}
+
+export function machineLayerById(document, machineId, layerId) {
+  return machineLayers(machineById(document, machineId)).find((layer) => layer.id === layerId) || null;
+}
+
+export function machineLayerForState(machine, stateId) {
+  return machineLayers(machine).find((layer) => layer.states.some((state) => state.id === stateId)) || null;
+}
+
+export function machineLayerForTransition(machine, transitionId) {
+  return machineLayers(machine).find((layer) => layer.transitions.some((transition) => transition.id === transitionId)) || null;
+}
+
 export function machineStateById(document, machineId, stateId) {
-  return machineById(document, machineId)?.states.find((state) => state.id === stateId) || null;
+  return machineStates(machineById(document, machineId)).find((state) => state.id === stateId) || null;
 }
 
 export function machineInputById(document, machineId, inputId) {
@@ -1669,7 +1796,7 @@ export function machineInputById(document, machineId, inputId) {
 }
 
 export function machineTransitionsFrom(document, machineId, stateId) {
-  return (machineById(document, machineId)?.transitions || []).filter(
+  return machineTransitions(machineById(document, machineId)).filter(
     (transition) => referenceId(transition.from, 'machineState') === stateId
   );
 }

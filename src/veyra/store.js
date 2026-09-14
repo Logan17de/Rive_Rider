@@ -12,6 +12,7 @@ import {
   createKeyframe,
   createMachineCondition,
   createMachineInput,
+  createMachineLayer,
   createMachineState,
   createMachineTransition,
   createStateMachine,
@@ -23,6 +24,12 @@ import {
   descendantIds,
   machineById,
   machineConditionViolation,
+  machineLayerById,
+  machineLayerForState,
+  machineLayerForTransition,
+  machineLayers,
+  machineStates,
+  machineTransitions,
   meshById,
   nodeById,
   normalizeDocument,
@@ -899,7 +906,7 @@ export class VeyraStore {
     const timeline = timelineById(this.document, timelineId);
     if (!timeline) return false;
     const stateUsers = (this.document.stateMachines || [])
-      .flatMap((machine) => machine.states
+      .flatMap((machine) => machineStates(machine)
         .filter((state) => referenceId(state.timeline, 'timeline') === timelineId)
         .map((state) => `${machine.name || machine.id}/${state.name || state.id}`));
     if (stateUsers.length) {
@@ -1027,9 +1034,74 @@ export class VeyraStore {
       : { label: `Update state machine ${machine.name}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
       const target = machineById(document, machineId);
-      for (const key of ['name', 'initial']) {
+      if (changes.name !== undefined) target.name = changes.name;
+      if (changes.initial !== undefined) machineLayers(target)[0].initial = changes.initial;
+    });
+    return true;
+  }
+
+  addMachineLayer(machineId, overrides = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    if (!machine) return null;
+    const layer = createMachineLayer(overrides);
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Add machine layer ${layer.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      machineById(document, machineId).layers.push(layer);
+    });
+    return layer.id;
+  }
+
+  updateMachineLayer(machineId, layerId, changes = {}, commandDescriptor = {}) {
+    const layer = machineLayerById(this.document, machineId, layerId);
+    if (!layer) return false;
+    if (changes.id !== undefined && changes.id !== layerId) throw new TypeError('Machine layer id is immutable.');
+    for (const key of ['states', 'transitions', 'initial']) {
+      if (changes[key] !== undefined) throw new TypeError(`Use graph commands to update machineLayer.${key}.`);
+    }
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Update machine layer ${layer.name || layer.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineLayerById(document, machineId, layerId);
+      for (const key of ['name', 'enabled', 'weight']) {
         if (changes[key] !== undefined) target[key] = changes[key];
       }
+    });
+    return true;
+  }
+
+  reorderMachineLayer(machineId, layerId, index, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const from = machineLayers(machine).findIndex((layer) => layer.id === layerId);
+    if (from < 0) return false;
+    const to = Math.max(0, Math.min(machine.layers.length - 1, Math.trunc(Number(index))));
+    if (!Number.isFinite(to)) throw new TypeError('Machine layer index must be finite.');
+    if (from === to) return true;
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Reorder machine layer ${layerId}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const layers = machineById(document, machineId).layers;
+      const sourceIndex = layers.findIndex((layer) => layer.id === layerId);
+      const [moved] = layers.splice(sourceIndex, 1);
+      layers.splice(to, 0, moved);
+    });
+    return true;
+  }
+
+  removeMachineLayer(machineId, layerId, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId);
+    const layer = machineLayerById(this.document, machineId, layerId);
+    if (!layer) return false;
+    if (machine.layers.length === 1) throw new TypeError('A state machine must keep at least one layer.');
+    const descriptor = typeof commandDescriptor === 'string'
+      ? { label: commandDescriptor }
+      : { label: `Delete machine layer ${layer.name || layer.id}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => {
+      const target = machineById(document, machineId);
+      target.layers = target.layers.filter((candidate) => candidate.id !== layerId);
     });
     return true;
   }
@@ -1047,63 +1119,75 @@ export class VeyraStore {
     return input.id;
   }
 
-  addMachineState(machineId, overrides = {}, commandDescriptor = {}) {
+  addMachineState(machineId, overrides = {}, commandDescriptor = {}, layerId = null) {
     const machine = machineById(this.document, machineId);
     if (!machine) return null;
+    const targetLayerId = layerId || referenceId(overrides.layer, 'machineLayer') || overrides.layerId || machineLayers(machine)[0].id;
+    if (!machineLayerById(this.document, machineId, targetLayerId)) throw new TypeError(`Machine layer ${targetLayerId} does not exist.`);
     const state = createMachineState(overrides);
     const descriptor = typeof commandDescriptor === 'string'
       ? { label: commandDescriptor }
       : { label: `Add state ${state.name}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
-      machineById(document, machineId).states.push(state);
+      machineLayerById(document, machineId, targetLayerId).states.push(state);
     });
     return state.id;
   }
 
   removeMachineState(machineId, stateId, commandDescriptor = {}) {
     const machine = machineById(this.document, machineId);
-    const state = machine?.states.find((candidate) => candidate.id === stateId);
+    const state = machineStates(machine).find((candidate) => candidate.id === stateId);
     if (!state) return false;
     const descriptor = typeof commandDescriptor === 'string'
       ? { label: commandDescriptor }
       : { label: `Delete state ${state.name}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
       const target = machineById(document, machineId);
-      target.states = target.states.filter((candidate) => candidate.id !== stateId);
-      target.transitions = target.transitions.filter((transition) =>
+      const layer = machineLayerForState(target, stateId);
+      layer.states = layer.states.filter((candidate) => candidate.id !== stateId);
+      layer.transitions = layer.transitions.filter((transition) =>
         referenceId(transition.from, 'machineState') !== stateId
         && referenceId(transition.to, 'machineState') !== stateId
       );
-      if (target.initial && referenceId(target.initial, 'machineState') === stateId) {
-        target.initial = null;
+      if (layer.initial && referenceId(layer.initial, 'machineState') === stateId) {
+        layer.initial = null;
       }
     });
     return true;
   }
 
-  addMachineTransition(machineId, overrides = {}, commandDescriptor = {}) {
+  addMachineTransition(machineId, overrides = {}, commandDescriptor = {}, layerId = null) {
     const machine = machineById(this.document, machineId);
     if (!machine) return null;
+    const fromId = referenceId(overrides.from, 'machineState');
+    const toId = referenceId(overrides.to, 'machineState');
+    const fromLayer = machineLayerForState(machine, fromId);
+    const toLayer = machineLayerForState(machine, toId);
+    const targetLayerId = layerId || referenceId(overrides.layer, 'machineLayer') || overrides.layerId || fromLayer?.id || machineLayers(machine)[0].id;
+    if (!fromLayer || !toLayer || fromLayer.id !== targetLayerId || toLayer.id !== targetLayerId) {
+      throw new TypeError('Machine transitions require endpoints in the same target layer.');
+    }
     const transition = createMachineTransition(overrides);
     const descriptor = typeof commandDescriptor === 'string'
       ? { label: commandDescriptor }
       : { label: 'Add machine transition', source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
-      machineById(document, machineId).transitions.push(transition);
+      machineLayerById(document, machineId, targetLayerId).transitions.push(transition);
     });
     return transition.id;
   }
 
   removeMachineTransition(machineId, transitionId, commandDescriptor = {}) {
     const machine = machineById(this.document, machineId);
-    const transition = machine?.transitions.find((candidate) => candidate.id === transitionId);
+    const transition = machineTransitions(machine).find((candidate) => candidate.id === transitionId);
     if (!transition) return false;
     const descriptor = typeof commandDescriptor === 'string'
       ? { label: commandDescriptor }
       : { label: 'Delete machine transition', source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
       const target = machineById(document, machineId);
-      target.transitions = target.transitions.filter((candidate) => candidate.id !== transitionId);
+      const layer = machineLayerForTransition(target, transitionId);
+      layer.transitions = layer.transitions.filter((candidate) => candidate.id !== transitionId);
     });
     return true;
   }
@@ -1118,7 +1202,7 @@ export class VeyraStore {
 
   updateMachineState(machineId, stateId, changes = {}, commandDescriptor = {}) {
     const machine = machineById(this.document, machineId);
-    const state = machine?.states.find((candidate) => candidate.id === stateId);
+    const state = machineStates(machine).find((candidate) => candidate.id === stateId);
     if (!state) return false;
     if (changes.timelineId !== undefined && !timelineById(this.document, changes.timelineId)) {
       throw new TypeError(`Timeline ${changes.timelineId} does not exist.`);
@@ -1127,7 +1211,7 @@ export class VeyraStore {
       ? { label: commandDescriptor }
       : { label: `Update state ${state.name || state.id}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
-      const target = machineById(document, machineId).states.find((candidate) => candidate.id === stateId);
+      const target = machineStates(machineById(document, machineId)).find((candidate) => candidate.id === stateId);
       if (changes.name !== undefined) target.name = changes.name;
       if (changes.timelineId !== undefined) target.timeline = createTimelineRef(changes.timelineId);
     });
@@ -1149,7 +1233,7 @@ export class VeyraStore {
         throw new TypeError(`Machine input type ${changes.type} is not supported.`);
       }
       const blockers = [];
-      for (const transition of machine.transitions) {
+      for (const transition of machineTransitions(machine)) {
         for (const condition of transition.conditions) {
           if (referenceId(condition.input, 'machineInput') !== inputId) continue;
           const violation = machineConditionViolation(condition.op, condition.value, changes.type);
@@ -1183,7 +1267,7 @@ export class VeyraStore {
     const input = machine?.inputs.find((candidate) => candidate.id === inputId);
     if (!input) return false;
     const blockers = [];
-    for (const transition of machine.transitions) {
+    for (const transition of machineTransitions(machine)) {
       for (const condition of transition.conditions) {
         if (referenceId(condition.input, 'machineInput') === inputId) {
           blockers.push(`condition ${condition.id} on transition ${transition.id} (op '${condition.op}')`);
@@ -1213,7 +1297,7 @@ export class VeyraStore {
 
   updateMachineTransition(machineId, transitionId, changes = {}, commandDescriptor = {}) {
     const machine = machineById(this.document, machineId);
-    const transition = machine?.transitions.find((candidate) => candidate.id === transitionId);
+    const transition = machineTransitions(machine).find((candidate) => candidate.id === transitionId);
     if (!transition) return false;
     if (changes.from !== undefined || changes.to !== undefined) {
       throw new TypeError(
@@ -1225,7 +1309,7 @@ export class VeyraStore {
       ? { label: commandDescriptor }
       : { label: `Update machine transition ${transitionId}`, source: 'user', ...commandDescriptor };
     this.execute(descriptor, (document) => {
-      const target = machineById(document, machineId).transitions.find((candidate) => candidate.id === transitionId);
+      const target = machineTransitions(machineById(document, machineId)).find((candidate) => candidate.id === transitionId);
       if (changes.duration !== undefined) target.duration = changes.duration;
       if (changes.after !== undefined) target.after = changes.after;
       if (changes.conditions !== undefined) {

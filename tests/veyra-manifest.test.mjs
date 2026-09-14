@@ -107,7 +107,7 @@ assert.equal(manifest.version, VEYRA_MANIFEST_VERSION);
 assert.equal(manifest.version, 1);
 assert.equal(manifest.document.id, 'document_manifest');
 assert.equal(manifest.document.format, 'veyra');
-assert.equal(manifest.document.version, 5);
+assert.equal(manifest.document.version, 7);
 assert.deepEqual(manifest.document.counts, {
   artboards: 1,
   components: 0,
@@ -121,6 +121,7 @@ assert.deepEqual(manifest.document.counts, {
   constraints: 0,
   timelines: 1,
   stateMachines: 1,
+  machineLayers: 1,
   listeners: 0,
 });
 assert.ok(manifest.capabilities.includes('assets.registry'));
@@ -285,7 +286,8 @@ assert.equal(machine.inputs[0].type, 'trigger');
 assert.deepEqual(machine.states[0].timeline, { kind: 'timeline', id: 'timeline_bob' });
 assert.deepEqual(machine.capabilities.inputTypes, [...VEYRA_MACHINE_INPUT_TYPES]);
 assert.deepEqual(machine.capabilities.graph, [
-  'set-name', 'set-initial', 'add-input', 'remove-input', 'update-input',
+  'set-name', 'set-initial', 'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
+  'add-input', 'remove-input', 'update-input',
   'add-state', 'update-state', 'remove-state',
   'add-transition', 'update-transition', 'remove-transition',
 ]);
@@ -298,7 +300,7 @@ assert.deepEqual(
 
 // --- Action schema --------------------------------------------------------------
 const actions = manifest.actions;
-assert.equal(actions.length, 114, 'Action catalog grows additively with 35 canonical M8 data mutations and 3 runtime-only data affordances.');
+assert.equal(actions.length, 118, 'Action catalog grows additively with four canonical M9 layer mutations.');
 const actionIds = actions.map((item) => item.ref.id);
 assert.equal(new Set(actionIds).size, actionIds.length, 'Action ids must be unique.');
 for (const item of actions) {

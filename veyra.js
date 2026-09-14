@@ -3721,8 +3721,8 @@ globalThis.veyra = Object.freeze({
   getCommandHistory: () => store.commandHistory,
   getMachines: () => cloneValue(store.document.stateMachines || []),
   getMachine: (machineId) => cloneValue(machineById(store.document, machineId)),
-  createMachine: ({ name = 'State Machine', inputs = [], states = [], transitions = [], initial } = {}) => {
-    return dispatchCompatibilityCommand('addStateMachine', { overrides: { name, inputs, states, transitions, initial } }, {
+  createMachine: ({ name = 'State Machine', inputs = [], layers, states = [], transitions = [], initial } = {}) => {
+    return dispatchCompatibilityCommand('addStateMachine', { overrides: { name, inputs, layers, states, transitions, initial } }, {
       label: `Create state machine ${name}`,
       source: 'script',
     });
@@ -3737,14 +3737,26 @@ globalThis.veyra = Object.freeze({
     if (removed) machineInteractionBridge.prune();
     return removed;
   },
+  addMachineLayer: (machineId, overrides = {}) => dispatchCompatibilityCommand('addMachineLayer', { machineId, overrides }, {
+    label: `Add machine layer ${overrides.name || ''}`.trim(), source: 'script',
+  }),
+  updateMachineLayer: (machineId, layerId, changes) => Boolean(dispatchCompatibilityCommand('updateMachineLayer', { machineId, layerId, changes }, {
+    label: `Update machine layer ${layerId}`, source: 'script',
+  })),
+  reorderMachineLayer: (machineId, layerId, index) => Boolean(dispatchCompatibilityCommand('reorderMachineLayer', { machineId, layerId, index }, {
+    label: `Reorder machine layer ${layerId}`, source: 'script',
+  })),
+  removeMachineLayer: (machineId, layerId) => Boolean(dispatchCompatibilityCommand('removeMachineLayer', { machineId, layerId }, {
+    label: `Delete machine layer ${layerId}`, source: 'script',
+  })),
   addMachineInput: (machineId, { name = 'Value', type = 'number', value }) => {
     return dispatchCompatibilityCommand('addMachineInput', { machineId, overrides: { name, type, value } }, {
       label: `Add machine input ${name}`,
       source: 'script',
     });
   },
-  addMachineState: (machineId, { name = 'State', timelineId, type = 'animation' }) => {
-    return dispatchCompatibilityCommand('addMachineState', { machineId, overrides: { name, type, timelineId } }, {
+  addMachineState: (machineId, { name = 'State', timelineId, type = 'animation', layerId } = {}) => {
+    return dispatchCompatibilityCommand('addMachineState', { machineId, layerId, overrides: { name, type, timelineId } }, {
       label: `Add state ${name}`,
       source: 'script',
     });
@@ -3754,9 +3766,9 @@ globalThis.veyra = Object.freeze({
       label: 'Delete machine state', source: 'script',
     }));
   },
-  addMachineTransition: (machineId, { from, to, duration = 0, after, conditions = [] }) => {
+  addMachineTransition: (machineId, { from, to, duration = 0, after, conditions = [], layerId } = {}) => {
     return dispatchCompatibilityCommand('addMachineTransition', {
-      machineId,
+      machineId, layerId,
       overrides: {
         from, to, duration, after,
         conditions: conditions.map((condition) => ({ input: condition.input, op: condition.op, value: condition.value })),

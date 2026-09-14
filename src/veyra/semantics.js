@@ -290,21 +290,27 @@ export function entityByReference(document, reference) {
       }
       return null;
     case 'stateMachine': return find(document.stateMachines);
+    case 'machineLayer':
     case 'machineState':
     case 'machineInput':
     case 'machineTransition':
     case 'machineCondition':
       for (const machine of document.stateMachines || []) {
+        if (ref.kind === 'machineLayer') {
+          const layer = find(machine.layers || []);
+          if (layer) return layer;
+          continue;
+        }
         const collection = {
-          machineState: machine.states,
+          machineState: (machine.layers || []).flatMap((layer) => layer.states || []),
           machineInput: machine.inputs,
-          machineTransition: machine.transitions,
+          machineTransition: (machine.layers || []).flatMap((layer) => layer.transitions || []),
         }[ref.kind];
         if (collection) {
           const item = find(collection);
           if (item) return item;
         } else {
-          for (const transition of machine.transitions || []) {
+          for (const transition of (machine.layers || []).flatMap((layer) => layer.transitions || [])) {
             const condition = find(transition.conditions);
             if (condition) return condition;
           }
@@ -416,10 +422,13 @@ export function allEntityReferenceKeys(document) {
   for (const machine of document.stateMachines || []) {
     add('stateMachine', machine.id);
     for (const input of machine.inputs || []) add('machineInput', input.id);
-    for (const state of machine.states || []) add('machineState', state.id);
-    for (const transition of machine.transitions || []) {
-      add('machineTransition', transition.id);
-      for (const condition of transition.conditions || []) add('machineCondition', condition.id);
+    for (const layer of machine.layers || []) {
+      add('machineLayer', layer.id);
+      for (const state of layer.states || []) add('machineState', state.id);
+      for (const transition of layer.transitions || []) {
+        add('machineTransition', transition.id);
+        for (const condition of transition.conditions || []) add('machineCondition', condition.id);
+      }
     }
   }
   for (const listener of document.listeners || []) add('listener', listener.id);

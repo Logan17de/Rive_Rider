@@ -292,6 +292,26 @@ const COMMAND_TABLE = {
     params: [param('machineId', 'string', true), param('changes', 'object', false)],
     run: (store, args, command) => store.updateStateMachine(args.machineId, args.changes ?? {}, command ?? {}),
   },
+  addMachineLayer: {
+    summary: 'Add an ordered state-machine layer.',
+    params: [param('machineId', 'string', true), param('overrides', 'object', false)],
+    run: (store, args, command) => store.addMachineLayer(args.machineId, args.overrides ?? {}, command ?? {}),
+  },
+  updateMachineLayer: {
+    summary: 'Update a machine layer name, enabled flag, or weight.',
+    params: [param('machineId', 'string', true), param('layerId', 'string', true), param('changes', 'object', false)],
+    run: (store, args, command) => store.updateMachineLayer(args.machineId, args.layerId, args.changes ?? {}, command ?? {}),
+  },
+  reorderMachineLayer: {
+    summary: 'Move a machine layer to an authored priority index.',
+    params: [param('machineId', 'string', true), param('layerId', 'string', true), param('index', 'number', true)],
+    run: (store, args, command) => store.reorderMachineLayer(args.machineId, args.layerId, args.index, command ?? {}),
+  },
+  removeMachineLayer: {
+    summary: 'Delete a machine layer while preserving at least one layer.',
+    params: [param('machineId', 'string', true), param('layerId', 'string', true)],
+    run: (store, args, command) => store.removeMachineLayer(args.machineId, args.layerId, command ?? {}),
+  },
   addMachineInput: {
     summary: 'Add a machine input (number/bool/trigger).',
     params: [param('machineId', 'string', true), param('overrides', 'object', false)],
@@ -299,8 +319,8 @@ const COMMAND_TABLE = {
   },
   addMachineState: {
     summary: 'Add an animation state pointing at a document timeline.',
-    params: [param('machineId', 'string', true), param('overrides', 'object', false)],
-    run: (store, args, command) => store.addMachineState(args.machineId, args.overrides ?? {}, command ?? {}),
+    params: [param('machineId', 'string', true), param('layerId', 'string', false), param('overrides', 'object', false)],
+    run: (store, args, command) => store.addMachineState(args.machineId, args.overrides ?? {}, command ?? {}, args.layerId),
   },
   removeMachineState: {
     summary: 'Delete a machine state and the transitions referencing it.',
@@ -309,8 +329,8 @@ const COMMAND_TABLE = {
   },
   addMachineTransition: {
     summary: 'Add a machine transition (from/to state ids, duration, after, conditions).',
-    params: [param('machineId', 'string', true), param('overrides', 'object', false)],
-    run: (store, args, command) => store.addMachineTransition(args.machineId, args.overrides ?? {}, command ?? {}),
+    params: [param('machineId', 'string', true), param('layerId', 'string', false), param('overrides', 'object', false)],
+    run: (store, args, command) => store.addMachineTransition(args.machineId, args.overrides ?? {}, command ?? {}, args.layerId),
   },
   removeMachineTransition: {
     summary: 'Delete a machine transition (false when missing).',
@@ -782,6 +802,7 @@ const COMMAND_MANIFEST_OVERRIDES = {
     parameters: [
       manifestParameter('name', 'string', false, 'Machine name.'),
       manifestParameter('inputs', 'array', false, 'Machine input records.'),
+      manifestParameter('layers', 'array', false, 'Ordered machine layer records.'),
       manifestParameter('states', 'array', false, 'Machine state records.'),
       manifestParameter('transitions', 'array', false, 'Machine transition records.'),
       manifestParameter('initial', 'reference', false, 'machineState reference for the initial state.'),
@@ -806,6 +827,55 @@ const COMMAND_MANIFEST_OVERRIDES = {
     parameters: [manifestParameter('machineId', 'string', true, 'Id of the machine.')],
     capabilities: ['transactional', 'undoable'],
   },
+  addMachineLayer: {
+    manifestId: 'add-machine-layer',
+    name: 'Add machine layer',
+    targetKind: 'machineLayer',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the owning machine.'),
+      manifestParameter('name', 'string', false, 'Layer display name.'),
+      manifestParameter('enabled', 'boolean', false, 'Whether the layer evaluates.'),
+      manifestParameter('weight', 'number', false, 'Layer mix weight.', bounds('machineLayer.weight')),
+      manifestParameter('initial', 'reference', false, 'Initial machineState in this layer.'),
+      manifestParameter('states', 'array', false, 'Initial states owned by this layer.'),
+      manifestParameter('transitions', 'array', false, 'Initial transitions owned by this layer.'),
+    ],
+    capabilities: ['transactional', 'undoable', 'returns-id'],
+  },
+  updateMachineLayer: {
+    manifestId: 'update-machine-layer',
+    name: 'Update machine layer',
+    targetKind: 'machineLayer',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the owning machine.'),
+      manifestParameter('layerId', 'string', true, 'Stable layer id.'),
+      manifestParameter('name', 'string', false, 'New layer display name.'),
+      manifestParameter('enabled', 'boolean', false, 'Whether the layer evaluates.'),
+      manifestParameter('weight', 'number', false, 'New layer mix weight.', bounds('machineLayer.weight')),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  reorderMachineLayer: {
+    manifestId: 'reorder-machine-layer',
+    name: 'Reorder machine layer',
+    targetKind: 'machineLayer',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the owning machine.'),
+      manifestParameter('layerId', 'string', true, 'Stable layer id.'),
+      manifestParameter('index', 'number', true, 'Zero-based authored priority index.'),
+    ],
+    capabilities: ['transactional', 'undoable'],
+  },
+  removeMachineLayer: {
+    manifestId: 'remove-machine-layer',
+    name: 'Remove machine layer',
+    targetKind: 'machineLayer',
+    parameters: [
+      manifestParameter('machineId', 'string', true, 'Id of the owning machine.'),
+      manifestParameter('layerId', 'string', true, 'Stable layer id.'),
+    ],
+    capabilities: ['cascades-owned-graph', 'preserves-one-layer', 'transactional', 'undoable'],
+  },
   addMachineInput: {
     manifestId: 'add-machine-input',
     name: 'Add machine input',
@@ -824,6 +894,7 @@ const COMMAND_MANIFEST_OVERRIDES = {
     targetKind: 'machineState',
     parameters: [
       manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('layerId', 'string', false, 'Owning machineLayer id; defaults to the base layer.'),
       manifestParameter('name', 'string', false, 'State name.'),
       manifestParameter('timelineId', 'string', true, 'Id of a timeline in the document.'),
     ],
@@ -845,6 +916,7 @@ const COMMAND_MANIFEST_OVERRIDES = {
     targetKind: 'machineTransition',
     parameters: [
       manifestParameter('machineId', 'string', true, 'Id of the machine.'),
+      manifestParameter('layerId', 'string', false, 'Owning machineLayer id; inferred from the source state when omitted.'),
       manifestParameter('from', 'string', true, 'Source machine state id.'),
       manifestParameter('to', 'string', true, 'Target machine state id.'),
       manifestParameter('duration', 'number', false, 'Transition duration in seconds.', bounds('machineTransition.duration')),
@@ -966,6 +1038,10 @@ const COMMAND_DESCRIPTIONS = Object.freeze({
   addStateMachine: 'Add a state machine with its inputs, states, and transitions.',
   updateStateMachine: 'Update the name or initial state of a machine.',
   removeStateMachine: 'Delete a state machine.',
+  addMachineLayer: 'Add an ordered machine layer with stable identity.',
+  updateMachineLayer: 'Update layer display metadata, enabled state, or weight without changing its id.',
+  reorderMachineLayer: 'Move a layer in the ordered property-priority stack without changing its id.',
+  removeMachineLayer: 'Delete a layer and its owned graph while preserving at least one layer.',
   addMachineInput: 'Add a number, bool, or trigger input to a machine.',
   addMachineState: 'Add an animation state pointing at a document timeline.',
   removeMachineState: 'Delete a state and the transitions that reference it; clears initial when it pointed there.',
