@@ -14,6 +14,7 @@ export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend']),
   actionTypes: Object.freeze(['data-set', 'data-fire', 'input-set', 'input-fire', 'emit', 'timeline']),
   actionPhases: Object.freeze(['state-start', 'state-end', 'transition-start', 'transition-end']),
+  randomizeExit: Object.freeze({ weighted: true, seeded: true, source: 'runtime-option', globalRandom: false }),
   graph: Object.freeze([
     'set-name', 'set-initial',
     'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
@@ -26,6 +27,29 @@ export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
 
 export const VEYRA_MACHINE_INVALIDATION_EVENT = 'runtime-invalidated';
 const NO_MACHINE = 'no-machine';
+const UINT32_RANGE = 0x100000000;
+
+function hashSeed(text) {
+  let value = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    value ^= text.charCodeAt(index);
+    value = Math.imul(value, 16777619);
+  }
+  return value >>> 0;
+}
+
+function normalizeRandomSeed(value, machineId) {
+  if (value == null) return hashSeed(`veyra-machine:${machineId}`);
+  const number = Number(value);
+  if (!Number.isInteger(number)) throw new TypeError('randomSeed must be an unsigned 32-bit integer.');
+  if (number < 0 || number > 0xffffffff) throw new RangeError('randomSeed must be an unsigned 32-bit integer.');
+  return number >>> 0;
+}
+
+function advanceRandomState(state) {
+  const next = (Math.imul(state >>> 0, 1664525) + 1013904223) >>> 0;
+  return { state: next, sample: next / UINT32_RANGE };
+}
 
 function resolveDocument(documentOrGetter) {
   if (typeof documentOrGetter === 'function') {
@@ -55,8 +79,8 @@ function machineSignature(machine) {
     orderedLayers(machine).map(layer => [
       layer.id,
       layer.initial ? referenceId(layer.initial, 'machineState') : null,
-      (layer.states || []).map(state => [state.id, state.type, state.actions || []]),
-      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, condition.input ? referenceId(condition.input, 'machineInput') : null, condition.source || null, condition.op, condition.value, condition.compare || null]), transition.actions || []]),
+      (layer.states || []).map(state => [state.id, state.type, Boolean(state.randomizeExit), state.actions || []]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.randomWeight ?? null, transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, condition.input ? referenceId(condition.input, 'machineInput') : null, condition.source || null, condition.op, condition.value, condition.compare || null]), transition.actions || []]),
     ]),
   ]);
 }
@@ -196,6 +220,7 @@ function transitionView(runtime) {
     allowExitDuringTransition: Boolean(allowExitDuringTransition),
     sourceKind: Array.isArray(runtime.transition.sourceSnapshot) ? 'snapshot' : 'state',
     interruptedFromTransitionId: runtime.transition.interruptedFromTransitionId || null,
+    randomDecision: cloneValue(runtime.transition.randomDecision || null),
     easing: easing || 'linear',
     ...(easingParams ? { easingParams: cloneValue(easingParams) } : {}),
     rawProgress: progress.raw,
@@ -219,6 +244,8 @@ export class MachineRuntime {
   #layers = new Map();
   #dataRuntime = null;
   #runtimeScopePath = [];
+  #randomSeed = 0;
+  #randomState = 0;
   #signature = NO_MACHINE;
   #invalidateListeners = new Set();
   #stats = {
@@ -230,6 +257,8 @@ export class MachineRuntime {
     triggerPulsesConsumed: 0,
     actionsExecuted: 0,
     actionErrors: 0,
+    randomDecisions: 0,
+    randomCandidatesEvaluated: 0,
     timelineEvaluations: 0,
     compositionApplications: 0,
     inactiveLayerSkips: 0,
@@ -241,6 +270,8 @@ export class MachineRuntime {
     this.#machineId = String(machineId || '');
     this.#dataRuntime = options.dataRuntime || createVeyraDataRuntime(documentOrGetter);
     this.#runtimeScopePath = createDataRuntimeScope(options.runtimeScopePath ?? options.scopePath ?? []).path;
+    this.#randomSeed = normalizeRandomSeed(options.randomSeed, this.#machineId);
+    this.#randomState = this.#randomSeed;
     const machine = machineById(resolveDocument(documentOrGetter), this.#machineId);
     if (!machine) throw new TypeError(`State machine ${machineId} was not found in the document.`);
     this.#resetRuntime(machine);
@@ -252,7 +283,8 @@ export class MachineRuntime {
   get stats() { return cloneValue(this.#stats); }
 
   fork() {
-    const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId, { dataRuntime: this.#dataRuntime.fork(), runtimeScopePath: this.#runtimeScopePath });
+    const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId, { dataRuntime: this.#dataRuntime.fork(), runtimeScopePath: this.#runtimeScopePath, randomSeed: this.#randomSeed });
+    snapshot.#randomState = this.#randomState;
     snapshot.#overrideValues = new Map([...this.#overrideValues].map(([key, value]) => [key, cloneValue(value)]));
     snapshot.#layers = new Map([...this.#layers].map(([id, value]) => [id, cloneLayerRuntime(value)]));
     snapshot.#signature = this.#signature;
@@ -384,6 +416,7 @@ export class MachineRuntime {
   #resetRuntime(machine) {
     this.#overrideValues = new Map();
     this.#layers = new Map();
+    this.#randomState = this.#randomSeed;
     for (const layer of orderedLayers(machine)) this.#layers.set(layer.id, createLayerRuntime(layer));
     this.#signature = machineSignature(machine);
     const inputs = new Map((machine?.inputs || []).map(input => [input.id, input.value]));
@@ -413,14 +446,63 @@ export class MachineRuntime {
     });
   }
 
+  #weightedTransitionChoice(matches) {
+    if (matches.length === 1) return { ...matches[0], randomDecision: null };
+    const candidates = matches.map(item => ({ transitionId: item.transition.id, weight: Number(item.transition.randomWeight ?? 1) }));
+    const total = candidates.reduce((sum, item) => sum + item.weight, 0);
+    const advanced = advanceRandomState(this.#randomState);
+    this.#randomState = advanced.state;
+    this.#stats.randomDecisions += 1;
+    this.#stats.randomCandidatesEvaluated += matches.length;
+    let cursor = advanced.sample * total;
+    let selectedIndex = matches.length - 1;
+    for (let index = 0; index < candidates.length; index += 1) {
+      cursor -= candidates[index].weight;
+      if (cursor < 0) { selectedIndex = index; break; }
+    }
+    const selected = matches[selectedIndex];
+    return {
+      ...selected,
+      randomDecision: {
+        seed: this.#randomSeed,
+        draw: this.#stats.randomDecisions,
+        sample: advanced.sample,
+        candidates,
+        selected: selected.transition.id,
+      },
+    };
+  }
+
   #eligibleTransitionForState(layer, stateId, stateTime, inputsById) {
     const sourceState = stateById(layer, stateId);
-    for (const transition of this.#transitionCandidates(layer, stateId)) {
+    const candidates = this.#transitionCandidates(layer, stateId);
+    if (sourceState?.randomizeExit) {
+      const directMatches = [];
+      for (const transition of candidates) {
+        if (referenceId(transition.from, 'machineState') !== stateId) continue;
+        this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
+        if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, stateTime)) continue;
+        const match = this.#transitionMatch(transition, stateTime, inputsById);
+        if (match.matched) directMatches.push({ transition, match });
+      }
+      if (directMatches.length) return this.#weightedTransitionChoice(directMatches);
+      // Any-state routes are not paths leaving this state and therefore stay a
+      // deterministic fallback outside the Randomize Exit weighted pool.
+      for (const transition of candidates) {
+        if (referenceId(transition.from, 'machineState') === stateId) continue;
+        this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
+        if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, stateTime)) continue;
+        const match = this.#transitionMatch(transition, stateTime, inputsById);
+        if (match.matched) return { transition, match, randomDecision: null };
+      }
+      return null;
+    }
+    for (const transition of candidates) {
       this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
       if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, stateTime)) continue;
       const match = this.#transitionMatch(transition, stateTime, inputsById);
       if (!match.matched) continue;
-      return { transition, match };
+      return { transition, match, randomDecision: null };
     }
     return null;
   }
@@ -432,7 +514,7 @@ export class MachineRuntime {
     const toId = referenceId(transition.to, 'machineState');
     const target = stateById(layer, toId);
     this.#runActions(source, 'state-end', layer, inputsById, events, { stateId: sourceStateId, transitionId: transition.id });
-    events.push({ type: 'transition-start', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
+    events.push({ type: 'transition-start', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id, ...(options.randomDecision ? { randomDecision: cloneValue(options.randomDecision) } : {}) });
     this.#runActions(transition, 'transition-start', layer, inputsById, events, { stateId: sourceStateId, transitionId: transition.id });
     if (target && !['entry', 'any', 'exit'].includes(target.type)) {
       this.#runActions(target, 'state-start', layer, inputsById, events, { stateId: target.id, transitionId: transition.id });
@@ -454,6 +536,7 @@ export class MachineRuntime {
         ...(transition.easingParams ? { easingParams: cloneValue(transition.easingParams) } : {}),
         ...(Array.isArray(options.sourceSnapshot) ? { sourceSnapshot: cloneValue(options.sourceSnapshot) } : {}),
         ...(options.interruptedFromTransitionId ? { interruptedFromTransitionId: options.interruptedFromTransitionId } : {}),
+        ...(options.randomDecision ? { randomDecision: cloneValue(options.randomDecision) } : {}),
       };
       return;
     }
@@ -472,7 +555,7 @@ export class MachineRuntime {
     const sourceStateTime = runtime.stateTime - active.startedAt;
     const selected = this.#eligibleTransitionForState(layer, sourceStateId, sourceStateTime, inputsById);
     if (!selected) return false;
-    const { transition: next, match } = selected;
+    const { transition: next, match, randomDecision } = selected;
     const sourceSnapshot = this.#stateTimelineContributions(layer, runtime, inputsById);
     events.push({
       type: 'transition-end',
@@ -487,6 +570,7 @@ export class MachineRuntime {
     this.#runActions(interruptedTransition, 'transition-end', layer, inputsById, events, { stateId: sourceStateId, transitionId: active.transitionId });
     this.#beginTransition(layer, runtime, next, sourceStateId, sourceStateTime, inputsById, events, {
       match,
+      randomDecision,
       sourceSnapshot,
       interruptedFromTransitionId: active.transitionId,
     });
@@ -560,7 +644,7 @@ export class MachineRuntime {
     }
     runtime.stateTime += delta;
     const selected = this.#eligibleTransitionForState(layer, runtime.stateId, runtime.stateTime, inputsById);
-    if (selected) this.#beginTransition(layer, runtime, selected.transition, runtime.stateId, runtime.stateTime, inputsById, events, { match: selected.match });
+    if (selected) this.#beginTransition(layer, runtime, selected.transition, runtime.stateId, runtime.stateTime, inputsById, events, { match: selected.match, randomDecision: selected.randomDecision });
   }
 
   step(deltaSeconds) {
@@ -756,6 +840,8 @@ export class MachineRuntime {
       triggerPulsesConsumed: 0,
       actionsExecuted: 0,
       actionErrors: 0,
+      randomDecisions: 0,
+      randomCandidatesEvaluated: 0,
       timelineEvaluations: 0,
       compositionApplications: 0,
       inactiveLayerSkips: 0,
