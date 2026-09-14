@@ -1,0 +1,35 @@
+name: M9 layered runtime worker
+on:
+  push:
+    branches: ['work/m9-layered-runtime']
+permissions:
+  contents: write
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply layered runtime schema patch
+        run: python3 scripts/apply-m9-layered-runtime.py
+      - name: Syntax checks
+        run: npm run check
+      - name: Full repository suites
+        run: npm test
+      - name: Remove worker-only transport
+        run: rm scripts/apply-m9-layered-runtime.py .github/workflows/m9-layered-runtime-worker.yml
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit clean M9 runtime slice
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(m9): add simultaneous layered machine runtime and pseudo states'
+          git push origin HEAD:work/m9-layered-runtime
