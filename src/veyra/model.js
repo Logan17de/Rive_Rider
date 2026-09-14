@@ -580,6 +580,7 @@ export function createMachineTransition(overrides = {}) {
     after: overrides.after == null ? null : finite(overrides.after, 'transition.after'),
     exitTime: normalizeTransitionExitTimeValue(overrides.exitTime),
     pauseSource: Boolean(overrides.pauseSource),
+    allowExitDuringTransition: Boolean(overrides.allowExitDuringTransition),
     easing,
     conditions: (overrides.conditions || []).map((condition) => createMachineCondition(condition)),
   };
@@ -1353,6 +1354,7 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   const after = transition.after == null ? null : bounded(transition.after, `${path}.after`, 0, 100000);
   const exitTime = normalizeTransitionExitTimeValue(transition.exitTime, `${path}.exitTime`);
   const pauseSource = Boolean(transition.pauseSource);
+  const allowExitDuringTransition = Boolean(transition.allowExitDuringTransition);
   const easing = String(transition.easing || 'linear');
   if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`${path}.easing must be one of ${VEYRA_EASING_TYPES.join(', ')}.`);
   let easingParams;
@@ -1362,7 +1364,7 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   }
   if (transition.conditions !== undefined && transition.conditions !== null && !Array.isArray(transition.conditions)) throw new TypeError(`${path}.conditions must be an array of conditions.`);
   const conditions=(Array.isArray(transition.conditions)?transition.conditions:[]).map((condition,i)=>normalizeMachineCondition(condition,`${path}.conditions[${i}]`,inputsById));
-  return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, easing, ...(easingParams?{easingParams}:{}), conditions };
+  return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, allowExitDuringTransition, easing, ...(easingParams?{easingParams}:{}), conditions };
 }
 
 function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsById, globalStateIds, globalTransitionIds) {
