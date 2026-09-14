@@ -17,6 +17,35 @@ jobs:
         with:
           node-version: 22
       - run: python3 scripts/apply-m9-lifecycle-actions.py
+      - name: Register machineAction reference kind
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/veyra/references.js')
+          text=p.read_text()
+          old="""  'machineCondition',
+            'machineBlendChild',
+          """
+          new="""  'machineCondition',
+            'machineAction',
+            'machineBlendChild',
+          """
+          if text.count(old)!=1: raise SystemExit(f'reference kind insertion count {text.count(old)}')
+          text=text.replace(old,new,1)
+          old="export function createMachineConditionRef(id) { return createReference('machineCondition', id); }\n"
+          new=old+"export function createMachineActionRef(id) { return createReference('machineAction', id); }\n"
+          if text.count(old)!=1: raise SystemExit('machineCondition ref helper missing')
+          p.write_text(text.replace(old,new,1))
+          PY
+      - name: Remove lifecycle debug print
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/veyra-m9-lifecycle-actions.test.mjs')
+          text=p.read_text()
+          text=text.replace("  console.log('INITIAL_LIFECYCLE_EVENTS', JSON.stringify(actionsOf(events)));\n", '')
+          p.write_text(text)
+          PY
       - run: npm run check
       - run: npm test
       - run: git diff --check
@@ -24,6 +53,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/veyra/model.js src/veyra/stateMachine.js tests/veyra-m9-lifecycle-actions.test.mjs
+          git add src/veyra/model.js src/veyra/references.js src/veyra/stateMachine.js tests/veyra-m9-lifecycle-actions.test.mjs
           git commit -m 'feat(m9): add exactly-once lifecycle actions'
           git push origin HEAD:work/m9-lifecycle-actions
