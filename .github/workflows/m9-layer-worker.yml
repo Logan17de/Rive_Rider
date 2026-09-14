@@ -62,6 +62,7 @@ jobs:
             git push origin HEAD:work/m9-layer-schema
             exit "$status"
           fi
+          python3 scripts/apply-m9-layer-import-fix.py
       - name: Syntax check
         run: npm run check
       - name: Full repository suites with retained failure evidence
@@ -81,7 +82,7 @@ jobs:
             exit "$status"
           fi
       - name: Remove worker-only patch machinery
-        run: rm -f scripts/apply-m9-layer-schema.py scripts/apply-m9-layer-followup.py .github/workflows/m9-layer-worker.yml verification/m9-layer-worker-failure.log verification/m9-patch-failure.log
+        run: rm -f scripts/apply-m9-layer-schema.py scripts/apply-m9-layer-followup.py scripts/apply-m9-layer-import-fix.py .github/workflows/m9-layer-worker.yml verification/m9-layer-worker-failure.log verification/m9-patch-failure.log
       - name: Diff hygiene
         run: git diff --check
       - name: Commit clean M9 layer foundation
