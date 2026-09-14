@@ -478,6 +478,9 @@ Keep already-landed implementation evidence visible without turning it into a se
 ## Integrated CI evidence
 
 - Implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`.
+- Production-hardening commit: `0495feea9d68bf97125ac72b28bd49c0f1c0dc82` (bounded inputs, layout evaluation,
+  renderer/player parity, static server, browser-safe modal and regression
+  coverage).
 - Integrated production baseline: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`.
 - Standard Tests #195, run `34866362425`, job `104051088061`: **SUCCESS on that exact integrated SHA**.
 - Exact integrated-head log: **55/55 source syntax checks PASS; 59/59 repository suites PASS**, including `tests/veyra-m10-features.test.mjs` and all discovered M0–M9 regressions.
@@ -510,7 +513,8 @@ Do not add further post-M9 feature-family scope merely to elaborate this record.
 
 ```text
 - Status: DEFERRED PENDING M9 ACCEPTANCE
-- Implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`
+- Original implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`
+- Production-hardening commit: `0495feea9d68bf97125ac72b28bd49c0f1c0dc82`
 - Integrated production baseline: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`
 - Exact integrated Tests evidence: #195 / run `34866362425` / job `104051088061` — 55/55 syntax, 59/59 suites PASS
 - Exact current-main Tests evidence: #196 / run `34867613727` / job `104055300606` on `82f6a1b59c41b1c1e118efc0af6bdda2190dd5a7` — 55/55 syntax, 59/59 suites PASS
