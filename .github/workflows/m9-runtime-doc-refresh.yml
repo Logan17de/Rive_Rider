@@ -1,0 +1,24 @@
+name: M9 runtime docs refresh
+on:
+  push:
+    branches: ['work/m9-runtime-doc-refresh']
+permissions:
+  contents: write
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/apply-m9-runtime-doc-refresh.py
+      - run: git diff --check
+      - name: Commit clean milestone refresh
+        run: |
+          rm scripts/apply-m9-runtime-doc-refresh.py
+          rm .github/workflows/m9-runtime-doc-refresh.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add milestone.md scripts/apply-m9-runtime-doc-refresh.py .github/workflows/m9-runtime-doc-refresh.yml
+          git commit -m 'docs(m9): record runtime parity advances'
+          git push origin HEAD:work/m9-runtime-doc-refresh
