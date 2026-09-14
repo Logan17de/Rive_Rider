@@ -631,7 +631,9 @@ export function createMachineState(overrides = {}) {
     ...(timeline ? { timeline } : {}),
     speed,
     graph,
+    ...(overrides.randomizeExit ? { randomizeExit: true } : {}),
   };
+  if (result.randomizeExit && ['entry', 'exit', 'any'].includes(type)) throw new TypeError(`${type} pseudo-states cannot enable Randomize Exit.`);
   const actions = (overrides.actions || []).map(createMachineAction);
   if (actions.some(action => !['state-start', 'state-end'].includes(action.phase))) throw new TypeError('State lifecycle action phase must be state-start or state-end.');
   if (['entry', 'exit', 'any'].includes(type) && actions.length) throw new TypeError(`${type} pseudo-states cannot own lifecycle actions.`);
@@ -689,6 +691,11 @@ export function createMachineTransition(overrides = {}) {
     easing,
     conditions: (overrides.conditions || []).map((condition) => createMachineCondition(condition)),
   };
+  if (overrides.randomWeight != null) {
+    const randomWeight = finite(overrides.randomWeight, 'transition.randomWeight');
+    if (!(randomWeight > 0)) throw new RangeError('transition.randomWeight must be positive.');
+    transition.randomWeight = randomWeight;
+  }
   const actions = (overrides.actions || []).map(createMachineAction);
   if (actions.some(action => !['transition-start', 'transition-end'].includes(action.phase))) throw new TypeError('Transition lifecycle action phase must be transition-start or transition-end.');
   if (actions.length) transition.actions = actions;
@@ -1570,7 +1577,8 @@ function normalizeMachineState(state, index, layerPath, timelineIds, inputsById)
   const graph = state?.graph && typeof state.graph === 'object' && !Array.isArray(state.graph)
     ? { x: finite(state.graph.x ?? 0, `${path}.graph.x`), y: finite(state.graph.y ?? 0, `${path}.graph.y`) }
     : { x: 0, y: 0 };
-  const result = { id, name: String(state.name || ''), displayNameAdvisory: true, caption: String(state.caption ?? ''), type, speed, graph };
+  const result = { id, name: String(state.name || ''), displayNameAdvisory: true, caption: String(state.caption ?? ''), type, speed, graph, ...(state.randomizeExit ? { randomizeExit: true } : {}) };
+  if (result.randomizeExit && ['entry', 'exit', 'any'].includes(type)) throw new TypeError(`${path}.${type} pseudo-state cannot enable Randomize Exit.`);
   if (timeline) result.timeline = timeline;
   if (state.actions !== undefined && state.actions !== null && !Array.isArray(state.actions)) throw new TypeError(`${path}.actions must be an array.`);
   const actions = (Array.isArray(state.actions) ? state.actions : []).map((action,i)=>normalizeMachineAction(action,i,path,'state',timelineIds,inputsById));
@@ -1608,6 +1616,11 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   const exitTime = normalizeTransitionExitTimeValue(transition.exitTime, `${path}.exitTime`);
   const pauseSource = Boolean(transition.pauseSource);
   const allowExitDuringTransition = Boolean(transition.allowExitDuringTransition);
+  let randomWeight;
+  if (transition.randomWeight != null) {
+    randomWeight = finite(transition.randomWeight, `${path}.randomWeight`);
+    if (!(randomWeight > 0)) throw new RangeError(`${path}.randomWeight must be positive.`);
+  }
   const easing = String(transition.easing || 'linear');
   if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`${path}.easing must be one of ${VEYRA_EASING_TYPES.join(', ')}.`);
   let easingParams;
@@ -1619,7 +1632,7 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   const conditions=(Array.isArray(transition.conditions)?transition.conditions:[]).map((condition,i)=>normalizeMachineCondition(condition,`${path}.conditions[${i}]`,inputsById));
   if (transition.actions !== undefined && transition.actions !== null && !Array.isArray(transition.actions)) throw new TypeError(`${path}.actions must be an array.`);
   const actions=(Array.isArray(transition.actions)?transition.actions:[]).map((action,i)=>normalizeMachineAction(action,i,path,'transition',timelineIds,inputsById));
-  return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, allowExitDuringTransition, easing, ...(easingParams?{easingParams}:{}), conditions, ...(actions.length?{actions}: {}) };
+  return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, allowExitDuringTransition, ...(randomWeight != null ? { randomWeight } : {}), easing, ...(easingParams?{easingParams}:{}), conditions, ...(actions.length?{actions}: {}) };
 }
 
 function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsById, globalStateIds, globalTransitionIds) {
