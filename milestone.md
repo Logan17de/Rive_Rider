@@ -132,8 +132,8 @@ Blend-state requirements:
 - `directBlend` steady-state evaluation is implemented with stable child identity, numeric per-child input weights, deterministic normalized ownership weights and zero-weight child sleeping.
 - Ownership evidence exposes every active child timeline, its stable blend-child ref and effective normalized weight.
 - Invalid thresholds, missing timelines, duplicate child IDs and non-number legacy inputs fail closed during canonical normalization.
-- Blend transitions are deliberately rejected until the richer transition compositor is implemented; Additive Blend, M8/View Model blend sources and canonical blend-child CRUD commands remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
-- Worker Actions run `34810521222`, job `103870774356`: syntax PASS, **49/49 suites PASS**, diff hygiene PASS.
+- Blend-state transitions now use the canonical transition compositor: animation↔blend and blend↔blend timed transitions compose outgoing/incoming child contributions with deterministic normalized effective weights. Additive Blend, M8/View Model blend sources and canonical blend-child CRUD commands remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
+- Blend steady-state worker Actions run `34810521222`, job `103870774356`: syntax PASS, **49/49 suites PASS**, diff hygiene PASS. Transition-compositor worker run `34812631038`, job `103876831686`: **50/50 syntax checks + 50/50 suites PASS**; exact-main standard Tests #186 (`34812754122`, job `103877176194`) also PASS on `00f85fff5a92284efb343bb316bf531469ca182c`.
 
 ## Task 3 — Ordered simultaneous layer evaluation
 
@@ -143,7 +143,7 @@ Implement concurrent ordered layer evaluation with an explicit property-composit
 - [x] layers evaluate simultaneously in deterministic order;
 - [x] property priority/composition is machine-readable and tested;
 - [x] disabled layers perform no active runtime work and contribute no ownership;
-- [ ] transitions/blends from multiple layers compose without mutating authored source values;
+- [x] transitions/blends from multiple layers compose without mutating authored source values;
 - [ ] active owner stack reports authored value → timelines/blends → state/layer winner with evidence;
 - [ ] Component instances receive isolated per-instance machine runtime paths, including repeated/nested Components;
 - [ ] reset/prune/document replacement cleans only the relevant runtime scopes.
@@ -164,22 +164,32 @@ Transitions must support, where meaningful for the source/target state types:
 - [ ] View Model property conditions;
 - [ ] compatible events/triggers;
 - [ ] built-in artboard/runtime values supported by the roadmap;
-- [ ] legacy machine inputs;
-- [ ] comparison against fixed values;
+- [x] legacy machine inputs;
+- [x] comparison against fixed values;
 - [ ] comparison against compatible data-bound values;
-- [ ] transition duration;
-- [ ] exit time;
-- [ ] pause source;
+- [x] transition duration;
+- [x] exit time;
+- [x] pause source;
 - [ ] allow exit during transition;
-- [ ] interpolation/easing;
+- [x] interpolation/easing;
 - [ ] transition start actions;
 - [ ] transition end actions;
-- [ ] enabled/disabled transition;
-- [ ] Any-state routing;
-- [ ] Entry/Exit routing;
+- [x] enabled/disabled transition;
+- [x] Any-state routing;
+- [x] Entry/Exit routing;
 - [ ] Randomize Exit with weighted outgoing paths.
 
 Randomized transitions need an explicit deterministic runtime RNG/seed contract for tests/replays. Never use a hidden global random source that makes verification nondeterministic.
+
+### M9 transition implementation evidence — compositor + timing slice
+
+- Production `00f85fff5a92284efb343bb316bf531469ca182c` lifts the previous fail-closed blend-transition restriction. The same canonical compositor handles animation→blend, blend→animation and blend→blend timed transitions by converting absolute outgoing/incoming contributions into deterministic sequential timeline weights.
+- Transition interpolation now persists `enabled`, `easing` and bounded cubic-bezier parameters; runtime/debug evidence exposes both raw and eased progress. Structural machine invalidation includes the transition behavior rather than relying on stale runtime state.
+- Permanent `tests/veyra-m9-transition-compositor.test.mjs` covers animation→1D Blend, 1D Blend→Direct Blend, eased composition and invalid interpolation authoring. Worker run `34812631038`, job `103876831686`: **50/50 syntax + 50/50 suites PASS**. Standard Tests #186 (`34812754122`, job `103877176194`) is SUCCESS on that exact production SHA.
+- Production `fb0bfb1c90452a477833f36757ee3e3b3fe76dab` adds canonical Exit Time with `{unit: seconds|percent, value}`, speed-aware percent gating, and Pause Source behavior that freezes the exact outgoing source time captured when a transition starts while the incoming state continues.
+- Exit Time rejects invalid units/ranges and meaningless pseudo-state source usage. The legacy `after` gate remains a separate condition; the two contracts are not silently conflated.
+- Permanent `tests/veyra-m9-transition-exit-pause.test.mjs` covers seconds, percent, speed-adjusted percentage, paused-vs-live source clocks and invalid authored values. Worker run `34812931703`, job `103877684445`: syntax/full-suite/diff gates PASS. Standard exact-main Tests #187 is the required promotion gate for this SHA.
+- Compatibility boundary: `allow exit during transition` remains deliberately open because interruption needs a snapshot-safe source/target composition contract; start/end actions, View Model/data-bound conditions, deterministic Randomize Exit and Additive Blend also remain open.
 
 ## Task 5 — Unified conditions, actions and data sources
 
@@ -214,7 +224,7 @@ Required runtime behavior:
 - [x] current states for every layer;
 - [x] transition progress and interpolation;
 - [x] state speed/reverse playback;
-- [ ] pause/exit-time behavior;
+- [x] pause/exit-time behavior;
 - [ ] exact trigger/event consumption policy;
 - [ ] start/end actions fire exactly once;
 - [ ] Randomize Exit chooses once per decision and is replayable under a seed;
