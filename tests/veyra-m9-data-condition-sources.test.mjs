@@ -119,8 +119,8 @@ function fixture() {
   assert.equal(runtime.stateId, 'done_state');
 }
 
-// M8 trigger properties are legal machine event sources. This slice observes the
-// queued pulse non-destructively; exact machine consumption is deliberately a later M9 contract.
+// M8 trigger properties are legal machine event sources. A selected transition now
+// consumes exactly one queued pulse; plain endpoint reads and forks remain non-consuming.
 {
   const { dataRuntime, runtime } = fixture();
   dataRuntime.setValue('inst_nested_a', 'p_score', 0.8);
@@ -131,7 +131,7 @@ function fixture() {
   assert.equal(dataRuntime.getValue('inst_main', 'p_trigger'), true);
   runtime.step(0.01);
   assert.equal(runtime.stateId, 'pulse_state');
-  assert.equal(dataRuntime.getValue('inst_main', 'p_trigger'), true, 'machine observation must not silently consume an M8 trigger yet');
+  assert.equal(dataRuntime.getValue('inst_main', 'p_trigger'), false, 'selected transition must consume exactly one M8 trigger pulse');
 }
 
 // getEndpointValue is nested and non-consuming, so MachineRuntime forks can safely observe M8 state.
