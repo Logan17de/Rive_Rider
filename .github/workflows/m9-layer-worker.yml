@@ -28,10 +28,38 @@ jobs:
           end=t.index("index=ROOT/'src/index.js'")
           p.write_text(t[:start]+t[end:])
           PY
-      - name: Apply M9 layered schema patches
+      - name: Apply M9 base schema patch
         run: |
-          python3 scripts/apply-m9-layer-schema.py
-          python3 scripts/apply-m9-layer-followup.py
+          set +e
+          python3 scripts/apply-m9-layer-schema.py > /tmp/m9-base-patch.log 2>&1
+          status=$?
+          cat /tmp/m9-base-patch.log
+          if [ "$status" -ne 0 ]; then
+            mkdir -p verification
+            cp /tmp/m9-base-patch.log verification/m9-patch-failure.log
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add verification/m9-patch-failure.log
+            git commit -m 'test(m9): retain base patch failure evidence'
+            git push origin HEAD:work/m9-layer-schema
+            exit "$status"
+          fi
+      - name: Apply M9 compatibility follow-up
+        run: |
+          set +e
+          python3 scripts/apply-m9-layer-followup.py > /tmp/m9-followup-patch.log 2>&1
+          status=$?
+          cat /tmp/m9-followup-patch.log
+          if [ "$status" -ne 0 ]; then
+            mkdir -p verification
+            cp /tmp/m9-followup-patch.log verification/m9-patch-failure.log
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add verification/m9-patch-failure.log
+            git commit -m 'test(m9): retain follow-up patch failure evidence'
+            git push origin HEAD:work/m9-layer-schema
+            exit "$status"
+          fi
       - name: Syntax check
         run: npm run check
       - name: Full repository suites with retained failure evidence
@@ -51,7 +79,7 @@ jobs:
             exit "$status"
           fi
       - name: Remove worker-only patch machinery
-        run: rm -f scripts/apply-m9-layer-schema.py scripts/apply-m9-layer-followup.py .github/workflows/m9-layer-worker.yml verification/m9-layer-worker-failure.log
+        run: rm -f scripts/apply-m9-layer-schema.py scripts/apply-m9-layer-followup.py .github/workflows/m9-layer-worker.yml verification/m9-layer-worker-failure.log verification/m9-patch-failure.log
       - name: Diff hygiene
         run: git diff --check
       - name: Commit clean M9 layer foundation
