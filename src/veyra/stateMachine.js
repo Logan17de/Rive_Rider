@@ -1,5 +1,5 @@
-import { cloneValue, machineById } from './model.js';
-import { referenceId } from './references.js';
+import { cloneValue, machineById, timelineById } from './model.js';
+import { createReference, referenceId } from './references.js';
 import { evaluateTimelines } from './animation.js';
 
 export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
@@ -7,82 +7,63 @@ export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
   'transition-end',
 ]);
 
-// The one machine capability surface, shared by `manifest.js`, `summary.js`,
-// and the browser API so the catalogs cannot drift (contract §Surface:
-// manifest + scene summary in the same change that exposes a command).
-// `graph` names edit operations 1:1 with Store commands; `runtime` names
-// operations 1:1 with `MachineRuntime` methods.
 export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   inputTypes: Object.freeze(['number', 'bool', 'trigger']),
-  stateTypes: Object.freeze(['animation']),
+  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend', 'additiveBlend']),
   graph: Object.freeze([
-    'set-name',
-    'set-initial',
-    'add-layer',
-    'update-layer',
-    'remove-layer',
-    'reorder-layer',
-    'add-input',
-    'remove-input',
-    'update-input',
-    'add-state',
-    'update-state',
-    'remove-state',
-    'add-transition',
-    'update-transition',
-    'remove-transition',
+    'set-name', 'set-initial',
+    'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
+    'add-input', 'remove-input', 'update-input',
+    'add-state', 'update-state', 'remove-state',
+    'add-transition', 'update-transition', 'remove-transition',
   ]),
   runtime: Object.freeze(['set-input', 'fire', 'step', 'scrub', 'reset', 'evaluate']),
 });
 
-// Emitted through `onInvalidate` when reconciliation finds that the machine
-// record this runtime tracks changed in a way that resets its position (or
-// that the machine disappeared or came back). One event per effective change.
 export const VEYRA_MACHINE_INVALIDATION_EVENT = 'runtime-invalidated';
-
-// Structural identity of the machine — only the fields the runtime's position
-// is expressed in: input ids/types, state ids, transition ids/endpoints, and
-// the initial pointer. Names, authored values, durations, `after` gates, and
-// condition payloads are deliberately absent: changing them must NOT reset a
-// live preview (they are read fresh on every evaluation anyway).
 const NO_MACHINE = 'no-machine';
-
-function machineSignature(machine) {
-  if (!machine) return NO_MACHINE;
-  return JSON.stringify([
-    machine.initial ? referenceId(machine.initial, 'machineState') : null,
-    machine.inputs.map((input) => [input.id, input.type]),
-    machine.states.map((state) => state.id),
-    machine.transitions.map((transition) => [
-      transition.id,
-      referenceId(transition.from, 'machineState'),
-      referenceId(transition.to, 'machineState'),
-    ]),
-  ]);
-}
 
 function resolveDocument(documentOrGetter) {
   if (typeof documentOrGetter === 'function') {
     const document = documentOrGetter();
-    if (!document || typeof document !== 'object') {
-      throw new TypeError('Document getter must return a Veyra document.');
-    }
+    if (!document || typeof document !== 'object') throw new TypeError('Document getter must return a Veyra document.');
     return document;
   }
-  if (!documentOrGetter || typeof documentOrGetter !== 'object') {
-    throw new TypeError('Machine runtime requires a Veyra document or document getter.');
-  }
+  if (!documentOrGetter || typeof documentOrGetter !== 'object') throw new TypeError('Machine runtime requires a Veyra document or document getter.');
   return documentOrGetter;
+}
+
+function compatibilityLayer(machine) {
+  if (!machine) return null;
+  const id = referenceId(machine.compatibilityLayer, 'machineLayer');
+  return machine.layers?.find(layer => layer.id === id) || machine.layers?.[0] || null;
+}
+
+function orderedLayers(machine) {
+  return [...(machine?.layers || [])].sort((a, b) => Number(a.order || 0) - Number(b.order || 0) || a.id.localeCompare(b.id));
+}
+
+function machineSignature(machine) {
+  if (!machine) return NO_MACHINE;
+  return JSON.stringify([
+    referenceId(machine.compatibilityLayer, 'machineLayer'),
+    (machine.inputs || []).map(input => [input.id, input.type]),
+    orderedLayers(machine).map(layer => [
+      layer.id,
+      layer.initial ? referenceId(layer.initial, 'machineState') : null,
+      (layer.states || []).map(state => [state.id, state.type]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState')]),
+    ]),
+  ]);
 }
 
 function resolveInput(machine, nameOrId) {
   const key = String(nameOrId || '');
-  return machine.inputs.find((input) => input.id === key || input.name === key) || null;
+  return (machine?.inputs || []).find(input => input.id === key || input.name === key) || null;
 }
 
 function evaluateCondition(condition, inputsById) {
-  const inputId = referenceId(condition.input, 'machineInput');
-  const inputValue = inputsById.get(inputId);
+  const inputValue = inputsById.get(referenceId(condition.input, 'machineInput'));
   switch (condition.op) {
     case '<': return inputValue < condition.value;
     case '<=': return inputValue <= condition.value;
@@ -92,174 +73,127 @@ function evaluateCondition(condition, inputsById) {
     case '!=': return inputValue !== condition.value;
     case 'fired': return inputValue === true;
     case '!fired': return inputValue !== true;
-    default:
-      throw new TypeError(`Unsupported condition operator: ${condition.op}`);
+    default: throw new TypeError(`Unsupported condition operator: ${condition.op}`);
   }
 }
 
 function transitionSatisfied(transition, stateTime, inputsById) {
+  if (transition.enabled === false) return false;
   if (transition.after != null && stateTime < transition.after) return false;
-  for (const condition of transition.conditions) {
-    if (!evaluateCondition(condition, inputsById)) return false;
-  }
-  return true;
+  return (transition.conditions || []).every(condition => evaluateCondition(condition, inputsById));
 }
 
-/**
- * Deterministic runtime for one Veyra state machine.
- *
- * The runtime owns per-machine *runtime state only* (current state, state
- * time, input overrides, active transition). Everything structural — states,
- * transitions, inputs, timelines — is read from the document on every call,
- * so editor edits are picked up without re-creation. Pass a document getter
- * (`() => store.document`) to stay current across edits, undo, and redo.
- *
- * Reconciliation runs before every public read and mutation, keyed strictly
- * to THIS machine's structural signature:
- * - an edit to any other part of the document never disturbs the preview;
- * - a structural change to this machine (state/transition/input added or
- *   removed, endpoint or type changed, `initial` re-pointed) resets the
- *   runtime to a valid position derived from the current record — it never
- *   throws, so a preview loop survives undo;
- * - deleted inputs drop their overrides with the reset; authored-value
- *   shadowing cannot occur because overrides only ever hold inputs that were
- *   explicitly `setInput`/`fire`d since the last reset (`?? input.value`
- *   therefore always surfaces live edits for clean inputs);
- * - a change emits at most one `runtime-invalidated` event through
- *   `onInvalidate(listener)` per effective (net) change observed, so
- *   multi-part commands cannot flicker.
- * Reconciliation never mutates the document.
- *
- * Time is measured in seconds. A transition's authored `duration` is in
- * seconds; `0` cuts immediately. Blending crossfades the outgoing and
- * incoming timeline contributions: addresses driven by both crossfade
- * linearly, outgoing-only addresses hold, incoming-only addresses ramp in
- * against their authored value. Active blends are captured as value
- * snapshots, so deleting a blend's endpoints can never land the machine on a
- * dangling state id.
- */
+function initialState(layer) {
+  const states = layer?.states || [];
+  if (!states.length) return null;
+  const initialId = referenceId(layer.initial, 'machineState');
+  return states.find(state => state.id === initialId) || states.find(state => state.type !== 'any' && state.type !== 'exit') || states[0] || null;
+}
+
+function stateById(layer, id) {
+  return (layer?.states || []).find(state => state.id === id) || null;
+}
+
+function stateSpeed(state) {
+  const speed = Number(state?.speed ?? 1);
+  return Number.isFinite(speed) ? speed : 1;
+}
+
+function timelineEndSeconds(document, timelineId) {
+  const timeline = timelineById(document, timelineId);
+  if (!timeline) return 0;
+  return Number(timeline.workEnd ?? timeline.duration) / Number(timeline.fps || 1);
+}
+
+function timelineTimeForState(document, state, elapsed) {
+  const speed = stateSpeed(state);
+  if (!state?.timeline) return elapsed;
+  const id = referenceId(state.timeline, 'timeline');
+  if (speed >= 0) return elapsed * speed;
+  return timelineEndSeconds(document, id) + elapsed * speed;
+}
+
+function runtimeLayerSnapshot(layer, runtime) {
+  const state = runtime.stateId ? stateById(layer, runtime.stateId) : null;
+  const transition = runtime.transition ? cloneValue(runtime.transition) : null;
+  return {
+    layer: createReference('machineLayer', layer.id),
+    layerName: layer.name,
+    enabled: layer.enabled !== false,
+    order: layer.order,
+    stateId: runtime.stateId,
+    stateName: state?.name || null,
+    stateType: state?.type || null,
+    stateTime: runtime.stateTime,
+    transition,
+  };
+}
+
+function transitionView(runtime) {
+  if (!runtime?.transition) return null;
+  const { transitionId, fromId, toId, duration, startedAt } = runtime.transition;
+  const elapsed = runtime.stateTime - startedAt;
+  return {
+    id: transitionId,
+    fromId,
+    toId,
+    duration,
+    progress: duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1,
+  };
+}
+
+function createLayerRuntime(layer) {
+  const state = initialState(layer);
+  return { stateId: state?.id || null, stateTime: 0, transition: null };
+}
+
+function cloneLayerRuntime(value) {
+  return { stateId: value.stateId, stateTime: value.stateTime, transition: cloneValue(value.transition) };
+}
+
 export class MachineRuntime {
   #documentOrGetter = null;
   #machineId = null;
   #overrideValues = new Map();
-  #stateId = null;
-  #stateTime = 0;
-  #transition = null;
+  #layers = new Map();
   #signature = NO_MACHINE;
   #invalidateListeners = new Set();
+  #stats = {
+    evaluations: 0,
+    layerEvaluations: 0,
+    stateEvaluations: 0,
+    transitionConditionEvaluations: 0,
+    timelineEvaluations: 0,
+    compositionApplications: 0,
+    inactiveLayerSkips: 0,
+    zeroMachineFastPaths: 0,
+  };
 
   constructor(documentOrGetter, machineId) {
     this.#documentOrGetter = documentOrGetter;
     this.#machineId = String(machineId || '');
     const machine = machineById(resolveDocument(documentOrGetter), this.#machineId);
-    if (!machine) {
-      throw new TypeError(`State machine ${machineId} was not found in the document.`);
-    }
+    if (!machine) throw new TypeError(`State machine ${machineId} was not found in the document.`);
     this.#resetRuntime(machine);
   }
 
-  // Read-only hosts reconcile only this private snapshot, never the live clock
-  // or its invalidation listeners. The evaluator remains unchanged.
+  get #document() { return resolveDocument(this.#documentOrGetter); }
+  get machine() { return machineById(this.#document, this.#machineId); }
+  get machineId() { return this.#machineId; }
+  get stats() { return cloneValue(this.#stats); }
+
   fork() {
     const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId);
     snapshot.#overrideValues = new Map([...this.#overrideValues].map(([key, value]) => [key, cloneValue(value)]));
-    snapshot.#stateId = this.#stateId; snapshot.#stateTime = this.#stateTime;
-    snapshot.#transition = cloneValue(this.#transition); snapshot.#signature = this.#signature;
+    snapshot.#layers = new Map([...this.#layers].map(([id, value]) => [id, cloneLayerRuntime(value)]));
+    snapshot.#signature = this.#signature;
+    snapshot.#stats = cloneValue(this.#stats);
     return snapshot;
   }
 
-  get machineId() {
-    return this.#machineId;
-  }
-
-  get machine() {
-    return machineById(this.#document, this.#machineId);
-  }
-
-  get #document() {
-    return resolveDocument(this.#documentOrGetter);
-  }
-
-  /**
-   * Subscribe to `runtime-invalidated` notifications. Returns an unsubscribe
-   * function, mirroring `VeyraStore.subscribe`.
-   */
   onInvalidate(listener) {
     this.#invalidateListeners.add(listener);
     return () => this.#invalidateListeners.delete(listener);
-  }
-
-  get stateId() {
-    this.#reconcile();
-    return this.#stateId;
-  }
-
-  get state() {
-    this.#reconcile();
-    return this.machine?.states.find((state) => state.id === this.#stateId) || null;
-  }
-
-  get stateTime() {
-    this.#reconcile();
-    return this.#stateTime;
-  }
-
-  get transition() {
-    this.#reconcile();
-    if (!this.#transition) return null;
-    const { transitionId, fromId, toId, duration, startedAt } = this.#transition;
-    const elapsed = this.#stateTime - startedAt;
-    const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
-    return {
-      id: transitionId,
-      fromId,
-      toId,
-      duration,
-      progress,
-    };
-  }
-
-  get inputs() {
-    this.#reconcile();
-    return (this.machine?.inputs || []).map((input) => ({
-      id: input.id,
-      name: input.name,
-      type: input.type,
-      value: this.#overrideValues.get(input.id) ?? input.value,
-    }));
-  }
-
-  #resetRuntime(machine) {
-    this.#overrideValues = new Map();
-    const states = machine ? machine.states : [];
-    const initial = machine
-      ? (machine.initial
-        ? states.find((state) => state.id === referenceId(machine.initial, 'machineState'))
-        : states[0])
-      : null;
-    this.#stateId = initial?.id || null;
-    this.#stateTime = 0;
-    this.#transition = null;
-    this.#signature = machineSignature(machine);
-  }
-
-  /**
-   * Re-read the machine and, when its structural signature changed since the
-   * last observation, reset the runtime to a valid position derived from the
-   * current record and emit one invalidation event. Never throws on a
-   * machine change; a broken document getter surfaces as before (caller bug).
-   */
-  #reconcile() {
-    const machine = this.machine;
-    const signature = machineSignature(machine);
-    if (signature === this.#signature) return machine;
-    const previous = this.#signature;
-    this.#resetRuntime(machine);
-    const reason = !machine
-      ? 'machine-removed'
-      : (previous === NO_MACHINE ? 'machine-restored' : 'structural');
-    this.#notifyInvalidated(reason);
-    return machine;
   }
 
   #notifyInvalidated(reason) {
@@ -267,194 +201,244 @@ export class MachineRuntime {
     for (const listener of [...this.#invalidateListeners]) listener(event);
   }
 
-  #inputsById() {
-    return new Map(this.inputs.map((input) => [input.id, input.value]));
+  #compatibilityRuntime(machine = this.machine) {
+    const layer = compatibilityLayer(machine);
+    return layer ? this.#layers.get(layer.id) || null : null;
   }
 
-  #completeTransition(events) {
-    const { transitionId, fromId, toId, startedAt } = this.#transition;
-    // The incoming state kept running during the blend, so it owns the
-    // elapsed time when the blend finishes and its timeline continues
-    // seamlessly from there.
-    this.#stateTime = this.#stateTime - startedAt;
-    this.#stateId = toId;
-    this.#transition = null;
-    events.push({ type: 'transition-end', transitionId, fromId, toId });
+  get stateId() { this.#reconcile(); return this.#compatibilityRuntime()?.stateId || null; }
+  get state() {
+    const machine = this.#reconcile();
+    const layer = compatibilityLayer(machine);
+    return layer ? stateById(layer, this.#layers.get(layer.id)?.stateId) : null;
+  }
+  get stateTime() { this.#reconcile(); return this.#compatibilityRuntime()?.stateTime || 0; }
+  get transition() { this.#reconcile(); return transitionView(this.#compatibilityRuntime()); }
+
+  get inputs() {
+    const machine = this.#reconcile();
+    return (machine?.inputs || []).map(input => ({ id: input.id, name: input.name, type: input.type, value: this.#overrideValues.get(input.id) ?? input.value }));
   }
 
-  /**
-   * Advance the machine by deltaSeconds and return the events that fired
-   * (`transition-start` / `transition-end`). Trigger inputs are consumed at
-   * the end of every step, whether or not a transition used them.
-   */
+  get layers() {
+    const machine = this.#reconcile();
+    return orderedLayers(machine).map(layer => ({ ...runtimeLayerSnapshot(layer, this.#layers.get(layer.id) || createLayerRuntime(layer)), transition: transitionView(this.#layers.get(layer.id)) }));
+  }
+
+  #inputsById() { return new Map(this.inputs.map(input => [input.id, input.value])); }
+
+  #resetRuntime(machine) {
+    this.#overrideValues = new Map();
+    this.#layers = new Map();
+    for (const layer of orderedLayers(machine)) this.#layers.set(layer.id, createLayerRuntime(layer));
+    this.#signature = machineSignature(machine);
+    const inputs = new Map((machine?.inputs || []).map(input => [input.id, input.value]));
+    for (const layer of orderedLayers(machine)) this.#resolveImmediatePseudo(layer, this.#layers.get(layer.id), inputs, []);
+  }
+
+  #reconcile() {
+    const machine = this.machine;
+    const signature = machineSignature(machine);
+    if (signature === this.#signature) return machine;
+    const previous = this.#signature;
+    this.#resetRuntime(machine);
+    this.#notifyInvalidated(!machine ? 'machine-removed' : (previous === NO_MACHINE ? 'machine-restored' : 'structural'));
+    return machine;
+  }
+
+  #transitionCandidates(layer, runtime) {
+    const anyIds = new Set((layer.states || []).filter(state => state.type === 'any').map(state => state.id));
+    return (layer.transitions || []).filter(transition => {
+      const fromId = referenceId(transition.from, 'machineState');
+      return fromId === runtime.stateId || anyIds.has(fromId);
+    });
+  }
+
+  #resolveImmediatePseudo(layer, runtime, inputsById, events) {
+    const seen = new Set();
+    for (let hops = 0; hops <= (layer.states?.length || 0) + 1; hops += 1) {
+      const state = stateById(layer, runtime.stateId);
+      if (!state || !['entry', 'any'].includes(state.type)) return;
+      if (seen.has(state.id)) { runtime.stateId = null; runtime.transition = null; return; }
+      seen.add(state.id);
+      const transition = (layer.transitions || []).find(candidate => referenceId(candidate.from, 'machineState') === state.id && transitionSatisfied(candidate, runtime.stateTime, inputsById));
+      if (!transition) return;
+      const toId = referenceId(transition.to, 'machineState');
+      const target = stateById(layer, toId);
+      events.push({ type: 'transition-start', transitionId: transition.id, fromId: state.id, toId, layerId: layer.id });
+      if (target?.type === 'exit') {
+        runtime.stateId = null; runtime.stateTime = 0; runtime.transition = null;
+        events.push({ type: 'transition-end', transitionId: transition.id, fromId: state.id, toId, layerId: layer.id });
+        return;
+      }
+      runtime.stateId = toId; runtime.stateTime = 0; runtime.transition = null;
+      events.push({ type: 'transition-end', transitionId: transition.id, fromId: state.id, toId, layerId: layer.id });
+    }
+  }
+
+  #completeTransition(layer, runtime, events) {
+    const { transitionId, fromId, toId, startedAt } = runtime.transition;
+    runtime.stateTime = runtime.stateTime - startedAt;
+    const target = stateById(layer, toId);
+    runtime.stateId = target?.type === 'exit' ? null : toId;
+    runtime.transition = null;
+    events.push({ type: 'transition-end', transitionId, fromId, toId, layerId: layer.id });
+  }
+
+  #stepLayer(layer, runtime, delta, inputsById, events) {
+    if (layer.enabled === false) return;
+    if (!runtime.stateId && !runtime.transition) return;
+    if (runtime.transition) {
+      runtime.stateTime += delta;
+      if (runtime.stateTime - runtime.transition.startedAt >= runtime.transition.duration - 1e-9) this.#completeTransition(layer, runtime, events);
+      return;
+    }
+    runtime.stateTime += delta;
+    const candidates = this.#transitionCandidates(layer, runtime);
+    for (const transition of candidates) {
+      this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
+      if (!transitionSatisfied(transition, runtime.stateTime, inputsById)) continue;
+      const fromId = runtime.stateId;
+      const toId = referenceId(transition.to, 'machineState');
+      const target = stateById(layer, toId);
+      if (transition.duration > 0 && target?.type !== 'entry' && target?.type !== 'any') {
+        runtime.transition = { transitionId: transition.id, fromId, toId, duration: transition.duration, startedAt: runtime.stateTime };
+        events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
+      } else {
+        events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
+        runtime.stateId = target?.type === 'exit' ? null : toId;
+        runtime.stateTime = 0;
+        events.push({ type: 'transition-end', transitionId: transition.id, fromId, toId, layerId: layer.id });
+        this.#resolveImmediatePseudo(layer, runtime, inputsById, events);
+      }
+      break;
+    }
+  }
+
   step(deltaSeconds) {
     const delta = Number(deltaSeconds);
-    if (!Number.isFinite(delta) || delta < 0) {
-      throw new TypeError('step() requires a finite, non-negative delta in seconds.');
-    }
+    if (!Number.isFinite(delta) || delta < 0) throw new TypeError('step() requires a finite, non-negative delta in seconds.');
     const events = [];
     const machine = this.#reconcile();
-    if (!machine || !machine.states.length) return events;
-    if (delta === 0) {
-      this.#clearTriggers();
-      return events;
-    }
-
+    if (!machine) { this.#stats.zeroMachineFastPaths += 1; return events; }
     const inputsById = this.#inputsById();
-    if (this.#transition) {
-      this.#stateTime += delta;
-      if (this.#stateTime - this.#transition.startedAt >= this.#transition.duration - 1e-9) {
-        this.#completeTransition(events);
-      }
-    } else {
-      this.#stateTime += delta;
-      const outgoing = machine.transitions.filter(
-        (transition) => referenceId(transition.from, 'machineState') === this.#stateId
-      );
-      for (const transition of outgoing) {
-        if (!transitionSatisfied(transition, this.#stateTime, inputsById)) continue;
-        const toId = referenceId(transition.to, 'machineState');
-        if (transition.duration > 0) {
-          this.#transition = {
-            transitionId: transition.id,
-            fromId: this.#stateId,
-            toId,
-            duration: transition.duration,
-            startedAt: this.#stateTime,
-          };
-          events.push({
-            type: 'transition-start',
-            transitionId: transition.id,
-            fromId: this.#stateId,
-            toId,
-          });
-        } else {
-          const fromId = this.#stateId;
-          this.#stateId = toId;
-          this.#stateTime = 0;
-          events.push(
-            { type: 'transition-start', transitionId: transition.id, fromId, toId },
-            { type: 'transition-end', transitionId: transition.id, fromId, toId },
-          );
-        }
-        break;
-      }
+    if (delta > 0) {
+      for (const layer of orderedLayers(machine)) this.#stepLayer(layer, this.#layers.get(layer.id), delta, inputsById, events);
     }
     this.#clearTriggers();
     return events;
   }
 
   #clearTriggers() {
-    for (const input of this.machine?.inputs || []) {
-      if (input.type === 'trigger' && (this.#overrideValues.get(input.id) ?? input.value)) {
-        this.#overrideValues.set(input.id, false);
-      }
-    }
+    for (const input of this.machine?.inputs || []) if (input.type === 'trigger' && (this.#overrideValues.get(input.id) ?? input.value)) this.#overrideValues.set(input.id, false);
   }
 
-  /** Set a number or bool input. Triggers must use `fire()`. */
   setInput(nameOrId, value) {
-    this.#reconcile();
-    const machine = this.machine;
+    const machine = this.#reconcile();
     if (!machine) throw new TypeError(`State machine ${this.#machineId} is no longer in the document.`);
     const input = resolveInput(machine, nameOrId);
     if (!input) throw new TypeError(`Machine input "${nameOrId}" was not found on ${machine.name || this.#machineId}.`);
-    if (input.type === 'trigger') {
-      throw new TypeError(`Input "${input.name || input.id}" is a trigger; use fire() to activate it.`);
-    }
-    const normalized = input.type === 'number'
-      ? Number(value)
-      : Boolean(value);
-    if (input.type === 'number' && !Number.isFinite(normalized)) {
-      throw new TypeError(`Input "${input.name || input.id}" requires a finite number.`);
-    }
+    if (input.type === 'trigger') throw new TypeError(`Input "${input.name || input.id}" is a trigger; use fire() to activate it.`);
+    const normalized = input.type === 'number' ? Number(value) : Boolean(value);
+    if (input.type === 'number' && !Number.isFinite(normalized)) throw new TypeError(`Input "${input.name || input.id}" requires a finite number.`);
     this.#overrideValues.set(input.id, normalized);
     return normalized;
   }
 
-  /** Arm a trigger input; it stays true until the next step() consumes it. */
   fire(nameOrId) {
-    this.#reconcile();
-    const machine = this.machine;
+    const machine = this.#reconcile();
     if (!machine) throw new TypeError(`State machine ${this.#machineId} is no longer in the document.`);
     const input = resolveInput(machine, nameOrId);
     if (!input) throw new TypeError(`Machine input "${nameOrId}" was not found on ${machine.name || this.#machineId}.`);
-    if (input.type !== 'trigger') {
-      throw new TypeError(`Input "${input.name || input.id}" is not a trigger; use setInput() for ${input.type} inputs.`);
-    }
+    if (input.type !== 'trigger') throw new TypeError(`Input "${input.name || input.id}" is not a trigger; use setInput() for ${input.type} inputs.`);
     this.#overrideValues.set(input.id, true);
     return true;
   }
 
-  /**
-   * Evaluate the machine and return an animation-layer override map plus
-   * runtime state. `overrides` uses the same property-address keys as
-   * `evaluateTimelines`, so it can be passed straight into
-   * `evaluateDocument(document, { animation: overrides })`.
-   */
+  #stateTimelineContributions(layer, runtime) {
+    const document = this.#document;
+    const contributions = [];
+    if (runtime.transition) {
+      const { fromId, toId, startedAt, duration } = runtime.transition;
+      const elapsed = runtime.stateTime - startedAt;
+      const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
+      const outgoing = stateById(layer, fromId), incoming = stateById(layer, toId);
+      if (outgoing?.type === 'animation' && outgoing.timeline) contributions.push({ timelineId: referenceId(outgoing.timeline, 'timeline'), time: timelineTimeForState(document, outgoing, runtime.stateTime), weight: 1, stateId: outgoing.id });
+      if (incoming?.type === 'animation' && incoming.timeline) contributions.push({ timelineId: referenceId(incoming.timeline, 'timeline'), time: timelineTimeForState(document, incoming, elapsed), weight: progress, stateId: incoming.id });
+    } else {
+      const state = stateById(layer, runtime.stateId);
+      if (state?.type === 'animation' && state.timeline) contributions.push({ timelineId: referenceId(state.timeline, 'timeline'), time: timelineTimeForState(document, state, runtime.stateTime), weight: 1, stateId: state.id });
+    }
+    return contributions;
+  }
+
   evaluate() {
     const machine = this.#reconcile();
+    this.#stats.evaluations += 1;
+    const compatibility = compatibilityLayer(machine);
+    const compatibilityRuntime = compatibility ? this.#layers.get(compatibility.id) : null;
     const result = {
       machineId: this.#machineId,
-      stateId: this.#stateId,
-      stateName: machine?.states.find((state) => state.id === this.#stateId)?.name || null,
-      stateTime: this.#stateTime,
-      transition: this.transition,
+      stateId: compatibilityRuntime?.stateId || null,
+      stateName: compatibility ? stateById(compatibility, compatibilityRuntime?.stateId)?.name || null : null,
+      stateTime: compatibilityRuntime?.stateTime || 0,
+      transition: transitionView(compatibilityRuntime),
       inputs: cloneValue(this.inputs),
+      layers: [],
       overrides: {},
+      ownership: {},
       evaluatedTimelines: [],
+      stats: null,
     };
-    if (!machine || !machine.states.length) return result;
-
-    const timelineStates = [];
-    if (this.#transition) {
-      const { fromId, toId, startedAt, duration } = this.#transition;
-      const elapsed = this.#stateTime - startedAt;
-      const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
-      const outgoing = machine.states.find((state) => state.id === fromId);
-      const incoming = machine.states.find((state) => state.id === toId);
-      if (outgoing?.timeline) {
-        timelineStates.push({
-          timelineId: referenceId(outgoing.timeline, 'timeline'),
-          time: this.#stateTime,
-          weight: 1,
-        });
-      }
-      if (incoming?.timeline) {
-        timelineStates.push({
-          timelineId: referenceId(incoming.timeline, 'timeline'),
-          time: elapsed,
-          weight: progress,
-        });
-      }
-    } else {
-      const current = machine.states.find((state) => state.id === this.#stateId);
-      if (current?.timeline) {
-        timelineStates.push({
-          timelineId: referenceId(current.timeline, 'timeline'),
-          time: this.#stateTime,
-          weight: 1,
-        });
-      }
+    if (!machine) {
+      this.#stats.zeroMachineFastPaths += 1;
+      result.stats = { activeLayers: 0, inactiveLayers: 0, ...cloneValue(this.#stats) };
+      return result;
     }
-    // The exact controllers/times used by this evaluation are also exposed to
-    // Component ownership. Observers do not reconstruct clocks from progress.
-    result.evaluatedTimelines = cloneValue(timelineStates);
-    result.overrides = evaluateTimelines(this.#document, timelineStates);
+
+    let activeLayers = 0, inactiveLayers = 0;
+    for (const layer of orderedLayers(machine)) {
+      const runtime = this.#layers.get(layer.id) || createLayerRuntime(layer);
+      if (layer.enabled === false) {
+        inactiveLayers += 1; this.#stats.inactiveLayerSkips += 1;
+        result.layers.push({ ...runtimeLayerSnapshot(layer, runtime), transition: transitionView(runtime), evaluatedTimelines: [] });
+        continue;
+      }
+      activeLayers += 1; this.#stats.layerEvaluations += 1;
+      const contributions = this.#stateTimelineContributions(layer, runtime);
+      if (runtime.stateId) this.#stats.stateEvaluations += 1;
+      this.#stats.timelineEvaluations += contributions.length;
+      const layerOverrides = evaluateTimelines(this.#document, contributions);
+      const layerEvidence = contributions.map(item => ({ timeline: createReference('timeline', item.timelineId), state: createReference('machineState', item.stateId), time: item.time, weight: item.weight }));
+      for (const [address, value] of Object.entries(layerOverrides)) {
+        const previous = result.ownership[address] || [];
+        for (const item of previous) item.effective = false;
+        const state = runtime.stateId ? stateById(layer, runtime.stateId) : null;
+        previous.push({
+          kind: 'machine-layer',
+          machine: createReference('stateMachine', machine.id),
+          layer: createReference('machineLayer', layer.id),
+          state: state ? createReference('machineState', state.id) : null,
+          order: layer.order,
+          contributions: cloneValue(layerEvidence),
+          effective: true,
+        });
+        result.ownership[address] = previous;
+        result.overrides[address] = cloneValue(value);
+        this.#stats.compositionApplications += 1;
+      }
+      result.evaluatedTimelines.push(...contributions.map(({ stateId, ...item }) => item));
+      result.layers.push({ ...runtimeLayerSnapshot(layer, runtime), transition: transitionView(runtime), evaluatedTimelines: cloneValue(contributions) });
+    }
+    result.stats = { activeLayers, inactiveLayers, ...cloneValue(this.#stats) };
     return result;
   }
 
-  /** Return the machine to its initial state with authored input values. */
   reset() {
     const machine = this.#reconcile();
-    if (!machine) return;
-    this.#resetRuntime(machine);
+    if (machine) this.#resetRuntime(machine);
   }
 
-  /**
-   * Deterministic scrub: reset the machine and re-simulate `seconds` with no
-   * external input changes, then return the resulting state.
-   */
   scrub(seconds) {
     this.reset();
     this.step(Number(seconds));
