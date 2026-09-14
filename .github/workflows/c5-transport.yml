@@ -1,27 +1,84 @@
-name: C5 source transport
+name: M8-C5 Clean Implementation Gate
+
 on:
   push:
     branches: [work/m8-c5-transport]
     paths: [.github/workflows/c5-transport.yml]
+
 permissions:
-  contents: read
+  contents: write
+
 jobs:
-  source:
+  implementation:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Export pinned sources
-        run: |
-          mkdir /tmp/c5-source
-          git archive 479494c54d14c1c576d36484622c6056fbc3404d -o /tmp/c5-source/baseline.tar
-          git show 89e086caae68bc85b8e0e9d3d138af4cfc2b41c5:verification/m8-c4-review.mjs > /tmp/c5-source/review.mjs
-          git show c810199bdd6f049292b5c1a384a4ca4be7ec5a49:verification/M8-C4-review.md > /tmp/c5-source/review.md
-          git rev-parse 479494c54d14c1c576d36484622c6056fbc3404d^{tree} > /tmp/c5-source/base-tree.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          name: c5-source
-          retention-days: 1
-          path: /tmp/c5-source
-# retriggered 2026-09-14 for M8-C5 continuation
+          node-version: 22
+          cache: npm
+      - name: Capture exact patch payloads
+        run: |
+          base64 -d .c5-transport/c5-test.patch.b64 > /tmp/c5-test.patch
+          base64 -d .c5-transport/c5-fix.patch.gz.b64 | gzip -d > /tmp/c5-fix.patch
+          cp .c5-transport/write-handoff.py /tmp/write-c5-handoff.py
+          echo 'be98f145879c40bef27e7be550dd81fc6ea3775a1151fefa35d06eff965274a8  /tmp/c5-test.patch' | sha256sum -c -
+          echo '80b01578af8b468631641c5f34b876ce55f1086f64ad93a1a03efebbc6b01c9c  /tmp/c5-fix.patch' | sha256sum -c -
+      - name: Guard authoritative C5 baseline
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "479494c54d14c1c576d36484622c6056fbc3404d"
+      - name: Build test-first clean history
+        run: |
+          git checkout -B m8-c5-effective-output origin/main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git apply --check /tmp/c5-test.patch
+          git apply /tmp/c5-test.patch
+          git add tests/veyra-m8-c5-effective-output.test.mjs
+          git commit -m "test: capture M8-C5 verifier regressions"
+          test_sha=$(git rev-parse HEAD)
+          echo "$test_sha" > /tmp/c5-test-sha
+          set +e
+          node tests/veyra-m8-c5-effective-output.test.mjs > /tmp/c5-red.txt 2>&1
+          red_status=$?
+          set -e
+          test "$red_status" -ne 0
+          grep -F '"passed":5,"failed":5,"setupErrors":0,"executionErrors":0' /tmp/c5-red.txt
+      - name: Apply production correction and run all gates
+        run: |
+          git apply --check /tmp/c5-fix.patch
+          git apply /tmp/c5-fix.patch
+          git add src tests
+          git diff --cached --check
+          git commit -m "fix: close M8-C5 effective writes and visual output safety"
+          impl_sha=$(git rev-parse HEAD)
+          echo "$impl_sha" > /tmp/c5-impl-sha
+          npm ci
+          npm run check
+          npm test
+      - name: Record implementer handoff
+        run: |
+          python /tmp/write-c5-handoff.py "$(cat /tmp/c5-test-sha)" "$(cat /tmp/c5-impl-sha)"
+          git add milestone.md
+          git commit -m "docs: hand off M8-C5 for independent verification"
+          test -z "$(git ls-tree -r --name-only HEAD | grep -E '(^\.c5-transport/|c5-transport\.yml)' || true)"
+          git diff --exit-code 479494c54d14c1c576d36484622c6056fbc3404d -- package.json package-lock.json scripts .github/workflows/test.yml
+      - name: Push clean product branch
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "479494c54d14c1c576d36484622c6056fbc3404d"
+          git push origin HEAD:m8-c5-effective-output
+          echo "Test-first commit: $(cat /tmp/c5-test-sha)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Implementation commit: $(cat /tmp/c5-impl-sha)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Clean handoff branch: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean temporary transport branch
+        run: |
+          git checkout work/m8-c5-transport
+          git reset --hard origin/work/m8-c5-transport
+          git rm -r .c5-transport .github/workflows/c5-transport.yml
+          git commit -m "chore: remove temporary M8-C5 transport"
+          git push origin HEAD:work/m8-c5-transport
