@@ -551,6 +551,17 @@ export function createMachineState(overrides = {}) {
   return result;
 }
 
+function normalizeTransitionExitTimeValue(value, path = 'transition.exitTime') {
+  if (value == null || value === false) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${path} must be an object with unit and value.`);
+  const unit = String(value.unit || '');
+  if (!['seconds', 'percent'].includes(unit)) throw new TypeError(`${path}.unit must be seconds or percent.`);
+  const normalized = unit === 'percent'
+    ? bounded(value.value, `${path}.value`, 0, 1)
+    : bounded(value.value, `${path}.value`, 0, 100000);
+  return { unit, value: normalized };
+}
+
 export function createMachineTransition(overrides = {}) {
   const from = normalizeReference(overrides.from, 'machineState', 'transition.from');
   const to = normalizeReference(overrides.to, 'machineState', 'transition.to');
@@ -567,6 +578,8 @@ export function createMachineTransition(overrides = {}) {
     enabled: overrides.enabled !== false,
     duration,
     after: overrides.after == null ? null : finite(overrides.after, 'transition.after'),
+    exitTime: normalizeTransitionExitTimeValue(overrides.exitTime),
+    pauseSource: Boolean(overrides.pauseSource),
     easing,
     conditions: (overrides.conditions || []).map((condition) => createMachineCondition(condition)),
   };
@@ -1338,6 +1351,8 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   if (from.id === to.id) throw new TypeError(`${path} cannot target the same state.`);
   const duration = bounded(transition.duration ?? 0, `${path}.duration`, 0, 10000);
   const after = transition.after == null ? null : bounded(transition.after, `${path}.after`, 0, 100000);
+  const exitTime = normalizeTransitionExitTimeValue(transition.exitTime, `${path}.exitTime`);
+  const pauseSource = Boolean(transition.pauseSource);
   const easing = String(transition.easing || 'linear');
   if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`${path}.easing must be one of ${VEYRA_EASING_TYPES.join(', ')}.`);
   let easingParams;
@@ -1347,7 +1362,7 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   }
   if (transition.conditions !== undefined && transition.conditions !== null && !Array.isArray(transition.conditions)) throw new TypeError(`${path}.conditions must be an array of conditions.`);
   const conditions=(Array.isArray(transition.conditions)?transition.conditions:[]).map((condition,i)=>normalizeMachineCondition(condition,`${path}.conditions[${i}]`,inputsById));
-  return { id, from, to, enabled: transition.enabled !== false, duration, after, easing, ...(easingParams?{easingParams}:{}), conditions };
+  return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, easing, ...(easingParams?{easingParams}:{}), conditions };
 }
 
 function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsById, globalStateIds, globalTransitionIds) {
@@ -1361,7 +1376,10 @@ function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsByI
     stateIds.add(state.id); globalStateIds.add(state.id);
   }
   const transitions=(Array.isArray(layer?.transitions)?layer.transitions:[]).map((transition,i)=>normalizeMachineTransition(transition,i,path,stateIds,inputsById));
+  const statesById=new Map(states.map(state=>[state.id,state]));
   for(const transition of transitions){
+    const source=statesById.get(referenceId(transition.from,'machineState'));
+    if(transition.exitTime && source && ['entry','any','exit'].includes(source.type)) throw new TypeError(`${path} transition ${transition.id}.exitTime is not meaningful for ${source.type} pseudo-states.`);
     if(globalTransitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
     globalTransitionIds.add(transition.id);
   }
