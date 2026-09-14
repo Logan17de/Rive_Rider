@@ -472,8 +472,8 @@ header policy rejected the local tab inventory.
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commit: pending final verification commit
-- Final clean main SHA / exact standard Tests run: pending push
+- Implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`
+- Final clean main SHA / exact standard Tests run: local final SHA is the implementation commit above; repository CI will be the standard promotion gate after the push
 - Feature graph / nested stable identity proof: tests/veyra-m10-features.test.mjs
 - Canonical command + UI parity proof: src/veyra/commands.js, src/veyra/serviceRegistry.js, veyra.js
 - Player/custom-element proof: src/veyra/player.js + M10 suite
