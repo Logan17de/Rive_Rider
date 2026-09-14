@@ -285,7 +285,8 @@ assert.equal(machine.inputs[0].type, 'trigger');
 assert.deepEqual(machine.states[0].timeline, { kind: 'timeline', id: 'timeline_bob' });
 assert.deepEqual(machine.capabilities.inputTypes, [...VEYRA_MACHINE_INPUT_TYPES]);
 assert.deepEqual(machine.capabilities.graph, [
-  'set-name', 'set-initial', 'add-input', 'remove-input', 'update-input',
+  'set-name', 'set-initial', 'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
+  'add-input', 'remove-input', 'update-input',
   'add-state', 'update-state', 'remove-state',
   'add-transition', 'update-transition', 'remove-transition',
 ]);

@@ -12,6 +12,7 @@ import {
   createKeyframe,
   createMachineCondition,
   createMachineInput,
+  createMachineLayer,
   createMachineState,
   createMachineTransition,
   createStateMachine,
@@ -1232,6 +1233,42 @@ export class VeyraStore {
         target.conditions = changes.conditions.map((condition) => createMachineCondition(condition));
       }
     });
+    return true;
+  }
+
+
+  addMachineLayer(machineId, overrides = {}, commandDescriptor = {}) {
+    const machine = machineById(this.document, machineId); if (!machine) return null;
+    const layer = createMachineLayer({ ...overrides, order: machine.layers.length });
+    if (machine.layers.some((candidate) => candidate.id === layer.id)) throw new TypeError(`Machine layer ${layer.id} already exists.`);
+    const descriptor = typeof commandDescriptor === 'string' ? { label: commandDescriptor } : { label: `Add machine layer ${layer.name}`, source: 'user', ...commandDescriptor };
+    this.execute(descriptor, (document) => { const target=machineById(document,machineId); target.layers.push(layer); target.layers.forEach((item,index)=>{item.order=index;}); });
+    return layer.id;
+  }
+
+  updateMachineLayer(machineId, layerId, changes = {}, commandDescriptor = {}) {
+    const machine=machineById(this.document,machineId), layer=machine?.layers?.find((candidate)=>candidate.id===layerId); if(!layer) return false;
+    const descriptor=typeof commandDescriptor==='string'?{label:commandDescriptor}:{label:`Update machine layer ${layer.name||layer.id}`,source:'user',...commandDescriptor};
+    this.execute(descriptor,(document)=>{const target=machineById(document,machineId).layers.find((candidate)=>candidate.id===layerId); if(changes.name!==undefined) target.name=String(changes.name); if(changes.enabled!==undefined) target.enabled=Boolean(changes.enabled); if(changes.graph!==undefined) target.graph=cloneValue(changes.graph);});
+    return layerId;
+  }
+
+  reorderMachineLayer(machineId, layerId, index, commandDescriptor = {}) {
+    const machine=machineById(this.document,machineId), from=machine?.layers?.findIndex((candidate)=>candidate.id===layerId) ?? -1; if(from<0) return false;
+    if(!Number.isFinite(Number(index))) throw new TypeError('Machine layer order index must be finite.');
+    const at=Math.max(0,Math.min(machine.layers.length-1,Math.trunc(Number(index))));
+    const descriptor=typeof commandDescriptor==='string'?{label:commandDescriptor}:{label:`Reorder machine layer ${layerId}`,source:'user',...commandDescriptor};
+    this.execute(descriptor,(document)=>{const target=machineById(document,machineId);const current=target.layers.findIndex((candidate)=>candidate.id===layerId);const [item]=target.layers.splice(current,1);target.layers.splice(at,0,item);target.layers.forEach((entry,i)=>{entry.order=i;});});
+    return layerId;
+  }
+
+  removeMachineLayer(machineId, layerId, commandDescriptor = {}) {
+    const machine=machineById(this.document,machineId), layer=machine?.layers?.find((candidate)=>candidate.id===layerId); if(!layer) return false;
+    if(machine.layers.length===1) throw new TypeError('Cannot remove the last machine layer.');
+    if(machine.compatibilityLayer?.id===layerId) throw new TypeError(`Cannot remove compatibility machine layer ${layerId} while the legacy runtime adapter is active.`);
+    if(layer.states.length || layer.transitions.length) throw new TypeError(`Cannot remove non-empty machine layer ${layerId}; remove or move its states/transitions first.`);
+    const descriptor=typeof commandDescriptor==='string'?{label:commandDescriptor}:{label:`Delete machine layer ${layer.name||layer.id}`,source:'user',...commandDescriptor};
+    this.execute(descriptor,(document)=>{const target=machineById(document,machineId);target.layers=target.layers.filter((candidate)=>candidate.id!==layerId);target.layers.forEach((item,i)=>{item.order=i;});});
     return true;
   }
 

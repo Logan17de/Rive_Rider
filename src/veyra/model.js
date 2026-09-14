@@ -14,6 +14,7 @@ import {
   createMeshVertexRef,
   createNodeRef,
   createTimelineRef,
+  createReference,
   normalizeReference,
   referenceId,
 } from './references.js';
@@ -95,6 +96,7 @@ export const VEYRA_LOOP_MODES = Object.freeze(['none', 'loop', 'pingpong']);
 export const VEYRA_FILL_TYPES = Object.freeze(['solid', 'linearGradient', 'radialGradient']);
 export const VEYRA_MACHINE_INPUT_TYPES = Object.freeze(['number', 'bool', 'trigger']);
 export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['animation']);
+export const VEYRA_MACHINE_LAYER_VERSION = 1;
 export const VEYRA_CONDITION_OPS = Object.freeze([
   '<',
   '<=',
@@ -474,6 +476,24 @@ export function createMachineCondition(overrides = {}) {
   return condition;
 }
 
+export function createMachineLayer(overrides = {}) {
+  const states = (overrides.states || []).map((state) => createMachineState(state));
+  const transitions = (overrides.transitions || []).map((transition) => createMachineTransition(transition));
+  return {
+    id: overrides.id || createId('machineLayer'),
+    name: String(overrides.name || 'Layer'),
+    displayNameAdvisory: true,
+    enabled: overrides.enabled !== false,
+    order: Number.isFinite(Number(overrides.order)) ? Math.trunc(Number(overrides.order)) : 0,
+    initial: overrides.initial == null ? null : normalizeReference(overrides.initial, 'machineState', 'machineLayer.initial'),
+    states,
+    transitions,
+    graph: overrides.graph && typeof overrides.graph === 'object' && !Array.isArray(overrides.graph)
+      ? { x: finite(overrides.graph.x ?? 0, 'machineLayer.graph.x'), y: finite(overrides.graph.y ?? 0, 'machineLayer.graph.y') }
+      : { x: 0, y: 0 },
+  };
+}
+
 export function createMachineState(overrides = {}) {
   const type = overrides.type || 'animation';
   if (!VEYRA_MACHINE_STATE_TYPES.includes(type)) throw new TypeError(`Unsupported machine state type: ${type}`);
@@ -513,15 +533,29 @@ export function createMachineTransition(overrides = {}) {
 }
 
 export function createStateMachine(overrides = {}) {
+  const id = overrides.id || createId('machine');
+  const rawLayers = Array.isArray(overrides.layers) && overrides.layers.length
+    ? overrides.layers
+    : [{
+      id: `machineLayer_${id}_default`, name: 'Base Layer', order: 0, enabled: true,
+      initial: overrides.initial ?? null, states: overrides.states || [], transitions: overrides.transitions || [], graph: { x: 0, y: 0 },
+    }];
+  const layers = rawLayers.map((layer, index) => createMachineLayer({ ...layer, order: layer.order ?? index }));
+  layers.sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id));
+  layers.forEach((layer,index)=>{ layer.order=index; });
+  const compatibilityLayerId = overrides.compatibilityLayer?.id || overrides.compatibilityLayerId || layers[0].id;
+  const compatibility = layers.find((layer) => layer.id === compatibilityLayerId);
+  if (!compatibility) throw new TypeError(`State machine compatibility layer ${compatibilityLayerId} does not exist.`);
   return {
-    id: overrides.id || createId('machine'),
+    id,
     name: String(overrides.name || 'State Machine'),
-    initial: overrides.initial == null
-      ? null
-      : normalizeReference(overrides.initial, 'machineState', 'machine.initial'),
+    layerVersion: VEYRA_MACHINE_LAYER_VERSION,
+    compatibilityLayer: createReference('machineLayer', compatibility.id),
     inputs: (overrides.inputs || []).map((input) => createMachineInput(input)),
-    states: (overrides.states || []).map((state) => createMachineState(state)),
-    transitions: (overrides.transitions || []).map((transition) => createMachineTransition(transition)),
+    layers,
+    // Temporary M0-M8 compatibility view over one stable layer. Reordering
+    // layers never changes legacy runtime behavior or stable authored identity.
+    initial: compatibility.initial, states: compatibility.states, transitions: compatibility.transitions,
   };
 }
 
@@ -1185,98 +1219,89 @@ function normalizeMachineCondition(condition, path, inputsById) {
   return { id, input: resolvedInput, op, value: cloneValue(condition.value) };
 }
 
-function normalizeMachineState(state, index, machinePath, timelineIds) {
-  const path = `${machinePath}.states[${index}]`;
+function normalizeMachineState(state, index, layerPath, timelineIds) {
+  const path = `${layerPath}.states[${index}]`;
   const id = String(state?.id || '');
   if (!id) throw new TypeError(`${path}.id is required.`);
   const type = String(state?.type || 'animation');
-  if (!VEYRA_MACHINE_STATE_TYPES.includes(type)) {
-    throw new TypeError(`${path}.type must be a valid machine state type.`);
-  }
+  if (!VEYRA_MACHINE_STATE_TYPES.includes(type)) throw new TypeError(`${path}.type must be a valid machine state type.`);
   const timeline = requiredReference(state?.timeline ?? state?.timelineId, 'timeline', `${path}.timeline`);
-  if (!timelineIds.has(referenceId(timeline, 'timeline'))) {
-    throw new TypeError(`${path}.timeline references missing timeline ${referenceId(timeline, 'timeline')}.`);
-  }
+  if (!timelineIds.has(referenceId(timeline, 'timeline'))) throw new TypeError(`${path}.timeline references missing timeline ${referenceId(timeline, 'timeline')}.`);
   return { id, name: String(state.name || ''), type, timeline };
 }
 
-function normalizeMachineTransition(transition, index, machinePath, stateIds, inputsById) {
-  const path = `${machinePath}.transitions[${index}]`;
+function normalizeMachineTransition(transition, index, layerPath, stateIds, inputsById) {
+  const path = `${layerPath}.transitions[${index}]`;
   const id = String(transition?.id || '');
   if (!id) throw new TypeError(`${path}.id is required.`);
   const from = requiredReference(transition?.from, 'machineState', `${path}.from`);
   const to = requiredReference(transition?.to, 'machineState', `${path}.to`);
-  for (const reference of [from, to]) {
-    if (!stateIds.has(referenceId(reference, 'machineState'))) {
-      throw new TypeError(`${path} references missing machine state ${referenceId(reference, 'machineState')}.`);
-    }
-  }
+  for (const reference of [from,to]) if (!stateIds.has(referenceId(reference,'machineState'))) throw new TypeError(`${path} references missing machine state ${referenceId(reference,'machineState')}.`);
   if (from.id === to.id) throw new TypeError(`${path} cannot target the same state.`);
   const duration = bounded(transition.duration ?? 0, `${path}.duration`, 0, 10000);
-  let after = null;
-  if (transition.after != null) {
-    after = bounded(transition.after, `${path}.after`, 0, 100000);
-  }
-  if (transition.conditions !== undefined && transition.conditions !== null
-    && !Array.isArray(transition.conditions)) {
-    // A malformed conditions field must never empty out to `[]`: that turns a
-    // gated transition into an unconditional one — firing EARLIER than
-    // authored, with no trace. Same silently-discard family as the operator
-    // matrix; refuse rather than repair.
-    throw new TypeError(`${path}.conditions must be an array of conditions.`);
-  }
-  const conditions = (Array.isArray(transition.conditions) ? transition.conditions : []).map(
-    (condition, conditionIndex) =>
-      normalizeMachineCondition(condition, `${path}.conditions[${conditionIndex}]`, inputsById)
-  );
+  const after = transition.after == null ? null : bounded(transition.after, `${path}.after`, 0, 100000);
+  if (transition.conditions !== undefined && transition.conditions !== null && !Array.isArray(transition.conditions)) throw new TypeError(`${path}.conditions must be an array of conditions.`);
+  const conditions=(Array.isArray(transition.conditions)?transition.conditions:[]).map((condition,i)=>normalizeMachineCondition(condition,`${path}.conditions[${i}]`,inputsById));
   return { id, from, to, duration, after, conditions };
 }
 
+function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsById, globalStateIds, globalTransitionIds) {
+  const path=`${machinePath}.layers[${index}]`;
+  const id=String(layer?.id || '');
+  if (!id) throw new TypeError(`${path}.id is required.`);
+  const states=(Array.isArray(layer?.states)?layer.states:[]).map((state,i)=>normalizeMachineState(state,i,path,timelineIds));
+  const stateIds=new Set();
+  for(const state of states){
+    if(stateIds.has(state.id) || globalStateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${machinePath}.`);
+    stateIds.add(state.id); globalStateIds.add(state.id);
+  }
+  const transitions=(Array.isArray(layer?.transitions)?layer.transitions:[]).map((transition,i)=>normalizeMachineTransition(transition,i,path,stateIds,inputsById));
+  for(const transition of transitions){
+    if(globalTransitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
+    globalTransitionIds.add(transition.id);
+  }
+  const initial=normalizeReference(layer?.initial,'machineState',`${path}.initial`);
+  if(initial && !stateIds.has(referenceId(initial,'machineState'))) throw new TypeError(`${path}.initial references missing machine state ${referenceId(initial,'machineState')}.`);
+  const graph=layer?.graph && typeof layer.graph==='object' && !Array.isArray(layer.graph)
+    ? {x:finite(layer.graph.x ?? 0,`${path}.graph.x`),y:finite(layer.graph.y ?? 0,`${path}.graph.y`)} : {x:0,y:0};
+  return {id,name:String(layer?.name || ''),displayNameAdvisory:true,enabled:layer?.enabled!==false,order:Number.isFinite(Number(layer?.order))?Math.trunc(Number(layer.order)):index,initial,states,transitions,graph};
+}
+
 function normalizeStateMachine(machine, index, timelineIds) {
-  const machinePath = `stateMachines[${index}]`;
-  const id = String(machine?.id || '');
-  if (!id) throw new TypeError(`${machinePath}.id is required.`);
-  const inputs = (Array.isArray(machine?.inputs) ? machine.inputs : []).map(
-    (input, inputIndex) => normalizeMachineInput(input, inputIndex, machinePath)
-  );
-  const inputsById = new Map();
-  const inputNames = new Set();
-  for (const input of inputs) {
-    if (inputsById.has(input.id)) throw new TypeError(`Duplicate machine input id ${input.id} in ${machinePath}.`);
-    if (input.name && inputNames.has(input.name)) {
-      throw new TypeError(`Duplicate machine input name "${input.name}" in ${machinePath}.`);
-    }
-    inputsById.set(input.id, input);
-    if (input.name) inputNames.add(input.name);
+  const machinePath=`stateMachines[${index}]`;
+  const id=String(machine?.id || '');
+  if(!id) throw new TypeError(`${machinePath}.id is required.`);
+  const inputs=(Array.isArray(machine?.inputs)?machine.inputs:[]).map((input,i)=>normalizeMachineInput(input,i,machinePath));
+  const inputsById=new Map(), inputNames=new Set();
+  for(const input of inputs){
+    if(inputsById.has(input.id)) throw new TypeError(`Duplicate machine input id ${input.id} in ${machinePath}.`);
+    if(input.name && inputNames.has(input.name)) throw new TypeError(`Duplicate machine input name "${input.name}" in ${machinePath}.`);
+    inputsById.set(input.id,input); if(input.name) inputNames.add(input.name);
   }
-  const states = (Array.isArray(machine?.states) ? machine.states : []).map(
-    (state, stateIndex) => normalizeMachineState(state, stateIndex, machinePath, timelineIds)
-  );
-  const stateIds = new Set();
-  for (const state of states) {
-    if (stateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${machinePath}.`);
-    stateIds.add(state.id);
+  let rawLayers;
+  if(Array.isArray(machine?.layers) && machine.layers.length){
+    rawLayers=machine.layers.map((layer,i)=>({...cloneValue(layer),order:layer.order ?? i}));
+  } else {
+    rawLayers=[{id:`machineLayer_${id}_default`,name:'Base Layer',enabled:true,order:0,initial:machine?.initial ?? null,states:Array.isArray(machine?.states)?machine.states:[],transitions:Array.isArray(machine?.transitions)?machine.transitions:[],graph:{x:0,y:0}}];
   }
-  const transitions = (Array.isArray(machine?.transitions) ? machine.transitions : []).map(
-    (transition, transitionIndex) => normalizeMachineTransition(transition, transitionIndex, machinePath, stateIds, inputsById)
-  );
-  const transitionIds = new Set();
-  for (const transition of transitions) {
-    if (transitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
-    transitionIds.add(transition.id);
-  }
-  const initial = normalizeReference(machine?.initial, 'machineState', `${machinePath}.initial`);
-  if (initial && !stateIds.has(referenceId(initial, 'machineState'))) {
-    throw new TypeError(`${machinePath}.initial references missing machine state ${referenceId(initial, 'machineState')}.`);
-  }
-  return {
-    id,
-    name: String(machine.name || ''),
-    initial,
-    inputs,
-    states,
-    transitions,
+  const compatibilityInput = machine?.compatibilityLayer ?? machine?.compatibilityLayerId ?? rawLayers[0].id;
+  const compatibilityRef = normalizeReference(compatibilityInput, 'machineLayer', `${machinePath}.compatibilityLayer`);
+  const compatibilityLayerId = referenceId(compatibilityRef, 'machineLayer');
+  const compatibilityIndex = rawLayers.findIndex((layer)=>String(layer.id||'')===compatibilityLayerId);
+  if(compatibilityIndex<0) throw new TypeError(`${machinePath}.compatibilityLayer references missing machine layer ${compatibilityLayerId}.`);
+  // Existing flat-store commands target compatibility aliases. Fold those edits
+  // back into the stable compatibility layer, never whichever layer is first.
+  rawLayers[compatibilityIndex]={...rawLayers[compatibilityIndex],
+    ...(Array.isArray(machine.states)?{states:machine.states}:{}),
+    ...(Array.isArray(machine.transitions)?{transitions:machine.transitions}:{}),
+    ...(Object.prototype.hasOwnProperty.call(machine,'initial')?{initial:machine.initial}:{}),
   };
+  const layerIds=new Set(), globalStateIds=new Set(), globalTransitionIds=new Set();
+  const layers=rawLayers.map((layer,i)=>normalizeMachineLayer(layer,i,machinePath,timelineIds,inputsById,globalStateIds,globalTransitionIds));
+  for(const layer of layers){ if(layerIds.has(layer.id)) throw new TypeError(`Duplicate machine layer id ${layer.id} in ${machinePath}.`); layerIds.add(layer.id); }
+  layers.sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id)); layers.forEach((layer,i)=>{layer.order=i;});
+  const compatibility=layers.find((layer)=>layer.id===compatibilityLayerId);
+  return {id,name:String(machine.name || ''),layerVersion:VEYRA_MACHINE_LAYER_VERSION,compatibilityLayer:createReference('machineLayer',compatibilityLayerId),inputs,layers,initial:compatibility.initial,states:compatibility.states,transitions:compatibility.transitions};
 }
 
 function normalizeListener(listener, index, nodeIds, machinesById, timelineIds) {
@@ -1391,13 +1416,13 @@ function validateStableIdentities(document) {
   document.stateMachines.forEach((machine, machineIndex) => {
     register('stateMachine', machine.id, `stateMachines[${machineIndex}]`);
     machine.inputs.forEach((input, inputIndex) => register('machineInput', input.id, `stateMachines[${machineIndex}].inputs[${inputIndex}]`));
-    machine.states.forEach((state, stateIndex) => register('machineState', state.id, `stateMachines[${machineIndex}].states[${stateIndex}]`));
-    machine.transitions.forEach((transition, transitionIndex) => {
-      register('machineTransition', transition.id, `stateMachines[${machineIndex}].transitions[${transitionIndex}]`);
-      transition.conditions.forEach((condition, conditionIndex) => register(
-        'machineCondition', condition.id,
-        `stateMachines[${machineIndex}].transitions[${transitionIndex}].conditions[${conditionIndex}]`,
-      ));
+    machine.layers.forEach((layer, layerIndex) => {
+      register('machineLayer', layer.id, `stateMachines[${machineIndex}].layers[${layerIndex}]`);
+      layer.states.forEach((state, stateIndex) => register('machineState', state.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}]`));
+      layer.transitions.forEach((transition, transitionIndex) => {
+        register('machineTransition', transition.id, `stateMachines[${machineIndex}].layers[${layerIndex}].transitions[${transitionIndex}]`);
+        transition.conditions.forEach((condition, conditionIndex) => register('machineCondition', condition.id, `stateMachines[${machineIndex}].layers[${layerIndex}].transitions[${transitionIndex}].conditions[${conditionIndex}]`));
+      });
     });
   });
   document.listeners.forEach((listener, index) => register('listener', listener.id, `listeners[${index}]`));
@@ -1648,14 +1673,19 @@ export function keyframeById(document, keyframeId) {
   return null;
 }
 
+export function machineLayerById(document, machineId, layerId) {
+  return machineById(document, machineId)?.layers?.find((layer) => layer.id === layerId) || null;
+}
+
 export function machineTransitionById(document, machineId, transitionId) {
   const machine = machineById(document, machineId);
-  return machine?.transitions.find((transition) => transition.id === transitionId) || null;
+  for (const layer of machine?.layers || []) { const found=layer.transitions.find((transition)=>transition.id===transitionId); if(found) return found; }
+  return null;
 }
 
 export function machineConditionById(document, machineId, conditionId) {
   const machine = machineById(document, machineId);
-  for (const transition of machine?.transitions || []) {
+  for (const layer of machine?.layers || []) for (const transition of layer.transitions) {
     const condition = transition.conditions.find((candidate) => candidate.id === conditionId);
     if (condition) return condition;
   }

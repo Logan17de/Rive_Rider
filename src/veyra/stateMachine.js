@@ -18,6 +18,10 @@ export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   graph: Object.freeze([
     'set-name',
     'set-initial',
+    'add-layer',
+    'update-layer',
+    'remove-layer',
+    'reorder-layer',
     'add-input',
     'remove-input',
     'update-input',
