@@ -12,7 +12,7 @@ def replace_once(path, old, new):
 model=ROOT/'src/veyra/model.js'
 replace_once(model,
     "export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['animation']);",
-    "export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend', 'additiveBlend']);")
+    "export const VEYRA_MACHINE_STATE_TYPES = Object.freeze(['entry', 'exit', 'any', 'animation']);")
 
 text=model.read_text()
 create_pattern=re.compile(r"export function createMachineState\(overrides = \{\}\) \{.*?\n\}\n\nexport function createMachineTransition", re.S)
@@ -80,4 +80,34 @@ replace_once(test,
     "  assert.throws(() => createMachineState({ name: 'Weird', type: 'entry' }), /Unsupported machine state type/);",
     "  assert.deepStrictEqual(createMachineState({ id: 'entry_state', name: 'Entry', type: 'entry' }).type, 'entry');\n  assert.throws(() => createMachineState({ name: 'Weird', type: 'unsupported' }), /Unsupported machine state type/);")
 
-print('M9 layered runtime model patch applied')
+runtime=ROOT/'src/veyra/stateMachine.js'
+replace_once(runtime,
+    "  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend', 'additiveBlend']),",
+    "  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation']),")
+replace_once(runtime,
+'''  reset() {
+    const machine = this.#reconcile();
+    if (machine) this.#resetRuntime(machine);
+  }
+''',
+'''  reset() {
+    const machine = this.#reconcile();
+    if (!machine) return;
+    // Work counters describe work since the current runtime reset. This keeps
+    // deterministic scrub/replay evidence comparable to a fresh runtime while
+    // still reporting all actual work performed during the replay itself.
+    this.#stats = {
+      evaluations: 0,
+      layerEvaluations: 0,
+      stateEvaluations: 0,
+      transitionConditionEvaluations: 0,
+      timelineEvaluations: 0,
+      compositionApplications: 0,
+      inactiveLayerSkips: 0,
+      zeroMachineFastPaths: 0,
+    };
+    this.#resetRuntime(machine);
+  }
+''')
+
+print('M9 layered runtime model/runtime patch applied')
