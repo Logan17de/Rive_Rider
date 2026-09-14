@@ -17,13 +17,27 @@ jobs:
         with:
           node-version: 22
       - name: Apply M9 state speed patch
-        run: python3 scripts/apply-m9-state-speed.py
+        run: |
+          set +e
+          python3 scripts/apply-m9-state-speed.py > /tmp/m9-state-speed-patch.log 2>&1
+          status=$?
+          cat /tmp/m9-state-speed-patch.log
+          if [ "$status" -ne 0 ]; then
+            mkdir -p verification
+            cp /tmp/m9-state-speed-patch.log verification/m9-state-speed-patch-failure.log
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add verification/m9-state-speed-patch-failure.log
+            git commit -m 'test(m9): retain state-speed patch failure evidence'
+            git push origin HEAD:work/m9-state-speed
+            exit "$status"
+          fi
       - name: Syntax check
         run: npm run check
       - name: Full repository suites
         run: npm test
       - name: Remove worker-only machinery
-        run: rm scripts/apply-m9-state-speed.py .github/workflows/m9-state-speed-worker.yml
+        run: rm -f scripts/apply-m9-state-speed.py .github/workflows/m9-state-speed-worker.yml verification/m9-state-speed-patch-failure.log
       - name: Diff hygiene
         run: git diff --check
       - name: Commit clean M9 state speed slice
