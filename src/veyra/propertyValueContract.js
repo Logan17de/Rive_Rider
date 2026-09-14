@@ -187,10 +187,14 @@ export function validateBindingPropertyValue(document, address, value, label = `
   const object = objectByReference(document, parsed.reference);
   if (!object) throw new TypeError(`${label} target ${parsed.reference.kind}:${parsed.reference.id} does not exist.`);
   const path = `${label} (${parsed.path})`;
-  if (parsed.reference.kind === 'node') return validateNode(object, parsed.segments, value, path);
-  if (parsed.reference.kind === 'bone') return validateBone(object, parsed.segments, value, path);
-  if (parsed.reference.kind === 'mesh') return validateMesh(object, parsed.segments, value, path);
-  if (parsed.reference.kind === 'control') return validateControl(object, parsed.segments, value, path);
-  if (parsed.reference.kind === 'constraint') return validateConstraint(object, parsed.segments, value, path);
-  throw new TypeError(`${label} has no ordinary property value contract.`);
+  if (parsed.reference.kind === 'node') validateNode(object, parsed.segments, value, path);
+  else if (parsed.reference.kind === 'bone') validateBone(object, parsed.segments, value, path);
+  else if (parsed.reference.kind === 'mesh') validateMesh(object, parsed.segments, value, path);
+  else if (parsed.reference.kind === 'control') validateControl(object, parsed.segments, value, path);
+  else if (parsed.reference.kind === 'constraint') validateConstraint(object, parsed.segments, value, path);
+  else throw new TypeError(`${label} has no ordinary property value contract.`);
+  // Validation must not rewrite the binding graph's published value. In
+  // particular, null is an intentional sentinel for empty list converters;
+  // canonical document normalization may interpret it as a property default.
+  return clone(value);
 }

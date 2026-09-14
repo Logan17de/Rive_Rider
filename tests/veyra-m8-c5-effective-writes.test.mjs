@@ -65,8 +65,8 @@ function derived(writerId = 'reference_writer', twoWayId = 'two_way') {
   assert.equal(f.r.setTwoWayTarget('a_two_way', .47), true);
   assert.equal(f.r.getValue('child', 'value'), .2);
   assert.equal(f.r.getValue('child2', 'value'), .47);
-  assert.equal(advance(f).overrides['node:box/opacity'], .47);
   assert.equal(beforeStats.evaluations, f.r.stats.evaluations, 'reverse resolution must use an observation snapshot, not advance the live evaluator');
+  assert.equal(advance(f).overrides['node:box/opacity'], .47);
 }
 
 {
