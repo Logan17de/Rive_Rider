@@ -64,6 +64,8 @@ function legacy(){
  assert.equal(store.document.stateMachines[0].layers[0].order,0);
  assert.equal(store.document.stateMachines[0].layers[1].order,1);
  assert.equal(store.document.stateMachines[0].layers[1].states[0].id,stateId,'reorder preserves state identity');
+ assert.equal(store.document.stateMachines[0].compatibilityLayer.id,baseId,'reorder does not repoint legacy compatibility layer');
+ assert.equal(new MachineRuntime(()=>store.document,'machine').stateId,stateId,'legacy runtime remains on compatibility layer after reorder');
  store.removeMachineLayer('machine','overlay');
  assert.equal(store.document.stateMachines[0].layers.length,1);
  assert.equal(store.document.stateMachines[0].layers[0].id,baseId);
@@ -78,6 +80,9 @@ function legacy(){
  const store=new VeyraStore(normalizeDocument(legacy()));
  const only=store.document.stateMachines[0].layers[0].id;
  assert.throws(()=>store.removeMachineLayer('machine',only),/last machine layer/i);
+ store.addMachineLayer('machine',{id:'filled',states:[{id:'filled_state',name:'Filled',type:'animation',timeline:ref('timeline','tl')}],initial:ref('machineState','filled_state')});
+ assert.throws(()=>store.removeMachineLayer('machine','filled'),/non-empty machine layer/i);
+ assert.throws(()=>store.removeMachineLayer('machine',only),/compatibility machine layer|last machine layer/i);
 }
 
 {

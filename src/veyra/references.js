@@ -21,6 +21,7 @@ export const VEYRA_REFERENCE_KINDS = Object.freeze([
   'track',
   'keyframe',
   'stateMachine',
+  'machineLayer',
   'machineState',
   'machineInput',
   'machineTransition',
@@ -64,6 +65,7 @@ export function createTimelineRef(id) { return createReference('timeline', id); 
 export function createTrackRef(id) { return createReference('track', id); }
 export function createKeyframeRef(id) { return createReference('keyframe', id); }
 export function createStateMachineRef(id) { return createReference('stateMachine', id); }
+export function createMachineLayerRef(id) { return createReference('machineLayer', id); }
 export function createMachineStateRef(id) { return createReference('machineState', id); }
 export function createMachineInputRef(id) { return createReference('machineInput', id); }
 export function createMachineTransitionRef(id) { return createReference('machineTransition', id); }

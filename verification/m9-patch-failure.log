@@ -1,4 +1,0 @@
-  File "/home/runner/work/Rive_Rider/Rive_Rider/scripts/apply-m9-layer-followup.py", line 139
-    """    } else if (kind === 'stateMachine') {
-           ^
-SyntaxError: closing parenthesis '}' does not match opening parenthesis '(' on line 136

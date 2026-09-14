@@ -545,10 +545,13 @@ function idsForScopedEntity(document, artboardId) {
   for (const machine of document.stateMachines.filter((item) => item.artboard.id === artboardId)) {
     push('stateMachine', machine.id, 'machine');
     for (const input of machine.inputs) push('machineInput', input.id);
-    for (const state of machine.states) push('machineState', state.id);
-    for (const transition of machine.transitions) {
-      push('machineTransition', transition.id);
-      for (const condition of transition.conditions) push('machineCondition', condition.id);
+    for (const layer of machine.layers || []) {
+      push('machineLayer', layer.id);
+      for (const state of layer.states) push('machineState', state.id);
+      for (const transition of layer.transitions) {
+        push('machineTransition', transition.id);
+        for (const condition of transition.conditions) push('machineCondition', condition.id);
+      }
     }
   }
   for (const listener of document.listeners.filter((item) => item.artboard.id === artboardId)) push('listener', listener.id);
@@ -615,11 +618,17 @@ export function duplicateArtboardIntoDocument(document, sourceArtboardId, option
       });
     } else if (kind === 'stateMachine') {
       source.inputs.forEach((item, index) => { copy.inputs[index].id = mapped('machineInput', item.id); });
-      source.states.forEach((item, index) => { copy.states[index].id = mapped('machineState', item.id); });
-      source.transitions.forEach((item, index) => {
-        copy.transitions[index].id = mapped('machineTransition', item.id);
-        item.conditions.forEach((condition, conditionIndex) => { copy.transitions[index].conditions[conditionIndex].id = mapped('machineCondition', condition.id); });
+      (source.layers || []).forEach((layer, layerIndex) => {
+        copy.layers[layerIndex].id = mapped('machineLayer', layer.id);
+        layer.states.forEach((item, stateIndex) => { copy.layers[layerIndex].states[stateIndex].id = mapped('machineState', item.id); });
+        layer.transitions.forEach((item, transitionIndex) => {
+          copy.layers[layerIndex].transitions[transitionIndex].id = mapped('machineTransition', item.id);
+          item.conditions.forEach((condition, conditionIndex) => { copy.layers[layerIndex].transitions[transitionIndex].conditions[conditionIndex].id = mapped('machineCondition', condition.id); });
+        });
       });
+      const compatibilityId = copy.compatibilityLayer?.id;
+      const compatibility = copy.layers?.find((layer) => layer.id === compatibilityId) || copy.layers?.[0];
+      if (compatibility) { copy.initial = compatibility.initial; copy.states = compatibility.states; copy.transitions = compatibility.transitions; }
     } else if (kind === 'componentInstance') {
       source.overrides.forEach((item, index) => { copy.overrides[index].id = mapped('componentOverride', item.id); });
     } else if (kind === 'propertyGroup') {

@@ -9,6 +9,7 @@ import {
   createComponentOverrideRef,
   createGradientStopRef,
   createMachineConditionRef,
+  createMachineLayerRef,
   createMachineInputRef,
   createMachineStateRef,
   createMachineTransitionRef,
@@ -182,6 +183,13 @@ export function createSceneSummary(document, options = {}) {
         name: input.name,
         type: input.type,
         value: input.value,
+      })),
+      layers: machine.layers.map((layer) => ({
+        ref: createMachineLayerRef(layer.id),
+        name: layer.name, displayNameAdvisory: true, enabled: layer.enabled, order: layer.order, graph: cloneValue(layer.graph),
+        initial: layer.initial ? createMachineStateRef(referenceId(layer.initial, 'machineState')) : null,
+        states: layer.states.map((state) => createMachineStateRef(state.id)),
+        transitions: layer.transitions.map((transition) => createMachineTransitionRef(transition.id)),
       })),
       states: machine.states.map((state) => ({
         ref: createMachineStateRef(state.id),

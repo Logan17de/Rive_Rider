@@ -152,3 +152,7 @@ export {
 } from './veyra/dataGraph.js';
 export { createVeyraRuntimeHost } from './veyra/runtimeHost.js';
 export { VEYRA_DATA_RUNTIME_PORTS, VEYRA_DATA_RUNTIME_CONTRACT } from './veyra/runtimePorts.js';
+
+// M9 layered state-machine schema primitives.
+export { VEYRA_MACHINE_LAYER_VERSION, createMachineLayer, machineLayerById } from './veyra/model.js';
+export { createMachineLayerRef } from './veyra/references.js';
