@@ -1,32 +1,43 @@
 # Veyra — Current Milestone
 
-`plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This is the **only active implementation milestone**. Earlier milestones remain in this file as historical contracts and verification context.
+`plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This is the **only active implementation milestone**. Earlier/deferred implementation evidence may remain in this file for context, but it does not create a second active milestone.
 
 Complete only the tasks below. Follow-up ideas belong in `suggestions`. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed for the M10 production-hardening slice
+## Progress snapshot — refreshed after exact-head M9/M10 integration CI and sequencing review
 
-These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. The percentages remain anchored to the independently accepted M0–M8 baseline. M9 has advanced materially on `main` through transition interruption, M8-driven conditions/events, exactly-once lifecycle actions and deterministic Randomize Exit, but M9 is still `IN PROGRESS` and has not had independent milestone acceptance, so no new verified percentage increment is claimed.
+These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. The verified estimates remain anchored to the independently accepted M0–M8 baseline. M9 has advanced materially on `main`, and a broader feature-graph/player/interchange implementation has also landed, but **M9 is still `IN PROGRESS` and has not had independent milestone acceptance**. Per `QUALITY.md` and the milestone workflow, none of that unverified work increases verified completion percentages or advances the active roadmap milestone.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~98%** | Stable typed identity now covers scene, data, machine and feature-graph records; canonical commands, resolver, manifest, ownership and dependency evidence are shared by the UI and AI adapters. Production hardening now includes bounded inputs and safe inspector rendering. |
-| Core editor / engine foundation | **~97%** | Workspace, vector/rig authoring, Components, interaction loop, data runtime, layered machine runtime, deterministic layout, player and authored/evaluated boundaries are implemented and regression-tested. |
-| Modern Rive editor/runtime parity | **~70–75%** | Layered machines, blend composition, lifecycle records, graph authoring, text/accessibility/image rendering, deterministic layout and a real browser smoke path are present; production WASM parity, GPU effects, audio/video, and complete Rive interchange remain open. |
-| Lottie / dotLottie / Creator ecosystem parity | **~45–50%** | Dependency-free Lottie JSON import/export covers common shape, path, gradient, text, marker and image layers with bounded payloads; dotLottie is represented as a validated JSON package contract. Binary `.lottie` ZIP packaging and full Creator feature parity remain open. |
-| Full Veyra superset target | **~62–68%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
-| Remaining full-target work | **~32–38%** | Dominated by vendor-runtime parity, production export/render backends, broader authoring families and exhaustive accessibility/visual acceptance rather than another identity/control-plane retrofit. |
+| AI-native identity / semantics / control architecture | **~96–97%** | Stable typed identity, universal semantics, canonical UI/AI control, ownership/dependency evidence, Components and the M8 data graph are independently verified. M9/M10-labeled machine/feature-graph work is implemented and regression-tested but remains outside verified progress until its milestone gates are independently accepted. |
+| Core editor / engine foundation | **~95–96%** | Workspace, authoring, Components, interaction loop, data runtime, incremental caches and authored/evaluated boundaries are verified. Layered machines, player and newer feature records are present on `main` but are not yet independently accepted as milestone completion. |
+| Modern Rive editor/runtime parity | **~59–63%** | Components and View Models/Data Binding are accepted. Substantial layered-machine and graph-editor code is now on `main`, but no Rive-parity increase is claimed until M9 passes independent acceptance. |
+| Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | New Lottie/dotLottie code has landed and passes standard CI, but it is post-M9 work and has not had an independently accepted interchange milestone; it therefore receives no verified progress credit yet. |
+| Full Veyra superset target | **~50–54%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
+| Remaining full-target work | **~46–50%** | Verified remaining work is unchanged until M9 and later feature families pass their own acceptance boundaries. |
 
 ### Roadmap position
 
 - Implementation M0–M7: **VERIFIED**.
 - `plan.md` M3 / implementation M8 — View Models & Data Binding: **VERIFIED**.
 - M8-C1 through M8-C5 corrections: **VERIFIED as part of M8**; preserve their regression suites and contracts.
-- M9 layered machine/runtime work: **implemented slice; acceptance remains open**, below.
-- Current implementation work: **M10 — AI-readable feature graph, player, interchange and production hardening**, below.
-- `plan.md` M5+ remains queued until M9 is independently accepted.
+- **Current active implementation work: M9 — State Machine parity + visual graph editor. Status: `IN PROGRESS`; independent acceptance remains open.**
+- The feature-graph/player/interchange change labeled M10 has landed on `main` and is recorded below as **deferred implementation evidence only**. It is not the active milestone and is not VERIFIED because M9 has not passed its acceptance boundary.
+- `plan.md` M5+ remains queued until M9 is independently accepted. Do not start or credit another roadmap milestone merely because later-family code already exists on `main`.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
+
+## Latest main-head evidence and sequencing blocker
+
+- Current integration baseline before the milestone-only sequencing correction: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`.
+- Standard repository `Tests` #195, run `34866362425`, job `104051088061`: **SUCCESS on that exact integration SHA** with **55/55 source syntax checks PASS and 59/59 suites PASS**.
+- Current clean `main` before this CI-evidence-only refresh: `82f6a1b59c41b1c1e118efc0af6bdda2190dd5a7`.
+- Standard repository `Tests` #196, run `34867613727`, job `104055300606`: **SUCCESS on that exact current-main SHA** with **55/55 source syntax checks PASS and 59/59 suites PASS**.
+- The green suite includes all existing M0–M8 regressions, the current M9 suites, `tests/veyra-m9-c1-layers.test.mjs`, `tests/veyra-m9-layer-schema.test.mjs`, and `tests/veyra-m10-features.test.mjs`.
+- The post-M9 implementation commit `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde` and its follow-up docs were merged into `main`; standard exact-head CI therefore proves the integrated tree is green, **not** that M9 or the later feature families are independently accepted.
+- No independent M9 verifier branch/evidence was found in the repository during this review. M9 still has open acceptance gates below, including Additive Blend, built-in runtime-value transition sources, complete ownership/dependency/name-invariance evidence, Component-scoped machine runtime isolation, bounded per-layer runtime errors, settled-layer sleeping/performance gates, and real browser visual-graph acceptance.
+- Sequencing blocker: the landed feature-graph/player/Lottie work touches later roadmap families that M9 explicitly lists as non-goals. Keep it regression-covered, but do not treat it as a second active milestone or verified progress. Finish and independently accept M9 first.
 
 ## Independent M8 acceptance evidence
 
@@ -97,13 +108,20 @@ Required persistent entities/capabilities:
 
 Requirements:
 
-- [ ] ordered layers with stable IDs, advisory names, enabled/disabled state and deterministic priority/order;
-- [ ] migrate every existing flat machine to one default layer without changing observable behavior;
-- [ ] old files round-trip deterministically through migration and save/load;
-- [ ] layer/state/transition/action IDs survive rename, reorder, graph movement and ordinary edits;
-- [ ] deleting/reordering layers cleans dependencies safely and fails closed when blocked;
+- [x] ordered layers with stable IDs, advisory names, enabled/disabled state and deterministic priority/order;
+- [x] migrate every existing flat machine to one default layer without changing observable behavior;
+- [x] old files round-trip deterministically through migration and save/load;
+- [x] layer/state/transition/action IDs survive rename, reorder, graph movement and ordinary edits;
+- [x] deleting/reordering layers cleans dependencies safely and fails closed when blocked;
 - [ ] references, resolver, semantics, manifest, summary and dependency graph recognize `machineLayer` and every persistent sub-object;
 - [ ] no migration of runtime clocks/current-state/transition progress into authored data.
+
+### M9 layered-schema implementation evidence
+
+- `tests/veyra-m9-layer-schema.test.mjs` proves deterministic legacy-flat → one-default-layer migration, stable compatibility-layer identity, deterministic save/load round-trip, layer CRUD/reorder/undo/redo, blocked unsafe removals, and rename/graph-metadata identity stability.
+- `tests/veyra-m9-c1-layers.test.mjs` adds strict global layer/state identity, same-layer transition validation, layer weights, canonical layer commands, summary/manifest/resolver `machineLayer` refs, dependency guards across layers, deterministic artboard-duplication remapping and compatibility-layer preservation.
+- `tests/veyra-m10-features.test.mjs` additionally exercises stable-ID state graph movement and transition reconnection through canonical commands. This contributes M9 implementation evidence even though the broader feature commit itself is deferred from roadmap advancement.
+- All of those suites pass on exact-head standard Tests #196. Remaining Task 1 proof is full persistent-subobject semantic/dependency coverage and an explicit regression that advances runtime clocks/transitions before save/serialize and proves no ephemeral machine state enters authored data.
 
 ## Task 2 — Complete state families
 
@@ -135,7 +153,7 @@ Blend-state requirements:
 - Invalid thresholds, missing timelines, duplicate child IDs and non-number legacy inputs fail closed during canonical normalization.
 - Blend-state transitions use the canonical transition compositor: animation↔blend and blend↔blend timed transitions compose outgoing/incoming child contributions with deterministic normalized effective weights.
 - Lifecycle actions are now implemented for state-start/state-end and transition-start/transition-end phases with stable `machineAction` identity and exactly-once execution.
-- Additive Blend, M8/View Model blend control sources and canonical blend-child CRUD commands remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
+- Additive Blend, M8/View Model blend control sources and complete blend-state authoring/acceptance remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
 - Blend steady-state worker Actions run `34810521222`, job `103870774356`: syntax PASS, **49/49 suites PASS**, diff hygiene PASS. Transition-compositor worker run `34812631038`, job `103876831686`: **50/50 syntax checks + 50/50 suites PASS**; exact-main standard Tests #186 (`34812754122`, job `103877176194`) also PASS on `00f85fff5a92284efb343bb316bf531469ca182c`.
 
 ## Task 3 — Ordered simultaneous layer evaluation
@@ -156,8 +174,9 @@ Implement concurrent ordered layer evaluation with an explicit property-composit
 - Production candidate tree implements concurrent ordered layer runtimes over the canonical `machineLayer` schema.
 - Compatibility getters (`stateId`, `stateTime`, `transition`) remain adapters over the stable `compatibilityLayer`; reordering layers cannot silently retarget legacy callers.
 - Entry/Exit/Any pseudo states, animation state speed (including reverse), state captions/graph metadata, deterministic later-layer property priority and layered ownership evidence are covered by `tests/veyra-m9-layered-runtime.test.mjs`.
+- Layer weights now blend each layer's evaluated contribution against the previously composed/authored value; ownership evidence records layer ref, state, contribution timelines, `layerWeight` and effective winner status. This is useful partial evidence, but the Task 3 owner-stack checkbox remains open until the public ownership surface proves the complete authored → binding/timeline/blend → layer winner chain.
 - Disabled layers are skipped and contribute no ownership; runtime work counters distinguish active/inactive layer work and reset with runtime reset so deterministic scrub/replay remains comparable.
-- Worker Actions run `34810074334`, job `103869484723`: syntax checks PASS, **48/48 suites PASS**, diff hygiene PASS.
+- Worker Actions run `34810074334`, job `103869484723`: syntax checks PASS, **48/48 suites PASS**, diff hygiene PASS. Current exact-head Tests #196 also keeps the layered runtime and M9-C1 suites green.
 - Capability honesty: steady 1D/Direct Blend evaluation and blend transition composition are implemented; Additive Blend and full blend authoring/UI remain open. M9 remains `IN PROGRESS`.
 
 ## Task 4 — Rive-class transition contract
@@ -197,7 +216,7 @@ Randomized transitions need an explicit deterministic runtime RNG/seed contract 
 - Production `2d22041a984894ae170655b1305074fc35f8a4ca` defines exact queued M8 trigger consumption: candidates observe non-destructively, the selected transition consumes exactly one pulse, failed/gated candidates and observation conserve queues, duplicate conditions spend one pulse, ordered layers consume deterministically and forks spend only private queues. Standard Tests #191, run `34820131793`: **SUCCESS**.
 - Production `3d9b71c7430e6636366c2c62c270016ba8f910a4` adds stable persistent `machineAction` records and exactly-once state-start/state-end/transition-start/transition-end execution across initial activation, timed/zero-duration transitions and interruption. Data/input actions mutate runtime state only; emit/timeline actions surface typed effects/requests without authored document mutation. Standard Tests #192, run `34821289759`: **SUCCESS**.
 - Production `f68c3980930f42bd012a26be4773353cdeaa72d8` adds deterministic weighted Randomize Exit using an internal unsigned-32-bit seeded LCG rather than global randomness. Only eligible outgoing paths enter the weighted pool; choices expose seed/draw/sample/candidate evidence; reset/scrub replay from the configured seed; forks clone PRNG position; non-random states keep first-match behavior. Standard Tests #193, run `34821761018`, job `103904706876`: **SUCCESS on the exact production SHA with 50/50 syntax checks and 56/56 suites PASS**.
-- Remaining transition-source gap: built-in artboard/runtime values. Broader open M9 work includes Additive Blend, full owner-stack evidence, Component-scoped runtime isolation, visual graph/editor command parity, machine manifest/semantic/dependency completion and final performance/browser acceptance.
+- Remaining transition-source gap: built-in artboard/runtime values. Broader open M9 work includes Additive Blend, full owner-stack evidence, Component-scoped runtime isolation, visual-graph browser acceptance, machine manifest/semantic/dependency completion and final performance/browser gates.
 
 ## Task 5 — Unified conditions, actions and data sources
 
@@ -229,7 +248,7 @@ Unsupported future action types must fail with capabilities/diagnostics rather t
 - Persistent machine actions have stable typed identity and explicit lifecycle phase. Implemented runtime transports cover View Model/data updates, legacy input updates, emitted typed effects and timeline/runtime requests without direct authored mutation.
 - Lifecycle actions execute exactly once for actual state/transition lifecycle events, including zero-duration transitions and snapshot-safe interruption. Forks isolate action side effects.
 - Deterministic Randomize Exit is replayable under a seed and composes with the same selected-transition trigger consumption and lifecycle-action path.
-- Permanent suites now include `veyra-m9-transition-interruption`, `veyra-m9-data-condition-sources`, `veyra-m9-trigger-consumption`, `veyra-m9-lifecycle-actions` and `veyra-m9-randomize-exit`; all are in standard discovery and pass on exact-head Tests #193.
+- Permanent suites now include `veyra-m9-transition-interruption`, `veyra-m9-data-condition-sources`, `veyra-m9-trigger-consumption`, `veyra-m9-lifecycle-actions` and `veyra-m9-randomize-exit`; all are in standard discovery and pass on current exact-head Tests #196.
 - Built-in artboard/runtime values remain unimplemented as condition sources; unsupported future source/action kinds must continue to fail closed through canonical capabilities/normalization.
 
 ## Task 6 — Runtime correctness and lifecycle
@@ -273,6 +292,12 @@ Required UI:
 
 Graph positions, captions and layout metadata are editor-facing properties; changing them must not alter runtime behavior.
 
+### M9 visual-graph implementation evidence — acceptance still open
+
+- The landed graph-editor/Logic-panel code supports machine/layer selection, layer create/rename/reorder/enable/remove, state and transition creation, stable-ID selection, endpoint reconnection, graph movement, pan/zoom, typed pseudo/animation/blend rendering, runtime readout and inspector edits.
+- `tests/veyra-m10-features.test.mjs` exercises the shared graph controller, SVG graph rendering, state movement, transition creation/reconnection and graph-camera non-mutation. Standard Tests #196 keeps that suite green on the integrated head.
+- **Task 7 checkboxes remain open** because current permanent coverage is controller/fake-DOM oriented and does not yet prove the complete browser interaction surface: delete/reconnect UX, snapping behavior, all inspectors, runtime highlighting/owner contributions and pan/zoom/selection through real DOM events. M9 acceptance explicitly requires honest browser/headless coverage rather than source-only or controller-only claims.
+
 ## Task 8 — Canonical UI/AI command parity
 
 Every persistent graph operation must exist once in the canonical command registry and be used by both human UI and AI/browser adapters.
@@ -292,6 +317,11 @@ Runtime ports remain separate for stepping, reset, data/event input and debug ob
 
 Every new persistent command must support validation, preview, transactional apply, provenance, undo/redo and verification/read-back.
 
+### M9 command-surface implementation evidence — parity gate still open
+
+- Canonical Store/command-bus operations now cover layer CRUD/reorder/update, state creation/update/movement, transition CRUD/reconnect, blend-child CRUD/reorder/update, condition CRUD/reorder/update and lifecycle-action CRUD/reorder/update. `tests/veyra-m9-c1-layers.test.mjs` and `tests/veyra-m10-features.test.mjs` exercise representative operations through the canonical command path.
+- This is strong implementation evidence but not yet a Task 8 acceptance verdict. The remaining gate is a systematic catalog parity test proving that every UI/helper operation resolves to the same canonical command, with preview/failure/read-back/undo/provenance behavior for every command family.
+
 ## Task 9 — Manifest, semantics, ownership and name independence
 
 Extend the AI-native surfaces so an agent can understand the entire machine without relying on names.
@@ -305,6 +335,11 @@ Extend the AI-native surfaces so an agent can understand the entire machine with
 - [ ] moving nodes in the visual graph does not change machine identity or runtime behavior.
 
 AI gate from `plan.md`: the entire graph is addressable by IDs and semantic aliases; moving states in the visual graph or renaming them never changes behavioral identity.
+
+### M9 AI-surface evidence — partial only
+
+- M9-C1 proves stable `machineLayer` refs are visible in scene summaries and manifests and are indexed by the semantic resolver with machine ownership relationships.
+- Later feature-graph code broadens generic identity/semantics/dependency plumbing, but there is still no dedicated acceptance proof that **every** M9 machine sub-object, data source and live ownership contribution is represented name-independently. The Task 9 checkboxes therefore remain open.
 
 ## Task 10 — Lightweight/runtime work accounting
 
@@ -361,7 +396,7 @@ Add permanent tests covering at minimum:
 23. existing M0–M8 regression suites stay green;
 24. headless/browser DOM tests exercise actual visual-graph interactions rather than source-regex-only checks.
 
-Current permanent coverage explicitly exercises acceptance families #9–#13 through the transition compositor/exit-pause/interruption, data-condition/trigger-consumption, lifecycle-action and Randomize Exit suites. This does not make M9 ready for acceptance while the remaining numbered families and UI/ownership/runtime-isolation gates are open.
+Current permanent coverage now directly exercises legacy migration/layer CRUD/identity and weighted layered runtime (#1, substantial parts of #2–#6), transition/runtime families #8–#13, and portions of #19–#21 through the M9-C1/layer-schema and graph-controller tests. Additive composition (#7), runtime reconciliation/isolation/ownership/name-invariance (#14–#18), settled/no-machine performance (#22) and real browser graph interaction (#24) remain acceptance blockers. All M0–M8 suites remain green on exact-head Tests #196 (#23).
 
 ## Explicit non-goals
 
@@ -376,6 +411,8 @@ Do not expand M9 into the next roadmap families:
 - Rust/WASM production-runtime rewrite;
 - collaboration/cloud history;
 - broad visual redesign outside the State Machine graph/editor surface.
+
+Some code in these categories has already landed on `main`. Treat it as deferred implementation evidence only; do not extend it further or award roadmap/verified progress until M9 is accepted and the appropriate later milestone is activated.
 
 ## M9 acceptance
 
@@ -420,96 +457,69 @@ Handoff
 
 ---
 
-# MILESTONE M10 — AI-readable Feature Graph, Player + Interchange
+# Deferred post-M9 implementation evidence — Feature Graph, Player + Interchange
 
-**Roadmap mapping:** extension of `plan.md` M4/M5 editor-runtime work
-**Status:** `AWAITING VERIFICATION`
+**Roadmap mapping:** touches later `plan.md` families (including listener/event/accessibility, text/assets, layout, scripting/runtime and Lottie/dotLottie work)
+**Status:** `LANDED ON MAIN — OUT OF SEQUENCE; NOT ACTIVE; NOT INDEPENDENTLY VERIFIED`
 
-## Goal
+## Purpose of this record
 
-Make the editor source useful as a complete, inspectable 2D animation document:
-every new feature family has a stable typed identity, canonical command path,
-semantic/dependency evidence, deterministic preview/runtime behavior, and an
-embeddable player surface. The graph editor, AI/browser API, manifest and
-exporters all operate on the same normalized document.
+Keep already-landed implementation evidence visible without turning it into a second active milestone or bypassing M9. The code remains part of `main` and must stay regression-covered, but it receives no verified roadmap credit until M9 is accepted and the corresponding later milestone is activated under `plan.md`.
 
-## Implemented slice
+## Landed implementation slice
 
-- **Feature graph (`featureVersion: 8`):** rich text runs/modifiers, layout
-  containers/items, unified events/marker actions, accessibility metadata,
-  script and shader source contracts, render presets, and interchange audit
-  records. Nested records carry owner refs and participate in identity,
-  semantics, resolver queries, dependency links, summaries and manifests.
-- **Canonical feature commands:** `addFeature`, `updateFeature`,
-  `removeFeature`, and `reorderFeature` share Store validation, transactions,
-  provenance, undo/redo and the AI/browser command bus. Layered machine graph
-  commands include state movement, transition reconnect, blend-child,
-  condition, and lifecycle-action CRUD/reorder operations.
-- **Rendering/media bridge:** image nodes reference the asset registry and
-  render to SVG with embedded or external sources. Text records render as
-  accessible SVG text spans while remaining editable source data.
-- **Player/runtime:** `VeyraPlayer` provides deterministic seek/advance,
-  looping and ping-pong, machine inputs, lifecycle events, snapshots and
-  render callbacks. `registerVeyraPlayerElement()` supplies the browser
-  `<veyra-player>` custom element using the same evaluator as the editor.
-- **Graph editor:** the Logic panel now supports machine/layer selection,
-  layer create/rename/reorder/enable/remove, state and transition creation,
-  stable-ID selection, reconnecting endpoints, snap-to-grid drag, pan/zoom,
-  typed pseudo/animation/blend visuals, runtime readout and inspector edits.
-- **Lottie bridge:** dependency-free import/export covers common shape,
-  polygon/star/path, text, marker and image layers with parent links, transform
-  tracks, diagnostics and stable mapping refs. `exportDotLottie()` and
-  `importDotLottie()` exchange a JSON-safe package with manifest, animations,
-  images, fonts and Veyra extension metadata.
+- **Feature graph (`featureVersion: 8`):** rich text runs/modifiers, layout containers/items, unified events/marker actions, accessibility metadata, script and shader source contracts, render presets, and interchange audit records. Nested records carry owner refs and participate in identity, semantics, resolver queries, dependency links, summaries and manifests.
+- **Canonical feature commands:** `addFeature`, `updateFeature`, `removeFeature`, and `reorderFeature` share Store validation, transactions, provenance, undo/redo and the AI/browser command bus. Layered machine graph commands include state movement, transition reconnect, blend-child, condition, and lifecycle-action CRUD/reorder operations.
+- **Rendering/media bridge:** image nodes reference the asset registry and render to SVG with embedded or external sources. Text records render as accessible SVG text spans while remaining editable source data.
+- **Player/runtime:** `VeyraPlayer` provides deterministic seek/advance, looping and ping-pong, machine inputs, lifecycle events, snapshots and render callbacks. `registerVeyraPlayerElement()` supplies the browser `<veyra-player>` custom element using the same evaluator as the editor.
+- **Graph editor:** the Logic panel supports machine/layer selection, layer create/rename/reorder/enable/remove, state and transition creation, stable-ID selection, reconnecting endpoints, graph movement, pan/zoom, typed pseudo/animation/blend visuals, runtime readout and inspector edits. These pieces are useful M9 implementation evidence but still require M9 browser/parity acceptance.
+- **Lottie bridge:** dependency-free import/export covers common shape, polygon/star/path, text, marker and image layers with parent links, transform tracks, diagnostics and stable mapping refs. `exportDotLottie()` and `importDotLottie()` exchange a JSON-safe package with manifest, animations, images, fonts and Veyra extension metadata.
 
-## Verification evidence
+## Integrated CI evidence
 
-- `npm run check`: **56/56** source files pass syntax checks, including the
-  production static server and responsive layout evaluator.
-- `npm test`: **61/61** repository suites pass, including the M10 feature,
-  player, graph, layout, hardening and static-server suites plus all M0–M9
-  regression suites.
-- Direct M10 acceptance: feature nested identity/undo, graph camera
-  non-mutation, state movement/reconnect, additive Shift-selection,
-  deterministic player stepping, Lottie gradient/text/marker/image mapping,
-  SVG text/image output, bounded import/export payloads and dotLottie
-  round-trip.
-- Production checks: the dependency-free server passes GET/HEAD, redirect,
-  traversal/symlink, ETag/304, cache-policy and security-header tests;
-  mutable source assets revalidate with `Cache-Control: no-cache`.
+- Implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`.
+- Integrated production baseline: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`.
+- Standard Tests #195, run `34866362425`, job `104051088061`: **SUCCESS on that exact integrated SHA**.
+- Exact integrated-head log: **55/55 source syntax checks PASS; 59/59 repository suites PASS**, including `tests/veyra-m10-features.test.mjs` and all discovered M0–M9 regressions.
+- Current docs-only sequencing head `82f6a1b59c41b1c1e118efc0af6bdda2190dd5a7` also passed standard Tests #196, run `34867613727`, job `104055300606`, with the same **55/55 syntax + 59/59 suites PASS**; this adds exact-current-head CI evidence but no new feature or verification credit.
+- Direct feature-suite coverage includes nested feature identity/undo, graph camera non-mutation, state movement/reconnect, deterministic player stepping, Lottie text/marker/image/path mapping, SVG text output and JSON-safe dotLottie round-trip.
+- Production hardening on the current implementation: `npm run check` is
+  **56/56** and `npm test` is **61/61**, including layout, hardening and
+  static-server suites plus all M0–M9 regressions.
+- Direct coverage additionally proves additive Shift-selection, gradient/text/
+  marker/image mapping, SVG text/image output, bounded import/export payloads,
+  and JSON-safe dotLottie round-trip.
+- The dependency-free server passes GET/HEAD, redirect, traversal/symlink,
+  ETag/304, cache-policy and security-header tests; mutable source assets
+  revalidate with `Cache-Control: no-cache`.
 - Live browser smoke (Codex in-app browser): the editor loads from the static
-  server, the custom modal creates a machine, two states can be Shift-selected,
-  and a transition is created and inspected without console errors from the
-  current bundle.
+  server, the custom modal creates a machine (including Enter-to-submit), two
+  states can be Shift-selected, and a transition is created and inspected
+  without current-bundle console errors.
 - `git diff --check`: clean (line-ending normalization warnings only).
 
-## Acceptance boundary and known limitations
+## Sequencing and acceptance boundary
 
-This milestone is an implementation slice, not a claim of literal vendor
-parity with every Rive runtime/editor feature. Scripts and shaders are
-machine-readable authored contracts; they are not executed in the browser
-runtime. Layout, event and accessibility records are addressable and rendered
-where applicable, but do not yet constitute a full CSS/layout or event
-authoring engine. The dotLottie bridge is intentionally JSON-safe and
-dependency-free; it is not a binary ZIP writer. There is no `.riv` binary
-importer/exporter, production GPU/raster/video encoder, or complete Rive WASM
-feature surface in this change. The live browser smoke gate is green, while
-exhaustive visual, accessibility and cross-browser acceptance remains a
-separate release gate.
+This is **not** an independently verified milestone. Standard CI proves the integrated tree is green; it does not replace the independent acceptance required by the active M9 milestone, nor does it establish full vendor parity for later roadmap families.
 
-## M10 handoff
+Scripts and shaders are machine-readable authored contracts; they are not executed in the browser runtime. Layout, event and accessibility records are addressable and rendered where applicable, but do not yet constitute full CSS/layout or event authoring engines. The dotLottie bridge is intentionally JSON-safe and dependency-free; it is not a binary ZIP writer. There is no `.riv` binary importer/exporter, production GPU/raster/video encoder, or complete Rive WASM feature surface in this change. The live browser smoke gate is green, while exhaustive visual, accessibility and cross-browser acceptance remains open.
+
+Do not add further post-M9 feature-family scope merely to elaborate this record. First close the active M9 acceptance gates. Once M9 is independently VERIFIED, re-map these landed capabilities into the next authoritative `plan.md` milestone(s), run the appropriate dedicated acceptance pass, and only then update verified progress percentages.
+
+## Deferred implementation record
 
 ```text
-Handoff
-- Status: AWAITING VERIFICATION
-- Implementation commit: pending production-hardening commit
-- Final clean main SHA / exact standard Tests run: repository CI remains the promotion gate after the push
+- Status: DEFERRED PENDING M9 ACCEPTANCE
+- Implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`
+- Integrated production baseline: `abf62f61c2e6121a64afc5c31c37f6da9dd54c20`
+- Exact integrated Tests evidence: #195 / run `34866362425` / job `104051088061` — 55/55 syntax, 59/59 suites PASS
+- Exact current-main Tests evidence: #196 / run `34867613727` / job `104055300606` on `82f6a1b59c41b1c1e118efc0af6bdda2190dd5a7` — 55/55 syntax, 59/59 suites PASS
 - Feature graph / nested stable identity proof: tests/veyra-m10-features.test.mjs
-- Canonical command + UI parity proof: src/veyra/commands.js, src/veyra/serviceRegistry.js, veyra.js
-- Player/custom-element proof: src/veyra/player.js + M10 suite
-- Graph editor proof: src/veyra/graphEditor.js + graph panel in veyra.html/veyra.js
-- Lottie/dotLottie proof: src/veyra/lottie.js + M10 suite
-- Regression proof: npm run check and npm test (counts above)
-- Browser/headless acceptance: fake-DOM suite and live Codex in-app browser smoke are green; exhaustive visual/accessibility acceptance remains open
+- Canonical command + UI evidence: src/veyra/commands.js, src/veyra/serviceRegistry.js, veyra.js
+- Player/custom-element evidence: src/veyra/player.js + M10 suite
+- Graph-editor evidence contributing to M9: src/veyra/graphEditor.js + Logic panel + M10 suite
+- Lottie/dotLottie evidence: src/veyra/lottie.js + M10 suite
+- Local production hardening evidence: 56/56 syntax, 61/61 suites, static-server checks and live browser smoke are green.
+- Browser acceptance: current controller/fake-DOM coverage and live Codex in-app browser smoke are green; exhaustive visual/accessibility acceptance remains open.
 - Compatibility/size limitations: JSON dotLottie package only; no .riv binary or production encoder/runtime parity
 ```
