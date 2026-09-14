@@ -57,6 +57,7 @@ function actionsOf(events) { return events.filter(event => event.type === 'machi
   assert.deepEqual(runtime.step(0), []);
   assert.equal(dataRuntime.getValue('inst', 'value'), 0, 'zero-time observation must not flush lifecycle actions');
   let events = runtime.step(0.01);
+  console.log('INITIAL_LIFECYCLE_EVENTS', JSON.stringify(actionsOf(events)));
   assert.equal(dataRuntime.getValue('inst', 'value'), 1);
   assert.deepEqual(actionsOf(events).map(event => event.actionId), ['initial_set']);
   dataRuntime.setValue('inst', 'value', 2);
