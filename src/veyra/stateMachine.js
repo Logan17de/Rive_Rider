@@ -1,6 +1,6 @@
 import { cloneValue, machineById, timelineById } from './model.js';
 import { createReference, referenceId } from './references.js';
-import { evaluateTimelines } from './animation.js';
+import { evaluateTimelines, applyEasing } from './animation.js';
 
 export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
   'transition-start',
@@ -52,7 +52,7 @@ function machineSignature(machine) {
       layer.id,
       layer.initial ? referenceId(layer.initial, 'machineState') : null,
       (layer.states || []).map(state => [state.id, state.type]),
-      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState')]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, referenceId(condition.input, 'machineInput'), condition.op, condition.value])]),
     ]),
   ]);
 }
@@ -136,16 +136,26 @@ function runtimeLayerSnapshot(layer, runtime) {
   };
 }
 
+function transitionProgress(transition, stateTime) {
+  if (!transition) return { raw: 0, eased: 0 };
+  const elapsed = stateTime - transition.startedAt;
+  const raw = transition.duration > 0 ? Math.min(1, Math.max(0, elapsed / transition.duration)) : 1;
+  return { raw, eased: applyEasing(raw, transition.easing || 'linear', transition.easingParams) };
+}
+
 function transitionView(runtime) {
   if (!runtime?.transition) return null;
-  const { transitionId, fromId, toId, duration, startedAt } = runtime.transition;
-  const elapsed = runtime.stateTime - startedAt;
+  const { transitionId, fromId, toId, duration, easing, easingParams } = runtime.transition;
+  const progress = transitionProgress(runtime.transition, runtime.stateTime);
   return {
     id: transitionId,
     fromId,
     toId,
     duration,
-    progress: duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1,
+    easing: easing || 'linear',
+    ...(easingParams ? { easingParams: cloneValue(easingParams) } : {}),
+    rawProgress: progress.raw,
+    progress: progress.eased,
   };
 }
 
@@ -309,7 +319,7 @@ export class MachineRuntime {
       const toId = referenceId(transition.to, 'machineState');
       const target = stateById(layer, toId);
       if (transition.duration > 0 && target?.type !== 'entry' && target?.type !== 'any') {
-        runtime.transition = { transitionId: transition.id, fromId, toId, duration: transition.duration, startedAt: runtime.stateTime };
+        runtime.transition = { transitionId: transition.id, fromId, toId, duration: transition.duration, startedAt: runtime.stateTime, easing: transition.easing || 'linear', ...(transition.easingParams ? { easingParams: cloneValue(transition.easingParams) } : {}) };
         events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
       } else {
         events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
@@ -402,17 +412,29 @@ export class MachineRuntime {
     return [];
   }
 
+  #composeWeightedContributions(items) {
+    const desired = items
+      .map(item => ({ ...item, effectiveWeight: Math.max(0, Math.min(1, Number(item.effectiveWeight ?? item.weight ?? 0))) }))
+      .filter(item => item.effectiveWeight > 1e-12);
+    const total = desired.reduce((sum,item)=>sum+item.effectiveWeight,0);
+    const base = Math.max(0, 1-total);
+    let cumulative = base;
+    return desired.map(item => {
+      cumulative += item.effectiveWeight;
+      return { ...item, weight: cumulative > 0 ? item.effectiveWeight / cumulative : 0 };
+    });
+  }
+
   #stateTimelineContributions(layer, runtime, inputsById) {
     if (runtime.transition) {
-      const { fromId, toId, startedAt, duration } = runtime.transition;
+      const { fromId, toId, startedAt } = runtime.transition;
       const elapsed = runtime.stateTime - startedAt;
-      const progress = duration > 0 ? Math.min(1, Math.max(0, elapsed / duration)) : 1;
-      const outgoing = stateById(layer, fromId), incoming = stateById(layer, toId);
-      const contributions = this.#steadyStateContributions(outgoing, runtime.stateTime, inputsById);
-      // Blend states are currently rejected as transition endpoints by model
-      // validation, so the legacy incoming animation scaling remains exact.
-      for (const item of this.#steadyStateContributions(incoming, elapsed, inputsById)) contributions.push({ ...item, weight: item.weight * progress, effectiveWeight: item.effectiveWeight * progress });
-      return contributions;
+      const progress = transitionProgress(runtime.transition, runtime.stateTime).eased;
+      const outgoing = this.#steadyStateContributions(stateById(layer, fromId), runtime.stateTime, inputsById)
+        .map(item => ({ ...item, effectiveWeight: Number(item.effectiveWeight ?? item.weight ?? 1) * (1-progress), transitionRole: 'outgoing' }));
+      const incoming = this.#steadyStateContributions(stateById(layer, toId), elapsed, inputsById)
+        .map(item => ({ ...item, effectiveWeight: Number(item.effectiveWeight ?? item.weight ?? 1) * progress, transitionRole: 'incoming' }));
+      return this.#composeWeightedContributions([...outgoing, ...incoming]);
     }
     return this.#steadyStateContributions(stateById(layer, runtime.stateId), runtime.stateTime, inputsById);
   }
