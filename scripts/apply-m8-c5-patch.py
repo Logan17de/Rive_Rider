@@ -28,6 +28,13 @@ if count != 1:
     raise SystemExit(f'{model}: expected one scalar-normalizer block, found {count}')
 model.write_text(model_text)
 
+contract = ROOT / 'src/veyra/propertyValueContract.js'
+replace_once(
+    contract,
+    "  if (parsed.reference.kind === 'node') return validateNode(object, parsed.segments, value, path);\n  if (parsed.reference.kind === 'bone') return validateBone(object, parsed.segments, value, path);\n  if (parsed.reference.kind === 'mesh') return validateMesh(object, parsed.segments, value, path);\n  if (parsed.reference.kind === 'control') return validateControl(object, parsed.segments, value, path);\n  if (parsed.reference.kind === 'constraint') return validateConstraint(object, parsed.segments, value, path);\n  throw new TypeError(`${label} has no ordinary property value contract.`);\n",
+    "  if (parsed.reference.kind === 'node') validateNode(object, parsed.segments, value, path);\n  else if (parsed.reference.kind === 'bone') validateBone(object, parsed.segments, value, path);\n  else if (parsed.reference.kind === 'mesh') validateMesh(object, parsed.segments, value, path);\n  else if (parsed.reference.kind === 'control') validateControl(object, parsed.segments, value, path);\n  else if (parsed.reference.kind === 'constraint') validateConstraint(object, parsed.segments, value, path);\n  else throw new TypeError(`${label} has no ordinary property value contract.`);\n  // Validation must not rewrite the binding graph's published value. In\n  // particular, null is an intentional sentinel for empty list converters;\n  // canonical document normalization may interpret it as a property default.\n  return clone(value);\n",
+)
+
 data = ROOT / 'src/veyra/dataGraph.js'
 replace_once(
     data,
