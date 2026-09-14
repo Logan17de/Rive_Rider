@@ -109,6 +109,12 @@ export const VEYRA_CONDITION_OPS = Object.freeze([
   'fired',
   '!fired',
 ]);
+export const VEYRA_MACHINE_ACTION_PHASES = Object.freeze([
+  'state-start', 'state-end', 'transition-start', 'transition-end',
+]);
+export const VEYRA_MACHINE_ACTION_TYPES = Object.freeze([
+  'data-set', 'data-fire', 'input-set', 'input-fire', 'emit', 'timeline',
+]);
 
 // Shared bounds for the numeric properties that `normalizeDocument` validates.
 // Document validation and the AI-facing manifest action schemas both consume
@@ -461,6 +467,83 @@ export function createMachineInput(overrides = {}) {
   };
 }
 
+function machineJsonSafeClone(value, path = 'machineAction.value') {
+  const seen = new Set();
+  const visit = (item, at) => {
+    if (item === null || typeof item === 'string' || typeof item === 'boolean') return item;
+    if (typeof item === 'number') {
+      if (!Number.isFinite(item)) throw new TypeError(`${at} must contain only finite JSON numbers.`);
+      return item;
+    }
+    if (Array.isArray(item)) {
+      if (seen.has(item)) throw new TypeError(`${at} must be acyclic JSON data.`);
+      seen.add(item);
+      const result = item.map((entry, index) => visit(entry, `${at}[${index}]`));
+      seen.delete(item);
+      return result;
+    }
+    if (item && typeof item === 'object') {
+      const proto = Object.getPrototypeOf(item);
+      if (proto !== Object.prototype && proto !== null) throw new TypeError(`${at} must be plain JSON data.`);
+      if (seen.has(item)) throw new TypeError(`${at} must be acyclic JSON data.`);
+      seen.add(item);
+      const result = {};
+      for (const [key, entry] of Object.entries(item)) {
+        if (entry === undefined || ['function', 'symbol', 'bigint'].includes(typeof entry)) throw new TypeError(`${at}.${key} is not JSON-safe.`);
+        result[key] = visit(entry, `${at}.${key}`);
+      }
+      seen.delete(item);
+      return result;
+    }
+    throw new TypeError(`${at} is not JSON-safe.`);
+  };
+  return visit(value, path);
+}
+
+export function createMachineAction(overrides = {}) {
+  const type = String(overrides.type || '');
+  const phase = String(overrides.phase || '');
+  if (!VEYRA_MACHINE_ACTION_TYPES.includes(type)) throw new TypeError(`Unsupported machine action type: ${type || '(empty)'}.`);
+  if (!VEYRA_MACHINE_ACTION_PHASES.includes(phase)) throw new TypeError(`Unsupported machine action phase: ${phase || '(empty)'}.`);
+  const action = { id: String(overrides.id || createId('machineAction')), type, phase };
+  if (type === 'data-set' || type === 'data-fire') {
+    action.target = normalizeMachineDataEndpoint(overrides.target ?? overrides.endpoint, 'machineAction.target');
+    if (type === 'data-set') {
+      if (overrides.value === undefined) throw new TypeError('machineAction.value is required for data-set.');
+      action.value = machineJsonSafeClone(overrides.value);
+    }
+    return action;
+  }
+  if (type === 'input-set' || type === 'input-fire') {
+    const input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'machineAction.input');
+    if (!input) throw new TypeError('machineAction.input is required.');
+    action.input = input;
+    if (type === 'input-set') {
+      if (overrides.value === undefined) throw new TypeError('machineAction.value is required for input-set.');
+      action.value = machineJsonSafeClone(overrides.value);
+    }
+    return action;
+  }
+  if (type === 'emit') {
+    action.event = String(overrides.event || '');
+    if (!action.event) throw new TypeError('machineAction.event is required for emit.');
+    action.payload = machineJsonSafeClone(overrides.payload ?? null, 'machineAction.payload');
+    return action;
+  }
+  const timeline = normalizeReference(overrides.timeline ?? overrides.timelineId, 'timeline', 'machineAction.timeline');
+  if (!timeline) throw new TypeError('machineAction.timeline is required.');
+  const operation = String(overrides.operation || 'play');
+  if (!['play', 'stop', 'seek'].includes(operation)) throw new TypeError('machineAction.operation must be play, stop, or seek.');
+  action.timeline = timeline;
+  action.operation = operation;
+  if (operation === 'seek') {
+    const time = Number(overrides.time ?? overrides.value);
+    if (!Number.isFinite(time) || time < 0) throw new TypeError('machineAction.time must be a non-negative finite number for seek.');
+    action.time = time;
+  }
+  return action;
+}
+
 function normalizeMachineDataEndpoint(value, path) {
   const endpoint = normalizeBindingEndpoint(value, path);
   if (endpoint.kind !== 'data') throw new TypeError(`${path} must be a View Model data endpoint.`);
@@ -549,6 +632,10 @@ export function createMachineState(overrides = {}) {
     speed,
     graph,
   };
+  const actions = (overrides.actions || []).map(createMachineAction);
+  if (actions.some(action => !['state-start', 'state-end'].includes(action.phase))) throw new TypeError('State lifecycle action phase must be state-start or state-end.');
+  if (['entry', 'exit', 'any'].includes(type) && actions.length) throw new TypeError(`${type} pseudo-states cannot own lifecycle actions.`);
+  if (actions.length) result.actions = actions;
   if (type === 'blend1d') {
     result.input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'state.input');
     if (!result.input) throw new TypeError('blend1d states require a numeric machine input reference.');
@@ -602,6 +689,9 @@ export function createMachineTransition(overrides = {}) {
     easing,
     conditions: (overrides.conditions || []).map((condition) => createMachineCondition(condition)),
   };
+  const actions = (overrides.actions || []).map(createMachineAction);
+  if (actions.some(action => !['transition-start', 'transition-end'].includes(action.phase))) throw new TypeError('Transition lifecycle action phase must be transition-start or transition-end.');
+  if (actions.length) transition.actions = actions;
   if (easing === 'cubic-bezier') {
     if (!Array.isArray(overrides.easingParams) || overrides.easingParams.length !== 4) throw new TypeError('transition.easingParams must contain four values for cubic-bezier.');
     transition.easingParams = overrides.easingParams.map((value,index)=>bounded(value,`transition.easingParams[${index}]`,0,1));
@@ -1386,6 +1476,33 @@ function validateMachineDataConditions(document) {
   }
 }
 
+function validateMachineDataActions(document) {
+  for (const machine of document.stateMachines || []) for (const layer of machine.layers || []) {
+    const owners = [
+      ...(layer.states || []).map(state => ({ kind: 'state', id: state.id, actions: state.actions || [] })),
+      ...(layer.transitions || []).map(transition => ({ kind: 'transition', id: transition.id, actions: transition.actions || [] })),
+    ];
+    for (const owner of owners) for (const action of owner.actions) {
+      if (action.type !== 'data-set' && action.type !== 'data-fire') continue;
+      const label = `stateMachine ${machine.id}/layer ${layer.id}/${owner.kind} ${owner.id}/action ${action.id}`;
+      const descriptor = machineDataEndpointDescriptor(document, action.target, `${label}.target`);
+      const property = graphDataPropertyById(document, action.target.path.at(-1).id);
+      if (!property?.writable) throw new TypeError(`[machine-action-readonly] ${label} targets a read-only data property.`);
+      if (action.type === 'data-fire') {
+        if (descriptor.type !== 'trigger') throw new TypeError(`[machine-action-type] ${label} data-fire requires a trigger target.`);
+        continue;
+      }
+      if (descriptor.type === 'trigger') throw new TypeError(`[machine-action-type] ${label} cannot data-set a trigger; use data-fire.`);
+      const value = machineLiteralDescriptor(document, action.value, descriptor);
+      if (!dataTypeAccepts(descriptor, value)) throw new TypeError(`[machine-action-type] ${label} value is incompatible with ${JSON.stringify(descriptor)}.`);
+      if (descriptor.type === 'number') {
+        if (typeof action.value !== 'number' || !Number.isFinite(action.value)) throw new TypeError(`[machine-action-type] ${label} requires a finite number.`);
+        if (descriptor.min != null && action.value < descriptor.min || descriptor.max != null && action.value > descriptor.max) throw new RangeError(`[machine-action-range] ${label} is outside the data property range.`);
+      }
+    }
+  }
+}
+
 function resolveMachineNumberInput(value, path, inputsById) {
   const ref = requiredReference(value, 'machineInput', path);
   const key = referenceId(ref, 'machineInput');
@@ -1410,6 +1527,33 @@ function normalizeBlendChild(child, index, path, timelineIds, inputsById, type) 
   return result;
 }
 
+function normalizeMachineAction(action, index, ownerPath, ownerKind, timelineIds, inputsById) {
+  const path = `${ownerPath}.actions[${index}]`;
+  if (!action || typeof action !== 'object' || Array.isArray(action)) throw new TypeError(`${path} must be an action object.`);
+  const id = String(action.id || '');
+  if (!id) throw new TypeError(`${path}.id is required.`);
+  const result = createMachineAction({ ...action, id });
+  const allowed = ownerKind === 'state' ? ['state-start', 'state-end'] : ['transition-start', 'transition-end'];
+  if (!allowed.includes(result.phase)) throw new TypeError(`${path}.phase must be ${allowed.join(' or ')}.`);
+  if (result.type === 'input-set' || result.type === 'input-fire') {
+    const key = referenceId(result.input, 'machineInput');
+    const input = inputsById.get(key) || [...inputsById.values()].find(candidate => candidate.name === key) || null;
+    if (!input) throw new TypeError(`${path}.input references missing machine input ${key}.`);
+    result.input = createReference('machineInput', input.id);
+    if (result.type === 'input-fire' && input.type !== 'trigger') throw new TypeError(`${path}.input must be a trigger input for input-fire.`);
+    if (result.type === 'input-set') {
+      if (input.type === 'trigger') throw new TypeError(`${path}.input is a trigger; use input-fire.`);
+      if (input.type === 'number') {
+        if (typeof result.value !== 'number' || !Number.isFinite(result.value)) throw new TypeError(`${path}.value must be finite for number input ${input.id}.`);
+      } else if (typeof result.value !== 'boolean') throw new TypeError(`${path}.value must be boolean for bool input ${input.id}.`);
+    }
+  }
+  if (result.type === 'timeline' && !timelineIds.has(referenceId(result.timeline, 'timeline'))) {
+    throw new TypeError(`${path}.timeline references missing timeline ${referenceId(result.timeline, 'timeline')}.`);
+  }
+  return result;
+}
+
 function normalizeMachineState(state, index, layerPath, timelineIds, inputsById) {
   const path = `${layerPath}.states[${index}]`;
   const id = String(state?.id || '');
@@ -1428,6 +1572,10 @@ function normalizeMachineState(state, index, layerPath, timelineIds, inputsById)
     : { x: 0, y: 0 };
   const result = { id, name: String(state.name || ''), displayNameAdvisory: true, caption: String(state.caption ?? ''), type, speed, graph };
   if (timeline) result.timeline = timeline;
+  if (state.actions !== undefined && state.actions !== null && !Array.isArray(state.actions)) throw new TypeError(`${path}.actions must be an array.`);
+  const actions = (Array.isArray(state.actions) ? state.actions : []).map((action,i)=>normalizeMachineAction(action,i,path,'state',timelineIds,inputsById));
+  if (['entry', 'exit', 'any'].includes(type) && actions.length) throw new TypeError(`${path}.${type} pseudo-state cannot own lifecycle actions.`);
+  if (actions.length) result.actions = actions;
   if (type === 'blend1d' || type === 'directBlend') {
     if (!Array.isArray(state?.children)) throw new TypeError(`${path}.children must be an array.`);
     result.children = state.children.map((child,i)=>normalizeBlendChild(child,i,path,timelineIds,inputsById,type));
@@ -1447,7 +1595,7 @@ function normalizeMachineState(state, index, layerPath, timelineIds, inputsById)
   return result;
 }
 
-function normalizeMachineTransition(transition, index, layerPath, stateIds, inputsById) {
+function normalizeMachineTransition(transition, index, layerPath, stateIds, inputsById, timelineIds) {
   const path = `${layerPath}.transitions[${index}]`;
   const id = String(transition?.id || '');
   if (!id) throw new TypeError(`${path}.id is required.`);
@@ -1469,7 +1617,9 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   }
   if (transition.conditions !== undefined && transition.conditions !== null && !Array.isArray(transition.conditions)) throw new TypeError(`${path}.conditions must be an array of conditions.`);
   const conditions=(Array.isArray(transition.conditions)?transition.conditions:[]).map((condition,i)=>normalizeMachineCondition(condition,`${path}.conditions[${i}]`,inputsById));
-  return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, allowExitDuringTransition, easing, ...(easingParams?{easingParams}:{}), conditions };
+  if (transition.actions !== undefined && transition.actions !== null && !Array.isArray(transition.actions)) throw new TypeError(`${path}.actions must be an array.`);
+  const actions=(Array.isArray(transition.actions)?transition.actions:[]).map((action,i)=>normalizeMachineAction(action,i,path,'transition',timelineIds,inputsById));
+  return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, allowExitDuringTransition, easing, ...(easingParams?{easingParams}:{}), conditions, ...(actions.length?{actions}: {}) };
 }
 
 function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsById, globalStateIds, globalTransitionIds) {
@@ -1482,11 +1632,12 @@ function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsByI
     if(stateIds.has(state.id) || globalStateIds.has(state.id)) throw new TypeError(`Duplicate machine state id ${state.id} in ${machinePath}.`);
     stateIds.add(state.id); globalStateIds.add(state.id);
   }
-  const transitions=(Array.isArray(layer?.transitions)?layer.transitions:[]).map((transition,i)=>normalizeMachineTransition(transition,i,path,stateIds,inputsById));
+  const transitions=(Array.isArray(layer?.transitions)?layer.transitions:[]).map((transition,i)=>normalizeMachineTransition(transition,i,path,stateIds,inputsById,timelineIds));
   const statesById=new Map(states.map(state=>[state.id,state]));
   for(const transition of transitions){
     const source=statesById.get(referenceId(transition.from,'machineState'));
     if(transition.exitTime && source && ['entry','any','exit'].includes(source.type)) throw new TypeError(`${path} transition ${transition.id}.exitTime is not meaningful for ${source.type} pseudo-states.`);
+    if((transition.actions || []).length && source && ['entry','any'].includes(source.type)) throw new TypeError(`${path} transition ${transition.id} from ${source.type} pseudo-state cannot own lifecycle actions.`);
     if(globalTransitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
     globalTransitionIds.add(transition.id);
   }
@@ -1648,10 +1799,14 @@ function validateStableIdentities(document) {
     machine.inputs.forEach((input, inputIndex) => register('machineInput', input.id, `stateMachines[${machineIndex}].inputs[${inputIndex}]`));
     machine.layers.forEach((layer, layerIndex) => {
       register('machineLayer', layer.id, `stateMachines[${machineIndex}].layers[${layerIndex}]`);
-      layer.states.forEach((state, stateIndex) => register('machineState', state.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}]`));
+      layer.states.forEach((state, stateIndex) => {
+        register('machineState', state.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}]`);
+        (state.actions || []).forEach((action, actionIndex) => register('machineAction', action.id, `stateMachines[${machineIndex}].layers[${layerIndex}].states[${stateIndex}].actions[${actionIndex}]`));
+      });
       layer.transitions.forEach((transition, transitionIndex) => {
         register('machineTransition', transition.id, `stateMachines[${machineIndex}].layers[${layerIndex}].transitions[${transitionIndex}]`);
         transition.conditions.forEach((condition, conditionIndex) => register('machineCondition', condition.id, `stateMachines[${machineIndex}].layers[${layerIndex}].transitions[${transitionIndex}].conditions[${conditionIndex}]`));
+        (transition.actions || []).forEach((action, actionIndex) => register('machineAction', action.id, `stateMachines[${machineIndex}].layers[${layerIndex}].transitions[${transitionIndex}].actions[${actionIndex}]`));
       });
     });
   });
@@ -1793,6 +1948,7 @@ export function normalizeDocument(input) {
   const projectDocument = normalizeProjectDocument(input, document);
   const dataDocument = normalizeDataGraphDocument(input, projectDocument);
   validateMachineDataConditions(dataDocument);
+  validateMachineDataActions(dataDocument);
   validateStableIdentities(dataDocument);
   validateSemanticRecords(dataDocument);
   return dataDocument;

@@ -6,11 +6,14 @@ import { createVeyraDataRuntime, createDataRuntimeScope } from './dataGraph.js';
 export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
   'transition-start',
   'transition-end',
+  'machine-action',
 ]);
 
 export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   inputTypes: Object.freeze(['number', 'bool', 'trigger']),
   stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend']),
+  actionTypes: Object.freeze(['data-set', 'data-fire', 'input-set', 'input-fire', 'emit', 'timeline']),
+  actionPhases: Object.freeze(['state-start', 'state-end', 'transition-start', 'transition-end']),
   graph: Object.freeze([
     'set-name', 'set-initial',
     'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
@@ -52,8 +55,8 @@ function machineSignature(machine) {
     orderedLayers(machine).map(layer => [
       layer.id,
       layer.initial ? referenceId(layer.initial, 'machineState') : null,
-      (layer.states || []).map(state => [state.id, state.type]),
-      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, condition.input ? referenceId(condition.input, 'machineInput') : null, condition.source || null, condition.op, condition.value, condition.compare || null])]),
+      (layer.states || []).map(state => [state.id, state.type, state.actions || []]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, condition.input ? referenceId(condition.input, 'machineInput') : null, condition.source || null, condition.op, condition.value, condition.compare || null]), transition.actions || []]),
     ]),
   ]);
 }
@@ -202,11 +205,11 @@ function transitionView(runtime) {
 
 function createLayerRuntime(layer) {
   const state = initialState(layer);
-  return { stateId: state?.id || null, stateTime: 0, transition: null };
+  return { stateId: state?.id || null, stateTime: 0, transition: null, stateStartPending: false };
 }
 
 function cloneLayerRuntime(value) {
-  return { stateId: value.stateId, stateTime: value.stateTime, transition: cloneValue(value.transition) };
+  return { stateId: value.stateId, stateTime: value.stateTime, transition: cloneValue(value.transition), stateStartPending: Boolean(value.stateStartPending) };
 }
 
 export class MachineRuntime {
@@ -225,6 +228,8 @@ export class MachineRuntime {
     transitionConditionEvaluations: 0,
     dataConditionReads: 0,
     triggerPulsesConsumed: 0,
+    actionsExecuted: 0,
+    actionErrors: 0,
     timelineEvaluations: 0,
     compositionApplications: 0,
     inactiveLayerSkips: 0,
@@ -312,13 +317,82 @@ export class MachineRuntime {
     }
   }
 
+  #executeAction(action, phase, layer, inputsById, events, context = {}) {
+    this.#stats.actionsExecuted += 1;
+    const base = {
+      type: 'machine-action',
+      status: 'success',
+      machineId: this.#machineId,
+      layerId: layer.id,
+      actionId: action.id,
+      actionType: action.type,
+      phase,
+      authoredMutation: false,
+      stateId: context.stateId || null,
+      transitionId: context.transitionId || null,
+    };
+    try {
+      let effect = null, request = null;
+      if (action.type === 'data-set' || action.type === 'data-fire') {
+        const resolved = this.#dataRuntime.resolveDataEndpoint(action.target, { scopePath: this.#runtimeScopePath });
+        if (action.type === 'data-set') {
+          const changed = this.#dataRuntime.setValue(resolved.instance.id, resolved.property.id, cloneValue(action.value), {
+            scopePath: this.#runtimeScopePath,
+            source: 'machine-action',
+            provenance: { machine: createReference('stateMachine', this.#machineId), action: createReference('machineAction', action.id), phase },
+          });
+          effect = { kind: 'data-set', target: cloneValue(action.target), effectiveInstance: cloneValue(resolved.instance), effectiveProperty: cloneValue(resolved.property), value: cloneValue(action.value), changed: Boolean(changed), mutation: 'runtime-only' };
+        } else {
+          const sequence = this.#dataRuntime.fire(resolved.instance.id, resolved.property.id, {
+            scopePath: this.#runtimeScopePath,
+            source: 'machine-action',
+            provenance: { machine: createReference('stateMachine', this.#machineId), action: createReference('machineAction', action.id), phase },
+          });
+          effect = { kind: 'data-fire', target: cloneValue(action.target), effectiveInstance: cloneValue(resolved.instance), effectiveProperty: cloneValue(resolved.property), sequence, mutation: 'runtime-only' };
+        }
+      } else if (action.type === 'input-set') {
+        const inputId = referenceId(action.input, 'machineInput');
+        this.#overrideValues.set(inputId, cloneValue(action.value));
+        inputsById.set(inputId, cloneValue(action.value));
+        effect = { kind: 'input-set', input: cloneValue(action.input), value: cloneValue(action.value), mutation: 'runtime-only' };
+      } else if (action.type === 'input-fire') {
+        const inputId = referenceId(action.input, 'machineInput');
+        this.#overrideValues.set(inputId, true);
+        inputsById.set(inputId, true);
+        effect = { kind: 'input-fire', input: cloneValue(action.input), value: true, mutation: 'runtime-only' };
+      } else if (action.type === 'emit') {
+        effect = { kind: 'emit', event: action.event, payload: cloneValue(action.payload ?? null), mutation: 'none' };
+      } else if (action.type === 'timeline') {
+        request = { kind: 'timeline', timeline: cloneValue(action.timeline), operation: action.operation, ...(action.operation === 'seek' ? { time: action.time } : {}) };
+        effect = { kind: 'timeline-request', mutation: 'none' };
+      } else {
+        throw new TypeError(`Unsupported machine action type ${action.type}.`);
+      }
+      events.push({ ...base, ...(effect ? { effect } : {}), ...(request ? { request } : {}) });
+    } catch (cause) {
+      this.#stats.actionErrors += 1;
+      events.push({ ...base, status: 'error', error: String(cause?.message || cause) });
+    }
+  }
+
+  #runActions(owner, phase, layer, inputsById, events, context = {}) {
+    for (const action of owner?.actions || []) {
+      if (action.phase === phase) this.#executeAction(action, phase, layer, inputsById, events, context);
+    }
+  }
+
   #resetRuntime(machine) {
     this.#overrideValues = new Map();
     this.#layers = new Map();
     for (const layer of orderedLayers(machine)) this.#layers.set(layer.id, createLayerRuntime(layer));
     this.#signature = machineSignature(machine);
     const inputs = new Map((machine?.inputs || []).map(input => [input.id, input.value]));
-    for (const layer of orderedLayers(machine)) this.#resolveImmediatePseudo(layer, this.#layers.get(layer.id), inputs, []);
+    for (const layer of orderedLayers(machine)) {
+      const runtime = this.#layers.get(layer.id);
+      this.#resolveImmediatePseudo(layer, runtime, inputs, [], { lifecycle: false });
+      const state = stateById(layer, runtime.stateId);
+      runtime.stateStartPending = Boolean(state && !['entry', 'any', 'exit'].includes(state.type));
+    }
   }
 
   #reconcile() {
@@ -353,8 +427,16 @@ export class MachineRuntime {
 
   #beginTransition(layer, runtime, transition, sourceStateId, sourceStateTime, inputsById, events, options = {}) {
     this.#consumeTransitionTriggers(options.match);
+    runtime.stateStartPending = false;
+    const source = stateById(layer, sourceStateId);
     const toId = referenceId(transition.to, 'machineState');
     const target = stateById(layer, toId);
+    this.#runActions(source, 'state-end', layer, inputsById, events, { stateId: sourceStateId, transitionId: transition.id });
+    events.push({ type: 'transition-start', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
+    this.#runActions(transition, 'transition-start', layer, inputsById, events, { stateId: sourceStateId, transitionId: transition.id });
+    if (target && !['entry', 'any', 'exit'].includes(target.type)) {
+      this.#runActions(target, 'state-start', layer, inputsById, events, { stateId: target.id, transitionId: transition.id });
+    }
     if (transition.duration > 0 && target?.type !== 'entry' && target?.type !== 'any') {
       runtime.stateId = sourceStateId;
       runtime.stateTime = sourceStateTime;
@@ -373,14 +455,13 @@ export class MachineRuntime {
         ...(Array.isArray(options.sourceSnapshot) ? { sourceSnapshot: cloneValue(options.sourceSnapshot) } : {}),
         ...(options.interruptedFromTransitionId ? { interruptedFromTransitionId: options.interruptedFromTransitionId } : {}),
       };
-      events.push({ type: 'transition-start', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
       return;
     }
-    events.push({ type: 'transition-start', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
     runtime.stateId = target?.type === 'exit' ? null : toId;
     runtime.stateTime = 0;
     runtime.transition = null;
     events.push({ type: 'transition-end', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
+    this.#runActions(transition, 'transition-end', layer, inputsById, events, { stateId: runtime.stateId, transitionId: transition.id });
     this.#resolveImmediatePseudo(layer, runtime, inputsById, events);
   }
 
@@ -402,6 +483,8 @@ export class MachineRuntime {
       interrupted: true,
       interruptedBy: next.id,
     });
+    const interruptedTransition = (layer.transitions || []).find(candidate => candidate.id === active.transitionId) || null;
+    this.#runActions(interruptedTransition, 'transition-end', layer, inputsById, events, { stateId: sourceStateId, transitionId: active.transitionId });
     this.#beginTransition(layer, runtime, next, sourceStateId, sourceStateTime, inputsById, events, {
       match,
       sourceSnapshot,
@@ -410,7 +493,8 @@ export class MachineRuntime {
     return true;
   }
 
-  #resolveImmediatePseudo(layer, runtime, inputsById, events) {
+  #resolveImmediatePseudo(layer, runtime, inputsById, events, options = {}) {
+    const lifecycle = options.lifecycle !== false;
     const seen = new Set();
     for (let hops = 0; hops <= (layer.states?.length || 0) + 1; hops += 1) {
       const state = stateById(layer, runtime.stateId);
@@ -429,32 +513,46 @@ export class MachineRuntime {
       const toId = referenceId(transition.to, 'machineState');
       const target = stateById(layer, toId);
       events.push({ type: 'transition-start', transitionId: transition.id, fromId: state.id, toId, layerId: layer.id });
+      if (lifecycle) this.#runActions(transition, 'transition-start', layer, inputsById, events, { stateId: state.id, transitionId: transition.id });
       if (target?.type === 'exit') {
         runtime.stateId = null; runtime.stateTime = 0; runtime.transition = null;
         events.push({ type: 'transition-end', transitionId: transition.id, fromId: state.id, toId, layerId: layer.id });
+        if (lifecycle) this.#runActions(transition, 'transition-end', layer, inputsById, events, { stateId: null, transitionId: transition.id });
         return;
       }
       runtime.stateId = toId; runtime.stateTime = 0; runtime.transition = null;
+      if (lifecycle && target && !['entry', 'any', 'exit'].includes(target.type)) {
+        this.#runActions(target, 'state-start', layer, inputsById, events, { stateId: target.id, transitionId: transition.id });
+      }
       events.push({ type: 'transition-end', transitionId: transition.id, fromId: state.id, toId, layerId: layer.id });
+      if (lifecycle) this.#runActions(transition, 'transition-end', layer, inputsById, events, { stateId: runtime.stateId, transitionId: transition.id });
+      if (!target || !['entry', 'any'].includes(target.type)) return;
     }
   }
 
-  #completeTransition(layer, runtime, events) {
+  #completeTransition(layer, runtime, inputsById, events) {
     const { transitionId, fromId, toId, startedAt } = runtime.transition;
     runtime.stateTime = runtime.stateTime - startedAt;
     const target = stateById(layer, toId);
     runtime.stateId = target?.type === 'exit' ? null : toId;
     runtime.transition = null;
     events.push({ type: 'transition-end', transitionId, fromId, toId, layerId: layer.id });
+    const transition = (layer.transitions || []).find(candidate => candidate.id === transitionId) || null;
+    this.#runActions(transition, 'transition-end', layer, inputsById, events, { stateId: runtime.stateId, transitionId });
   }
 
   #stepLayer(layer, runtime, delta, inputsById, events) {
     if (layer.enabled === false) return;
     if (!runtime.stateId && !runtime.transition) return;
+    if (runtime.stateStartPending) {
+      const state = stateById(layer, runtime.stateId);
+      runtime.stateStartPending = false;
+      this.#runActions(state, 'state-start', layer, inputsById, events, { stateId: runtime.stateId });
+    }
     if (runtime.transition) {
       runtime.stateTime += delta;
       if (runtime.stateTime - runtime.transition.startedAt >= runtime.transition.duration - 1e-9) {
-        this.#completeTransition(layer, runtime, events);
+        this.#completeTransition(layer, runtime, inputsById, events);
         return;
       }
       this.#interruptTransition(layer, runtime, inputsById, events);
@@ -656,6 +754,8 @@ export class MachineRuntime {
       transitionConditionEvaluations: 0,
       dataConditionReads: 0,
       triggerPulsesConsumed: 0,
+      actionsExecuted: 0,
+      actionErrors: 0,
       timelineEvaluations: 0,
       compositionApplications: 0,
       inactiveLayerSkips: 0,
