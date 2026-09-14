@@ -1,0 +1,35 @@
+name: M8 C5 independent review
+on:
+  push:
+    branches: ['verify/m8-c5-602a62e']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 8
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Confirm unchanged production baseline
+        run: |
+          git diff --exit-code 602a62ef929f1fc73c3c15dcedc65abc9b9ea19b HEAD -- . ':!verification' ':!.github/workflows/m8-c5-independent-review.yml'
+          test "$(git rev-parse 602a62ef929f1fc73c3c15dcedc65abc9b9ea19b^{tree})" = b3fde9fbbaf310f56fc6dfee8304a8f6b157e671
+      - run: npm ci
+      - name: Baseline syntax and full suites
+        run: npm run check && npm test
+      - name: Independent composition probes
+        run: node verification/m8-c5-review.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m8-c5-independent-results
+          path: |
+            verification/m8-c5-review.mjs
+            verification/m8-c5-review-results.json
+          retention-days: 7
