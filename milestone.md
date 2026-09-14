@@ -116,7 +116,7 @@ Support the roadmap state families in the canonical model/runtime/UI:
 - [ ] Additive/Direct Blend state;
 - [x] state speed, including reverse playback;
 - [x] state captions and graph/editor metadata;
-- [ ] state start actions and state end actions.
+- [x] state start actions and state end actions.
 
 Blend-state requirements:
 
@@ -161,23 +161,23 @@ Implement concurrent ordered layer evaluation with an explicit property-composit
 
 Transitions must support, where meaningful for the source/target state types:
 
-- [ ] View Model property conditions;
-- [ ] compatible events/triggers;
+- [x] View Model property conditions;
+- [x] compatible events/triggers;
 - [ ] built-in artboard/runtime values supported by the roadmap;
 - [x] legacy machine inputs;
 - [x] comparison against fixed values;
-- [ ] comparison against compatible data-bound values;
+- [x] comparison against compatible data-bound values;
 - [x] transition duration;
 - [x] exit time;
 - [x] pause source;
-- [ ] allow exit during transition;
+- [x] allow exit during transition;
 - [x] interpolation/easing;
-- [ ] transition start actions;
-- [ ] transition end actions;
+- [x] transition start actions;
+- [x] transition end actions;
 - [x] enabled/disabled transition;
 - [x] Any-state routing;
 - [x] Entry/Exit routing;
-- [ ] Randomize Exit with weighted outgoing paths.
+- [x] Randomize Exit with weighted outgoing paths.
 
 Randomized transitions need an explicit deterministic runtime RNG/seed contract for tests/replays. Never use a hidden global random source that makes verification nondeterministic.
 
@@ -189,7 +189,16 @@ Randomized transitions need an explicit deterministic runtime RNG/seed contract 
 - Production `fb0bfb1c90452a477833f36757ee3e3b3fe76dab` adds canonical Exit Time with `{unit: seconds|percent, value}`, speed-aware percent gating, and Pause Source behavior that freezes the exact outgoing source time captured when a transition starts while the incoming state continues.
 - Exit Time rejects invalid units/ranges and meaningless pseudo-state source usage. The legacy `after` gate remains a separate condition; the two contracts are not silently conflated.
 - Permanent `tests/veyra-m9-transition-exit-pause.test.mjs` covers seconds, percent, speed-adjusted percentage, paused-vs-live source clocks and invalid authored values. Worker run `34812931703`, job `103877684445`: syntax/full-suite/diff gates PASS. Standard exact-main Tests #187 is the required promotion gate for this SHA.
-- Compatibility boundary: `allow exit during transition` remains deliberately open because interruption needs a snapshot-safe source/target composition contract; start/end actions, View Model/data-bound conditions, deterministic Randomize Exit and Additive Blend also remain open.
+- Compatibility boundary after the later runtime slices: Additive Blend and built-in artboard/runtime-value condition sources remain open; View Model/data-bound conditions, exact event consumption, interruption, lifecycle actions and deterministic Randomize Exit are now implemented and regression-covered.
+
+### M9 transition/data/lifecycle implementation evidence — advanced runtime slice
+
+- Production `db024269faf013db6254941053ce38499a4604f8` implements snapshot-safe **Allow Exit During Transition**. An interrupted transition captures the exact composed source pose, supports repeated interruption/Any routing, preserves target-clock Exit Time semantics and keeps forks isolated. Standard Tests #189 is SUCCESS on that exact SHA.
+- Production `5c9c700ec956df0d05f73b116c17a730be2d38c8` connects M8 View Model/data endpoints to transition conditions, including nested reference retargeting, strict nominal typing, data-bound comparisons and trigger observation. Standard Tests #190 is SUCCESS.
+- Production `2d22041a984894ae170655b1305074fc35f8a4ca` defines exact M8 event consumption: queued data triggers consume one pulse only on the selected transition; failed candidates, time gates, reads and forks conserve live pulses. Legacy machine triggers retain their verified one-step broadcast compatibility behavior. Worker gates: **50/50 syntax + 54/54 suites PASS**; Tests #191 is SUCCESS.
+- Production `3d9b71c7430e6636366c2c62c270016ba8f910a4` adds stable `machineAction` identity and the bounded action registry (`data-set`, `data-fire`, `input-set`, `input-fire`, `emit`, `timeline`) across state-start/state-end/transition-start/transition-end phases. Effects are runtime-only or emitted requests; authored documents are never directly mutated. Exactly-once lifecycle behavior covers initial activation, zero/timed transitions, interruption and forks. Worker gates: **50/50 syntax + 55/55 suites PASS**; Tests #192 is SUCCESS.
+- Production `f68c3980930f42bd012a26be4773353cdeaa72d8` adds weighted state-level **Randomize Exit** with positive path weights and an internal seeded unsigned-32-bit PRNG. Same seed replays identically, reset/scrub restart the seed, forks clone current PRNG state, global `Math.random()` is never used, and chosen transitions expose seed/draw/sample/candidate evidence. Worker gates: **50/50 syntax + 56/56 suites PASS**; Tests #193 is SUCCESS.
+- Capability honesty: persistent actions are currently supported on normal playable states and normal transitions. Entry/Any pseudo-routing does not expose authored lifecycle actions yet, built-in artboard/runtime-value condition sources remain open, and Additive Blend is the next major state-family gap. M9 remains **IN PROGRESS**.
 
 ## Task 5 — Unified conditions, actions and data sources
 
@@ -214,6 +223,15 @@ Action contract:
 
 Unsupported future action types must fail with capabilities/diagnostics rather than being silently ignored.
 
+
+### M9 unified source/action registry evidence
+
+- M8 View Model endpoints and legacy machine inputs share the same transition evaluator; data-bound comparisons use canonical nominal M8 descriptors rather than coercion.
+- M8 trigger queues are first-class event sources with selected-transition consumption; legacy trigger semantics remain a compatibility adapter.
+- Persistent `machineAction` records have stable typed identity, explicit phases and JSON-safe parameters. Data/input effects mutate runtime state only; `emit` and `timeline` actions surface typed runtime effects/requests for host integration.
+- Machine action failures are bounded runtime events/counters rather than hidden authored mutation or unbounded exceptions through unrelated layers.
+- Built-in artboard/runtime-value sources remain open, so Task 5 is advanced but not claimed as fully closed.
+
 ## Task 6 — Runtime correctness and lifecycle
 
 Rebuild `MachineRuntime` around layer runtimes while retaining compatibility adapters for existing callers.
@@ -225,13 +243,20 @@ Required runtime behavior:
 - [x] transition progress and interpolation;
 - [x] state speed/reverse playback;
 - [x] pause/exit-time behavior;
-- [ ] exact trigger/event consumption policy;
-- [ ] start/end actions fire exactly once;
-- [ ] Randomize Exit chooses once per decision and is replayable under a seed;
+- [x] exact trigger/event consumption policy;
+- [x] start/end actions fire exactly once;
+- [x] Randomize Exit chooses once per decision and is replayable under a seed;
 - [ ] structural authored edits reconcile safely without leaving dangling state IDs;
 - [x] observation/fork/read paths do not advance the live machine or consume live events;
 - [ ] runtime errors are bounded per layer so an invalid independent layer cannot corrupt another layer's valid output;
 - [ ] settled/inactive layers stop continuous evaluation where possible.
+
+### M9 runtime lifecycle evidence — advanced Task 6
+
+- Snapshot-safe interruption, exact M8 trigger consumption, exactly-once state/transition lifecycle actions and deterministic weighted Randomize Exit now compose in the same layered evaluator.
+- Random decisions are runtime-only and replayable from an explicit seed; no random choice, action execution, transition progress or trigger queue leaks into authored serialization.
+- Standard Tests #189 through #193 are SUCCESS on their exact production SHAs, with the latest worker reaching **56/56 repository suites PASS**.
+- Remaining Task 6 gaps are structural-edit reconciliation coverage, per-layer runtime error isolation, and deeper inactive/settled-layer sleeping evidence.
 
 ## Task 7 — Visual graph editor
 
