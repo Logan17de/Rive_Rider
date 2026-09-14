@@ -16,7 +16,40 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Prepare patch bootstrap
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-m9-data-condition-sources.py')
+          text=p.read_text()
+          old="""if text.count(needle) != 2:
+              raise SystemExit(f'expected stats field block twice, found {text.count(needle)}')
+          text = text.replace(needle, replacement)
+          """
+          new="""if text.count(needle) != 1:
+              raise SystemExit(f'expected stats field block once, found {text.count(needle)}')
+          text = text.replace(needle, replacement, 1)
+          """
+          if old not in text: raise SystemExit('stats patch bootstrap target missing')
+          p.write_text(text.replace(old,new,1))
+          PY
       - run: python3 scripts/apply-m9-data-condition-sources.py
+      - name: Add reset counter
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/veyra/stateMachine.js')
+          text=p.read_text()
+          old="""      transitionConditionEvaluations: 0,
+                timelineEvaluations: 0,
+          """
+          new="""      transitionConditionEvaluations: 0,
+                dataConditionReads: 0,
+                timelineEvaluations: 0,
+          """
+          if text.count(old)!=1: raise SystemExit(f'reset stats target count {text.count(old)}')
+          p.write_text(text.replace(old,new,1))
+          PY
       - run: npm run check
       - run: npm test
       - run: git diff --check
