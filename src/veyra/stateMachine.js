@@ -9,7 +9,7 @@ export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
 
 export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   inputTypes: Object.freeze(['number', 'bool', 'trigger']),
-  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend', 'additiveBlend']),
+  stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation']),
   graph: Object.freeze([
     'set-name', 'set-initial',
     'add-layer', 'update-layer', 'remove-layer', 'reorder-layer',
@@ -436,7 +436,21 @@ export class MachineRuntime {
 
   reset() {
     const machine = this.#reconcile();
-    if (machine) this.#resetRuntime(machine);
+    if (!machine) return;
+    // Work counters describe work since the current runtime reset. This keeps
+    // deterministic scrub/replay evidence comparable to a fresh runtime while
+    // still reporting all actual work performed during the replay itself.
+    this.#stats = {
+      evaluations: 0,
+      layerEvaluations: 0,
+      stateEvaluations: 0,
+      transitionConditionEvaluations: 0,
+      timelineEvaluations: 0,
+      compositionApplications: 0,
+      inactiveLayerSkips: 0,
+      zeroMachineFastPaths: 0,
+    };
+    this.#resetRuntime(machine);
   }
 
   scrub(seconds) {
