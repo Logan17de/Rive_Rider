@@ -5,6 +5,7 @@ import {
   VEYRA_COORDINATE_CONVENTIONS,
 } from './contracts.js';
 import { finite, bounded, integer, color, gradientColor } from './propertyValueContract.js';
+import { dataTypeDescriptor, dataTypeAccepts } from './dataTypeContracts.js';
 import {
   createBoneRef,
   createControlRef,
@@ -48,6 +49,7 @@ import {
   propertyGroupPropertyById as dataPropertyGroupPropertyById,
   listById as dataListById,
   listItemById as dataListItemById,
+  normalizeBindingEndpoint,
 } from './dataGraph.js';
 
 export { VEYRA_PROJECT_VERSION, VEYRA_DATA_VERSION };
@@ -459,18 +461,34 @@ export function createMachineInput(overrides = {}) {
   };
 }
 
+function normalizeMachineDataEndpoint(value, path) {
+  const endpoint = normalizeBindingEndpoint(value, path);
+  if (endpoint.kind !== 'data') throw new TypeError(`${path} must be a View Model data endpoint.`);
+  return endpoint;
+}
+
 export function createMachineCondition(overrides = {}) {
   const op = String(overrides.op || '');
   if (!VEYRA_CONDITION_OPS.includes(op)) throw new TypeError(`Unsupported condition operator: ${op}`);
-  const input = normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'condition.input');
-  if (!input) throw new TypeError('condition.input is required.');
+  const hasDataSource = overrides.source != null;
+  const hasLegacyInput = overrides.input != null || overrides.inputId != null;
+  if (hasDataSource && hasLegacyInput) throw new TypeError('condition cannot define both source and input.');
+  const source = hasDataSource ? normalizeMachineDataEndpoint(overrides.source, 'condition.source') : null;
+  const input = hasLegacyInput ? normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'condition.input') : null;
+  if (!source && !input) throw new TypeError('condition.source or condition.input is required.');
   const condition = {
     id: overrides.id || createId('machineCondition'),
-    input,
+    ...(source ? { source } : { input }),
     op,
   };
-  if (op !== 'fired' && op !== '!fired') {
-    if (overrides.value === undefined) throw new TypeError(`condition.value is required for operator ${op}.`);
+  if (op === 'fired' || op === '!fired') {
+    if (overrides.compare != null) throw new TypeError(`condition.compare is not allowed for operator ${op}.`);
+    return condition;
+  }
+  if (overrides.compare != null && overrides.value !== undefined) throw new TypeError('condition cannot define both compare and value.');
+  if (overrides.compare != null) condition.compare = normalizeMachineDataEndpoint(overrides.compare, 'condition.compare');
+  else {
+    if (overrides.value === undefined) throw new TypeError(`condition.value is required for operator ${op} when condition.compare is absent.`);
     condition.value = cloneValue(overrides.value);
   }
   return condition;
@@ -1254,31 +1272,118 @@ export function machineConditionViolation(op, value, inputType) {
 
 function normalizeMachineCondition(condition, path, inputsById) {
   const id = String(condition?.id || createId('machineCondition'));
-  const inputRef = requiredReference(condition?.input ?? condition?.inputId, 'machineInput', `${path}.input`);
-  const inputKey = referenceId(inputRef, 'machineInput');
-  // Inputs are addressed by stable id, but a unique input name is also
-  // accepted so authored documents and AI commands can use the friendlier
-  // form; both normalize to the stable id reference.
-  const input = inputsById.get(inputKey)
-    || [...inputsById.values()].find((candidate) => candidate.name === inputKey)
-    || null;
-  if (!input) throw new TypeError(`${path}.input references missing machine input ${inputKey}.`);
+  const hasDataSource = condition?.source != null;
+  const hasLegacyInput = condition?.input != null || condition?.inputId != null;
+  if (hasDataSource && hasLegacyInput) throw new TypeError(`${path} cannot define both source and input.`);
+  let source = null, input = null;
+  if (hasDataSource) source = normalizeMachineDataEndpoint(condition.source, `${path}.source`);
+  else {
+    const inputRef = requiredReference(condition?.input ?? condition?.inputId, 'machineInput', `${path}.input`);
+    const inputKey = referenceId(inputRef, 'machineInput');
+    input = inputsById.get(inputKey)
+      || [...inputsById.values()].find((candidate) => candidate.name === inputKey)
+      || null;
+    if (!input) throw new TypeError(`${path}.input references missing machine input ${inputKey}.`);
+  }
   const op = String(condition?.op || '');
-  if (!VEYRA_CONDITION_OPS.includes(op)) {
-    throw new TypeError(`${path}.op must be a valid condition operator.`);
+  if (!VEYRA_CONDITION_OPS.includes(op)) throw new TypeError(`${path}.op must be a valid condition operator.`);
+  const hasCompare = condition?.compare != null;
+  if ((op === 'fired' || op === '!fired') && hasCompare) throw new TypeError(`${path}.compare is not allowed for operator ${op}.`);
+  if (hasCompare && condition?.value !== undefined) throw new TypeError(`${path} cannot define both compare and value.`);
+  if (input) {
+    if (hasCompare) {
+      if (input.type === 'trigger') throw new TypeError(`${path}.op '${op}' is a comparison operator and cannot gate a trigger input.`);
+      if (VEYRA_MACHINE_ORDERING_OPS.includes(op) && input.type !== 'number') throw new TypeError(`${path}.op '${op}' requires a number input.`);
+    } else {
+      const violation = machineConditionViolation(op, condition?.value, input.type);
+      if (violation) throw new TypeError(`${path}.op '${op}' ${violation} (input ${JSON.stringify(input.name || input.id)} is ${input.type}).`);
+    }
   }
-  const violation = machineConditionViolation(op, condition?.value, input.type);
-  if (violation) {
-    throw new TypeError(
-      `${path}.op '${op}' ${violation} (input ${JSON.stringify(input.name || input.id)} is ${input.type}).`,
-    );
+  const result = { id, ...(source ? { source } : { input: { kind: 'machineInput', id: input.id } }), op };
+  if (op === 'fired' || op === '!fired') return result;
+  if (hasCompare) result.compare = normalizeMachineDataEndpoint(condition.compare, `${path}.compare`);
+  else {
+    if (condition?.value === undefined) throw new TypeError(`${path}.value or compare is required for operator ${op}.`);
+    result.value = cloneValue(condition.value);
   }
-  const resolvedInput = { kind: 'machineInput', id: input.id };
-  if (op === 'fired' || op === '!fired') {
-    return { id, input: resolvedInput, op };
+  return result;
+}
+
+function machineInputDescriptor(input) {
+  if (!input) return null;
+  return { type: input.type === 'bool' ? 'boolean' : input.type };
+}
+
+function machineDataEndpointDescriptor(document, endpointInput, path) {
+  const endpoint = normalizeMachineDataEndpoint(endpointInput, path);
+  const instance = dataViewModelInstanceById(document, endpoint.instance.id);
+  if (!instance) throw new TypeError(`${path}.instance references missing View Model instance ${endpoint.instance.id}.`);
+  let model = dataViewModelById(document, instance.viewModel.id);
+  if (!model) throw new TypeError(`${path}.instance references missing View Model ${instance.viewModel.id}.`);
+  let property = null;
+  for (let index = 0; index < endpoint.path.length; index += 1) {
+    const ref = endpoint.path[index];
+    property = model.properties.find(candidate => candidate.id === ref.id) || null;
+    if (!property) throw new TypeError(`${path}.path[${index}] references property ${ref.id} outside View Model ${model.id}.`);
+    if (index < endpoint.path.length - 1) {
+      if (property.type !== 'viewModel' || !property.viewModel) throw new TypeError(`${path}.path[${index}] must be a View Model reference property.`);
+      model = dataViewModelById(document, property.viewModel.id);
+      if (!model) throw new TypeError(`${path}.path[${index}] references missing View Model ${property.viewModel.id}.`);
+    }
   }
-  // No coercion: a surviving value is the authored value, type and all.
-  return { id, input: resolvedInput, op, value: cloneValue(condition.value) };
+  return dataTypeDescriptor(property);
+}
+
+function machineLiteralDescriptor(document, value, declared) {
+  if (value == null) return { type: 'null' };
+  if (typeof value === 'number') return Number.isFinite(value) ? { type: 'number', min: value, max: value } : { type: 'invalid-number' };
+  if (typeof value === 'boolean') return { type: 'boolean' };
+  if (typeof value === 'string') return { type: declared?.type === 'color' ? 'color' : 'string' };
+  if (value?.kind === 'enumValue') {
+    const owner = (document.enums || []).find(item => item.values.some(entry => entry.id === value.id));
+    return { type: 'enum', enum: owner ? { kind: 'enum', id: owner.id } : null };
+  }
+  if (value?.kind === 'viewModelInstance') {
+    const instance = dataViewModelInstanceById(document, value.id);
+    return { type: 'viewModel', viewModel: instance?.viewModel || null };
+  }
+  if (value?.kind === 'list') {
+    const list = dataListById(document, value.id);
+    const property = list ? graphDataPropertyById(document, list.property.id) : null;
+    return property?.type === 'list' ? dataTypeDescriptor(property) : { type: 'list', itemType: null };
+  }
+  if (value?.kind === 'asset') return { type: 'image' };
+  if (value?.kind === 'artboard') return { type: 'artboard' };
+  return { type: 'any' };
+}
+
+function validateMachineDataConditions(document) {
+  for (const machine of document.stateMachines || []) {
+    const inputs = new Map(machine.inputs.map(input => [input.id, input]));
+    for (const layer of machine.layers || []) for (const transition of layer.transitions || []) {
+      for (const condition of transition.conditions || []) {
+        const label = `stateMachine ${machine.id}/layer ${layer.id}/transition ${transition.id}/condition ${condition.id}`;
+        const source = condition.source
+          ? machineDataEndpointDescriptor(document, condition.source, `${label}.source`)
+          : machineInputDescriptor(inputs.get(referenceId(condition.input, 'machineInput')));
+        if (!source) throw new TypeError(`[machine-condition-source] ${label} has no resolvable source.`);
+        if (condition.op === 'fired' || condition.op === '!fired') {
+          if (source.type !== 'trigger') throw new TypeError(`[machine-condition-type] ${label}.${condition.op} requires a trigger source.`);
+          continue;
+        }
+        if (source.type === 'trigger') throw new TypeError(`[machine-condition-type] ${label} cannot compare a trigger source.`);
+        const compare = condition.compare
+          ? machineDataEndpointDescriptor(document, condition.compare, `${label}.compare`)
+          : machineLiteralDescriptor(document, condition.value, source);
+        if (VEYRA_MACHINE_ORDERING_OPS.includes(condition.op) && (source.type !== 'number' || compare.type !== 'number')) {
+          throw new TypeError(`[machine-condition-type] ${label}.${condition.op} requires number sources on both sides.`);
+        }
+        if (!dataTypeAccepts(source, compare) || !dataTypeAccepts(compare, source)) {
+          throw new TypeError(`[machine-condition-type] ${label} compares incompatible definitions ${JSON.stringify(source)} and ${JSON.stringify(compare)}.`);
+        }
+      }
+    }
+  }
 }
 
 function resolveMachineNumberInput(value, path, inputsById) {
@@ -1687,6 +1792,7 @@ export function normalizeDocument(input) {
   };
   const projectDocument = normalizeProjectDocument(input, document);
   const dataDocument = normalizeDataGraphDocument(input, projectDocument);
+  validateMachineDataConditions(dataDocument);
   validateStableIdentities(dataDocument);
   validateSemanticRecords(dataDocument);
   return dataDocument;

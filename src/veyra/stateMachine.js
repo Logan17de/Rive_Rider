@@ -1,6 +1,7 @@
 import { cloneValue, machineById, timelineById } from './model.js';
 import { createReference, referenceId } from './references.js';
 import { evaluateTimelines, applyEasing } from './animation.js';
+import { createVeyraDataRuntime, createDataRuntimeScope } from './dataGraph.js';
 
 export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
   'transition-start',
@@ -52,7 +53,7 @@ function machineSignature(machine) {
       layer.id,
       layer.initial ? referenceId(layer.initial, 'machineState') : null,
       (layer.states || []).map(state => [state.id, state.type]),
-      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, referenceId(condition.input, 'machineInput'), condition.op, condition.value])]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, condition.input ? referenceId(condition.input, 'machineInput') : null, condition.source || null, condition.op, condition.value, condition.compare || null])]),
     ]),
   ]);
 }
@@ -62,25 +63,28 @@ function resolveInput(machine, nameOrId) {
   return (machine?.inputs || []).find(input => input.id === key || input.name === key) || null;
 }
 
-function evaluateCondition(condition, inputsById) {
-  const inputValue = inputsById.get(referenceId(condition.input, 'machineInput'));
+function evaluateCondition(condition, inputsById, readData) {
+  const inputValue = condition.source
+    ? readData(condition.source)
+    : inputsById.get(referenceId(condition.input, 'machineInput'));
+  const compareValue = condition.compare ? readData(condition.compare) : condition.value;
   switch (condition.op) {
-    case '<': return inputValue < condition.value;
-    case '<=': return inputValue <= condition.value;
-    case '>': return inputValue > condition.value;
-    case '>=': return inputValue >= condition.value;
-    case '==': return inputValue === condition.value;
-    case '!=': return inputValue !== condition.value;
+    case '<': return inputValue < compareValue;
+    case '<=': return inputValue <= compareValue;
+    case '>': return inputValue > compareValue;
+    case '>=': return inputValue >= compareValue;
+    case '==': return inputValue === compareValue || JSON.stringify(inputValue) === JSON.stringify(compareValue);
+    case '!=': return !(inputValue === compareValue || JSON.stringify(inputValue) === JSON.stringify(compareValue));
     case 'fired': return inputValue === true;
     case '!fired': return inputValue !== true;
     default: throw new TypeError(`Unsupported condition operator: ${condition.op}`);
   }
 }
 
-function transitionSatisfied(transition, stateTime, inputsById) {
+function transitionSatisfied(transition, stateTime, inputsById, readData) {
   if (transition.enabled === false) return false;
   if (transition.after != null && stateTime < transition.after) return false;
-  return (transition.conditions || []).every(condition => evaluateCondition(condition, inputsById));
+  return (transition.conditions || []).every(condition => evaluateCondition(condition, inputsById, readData));
 }
 
 function initialState(layer) {
@@ -202,6 +206,8 @@ export class MachineRuntime {
   #machineId = null;
   #overrideValues = new Map();
   #layers = new Map();
+  #dataRuntime = null;
+  #runtimeScopePath = [];
   #signature = NO_MACHINE;
   #invalidateListeners = new Set();
   #stats = {
@@ -209,15 +215,18 @@ export class MachineRuntime {
     layerEvaluations: 0,
     stateEvaluations: 0,
     transitionConditionEvaluations: 0,
+    dataConditionReads: 0,
     timelineEvaluations: 0,
     compositionApplications: 0,
     inactiveLayerSkips: 0,
     zeroMachineFastPaths: 0,
   };
 
-  constructor(documentOrGetter, machineId) {
+  constructor(documentOrGetter, machineId, options = {}) {
     this.#documentOrGetter = documentOrGetter;
     this.#machineId = String(machineId || '');
+    this.#dataRuntime = options.dataRuntime || createVeyraDataRuntime(documentOrGetter);
+    this.#runtimeScopePath = createDataRuntimeScope(options.runtimeScopePath ?? options.scopePath ?? []).path;
     const machine = machineById(resolveDocument(documentOrGetter), this.#machineId);
     if (!machine) throw new TypeError(`State machine ${machineId} was not found in the document.`);
     this.#resetRuntime(machine);
@@ -229,7 +238,7 @@ export class MachineRuntime {
   get stats() { return cloneValue(this.#stats); }
 
   fork() {
-    const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId);
+    const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId, { dataRuntime: this.#dataRuntime.fork(), runtimeScopePath: this.#runtimeScopePath });
     snapshot.#overrideValues = new Map([...this.#overrideValues].map(([key, value]) => [key, cloneValue(value)]));
     snapshot.#layers = new Map([...this.#layers].map(([id, value]) => [id, cloneLayerRuntime(value)]));
     snapshot.#signature = this.#signature;
@@ -273,6 +282,15 @@ export class MachineRuntime {
 
   #inputsById() { return new Map(this.inputs.map(input => [input.id, input.value])); }
 
+  #readDataCondition(endpoint) {
+    this.#stats.dataConditionReads += 1;
+    return this.#dataRuntime.getEndpointValue(endpoint, { scopePath: this.#runtimeScopePath });
+  }
+
+  #transitionSatisfied(transition, stateTime, inputsById) {
+    return transitionSatisfied(transition, stateTime, inputsById, endpoint => this.#readDataCondition(endpoint));
+  }
+
   #resetRuntime(machine) {
     this.#overrideValues = new Map();
     this.#layers = new Map();
@@ -305,7 +323,7 @@ export class MachineRuntime {
     for (const transition of this.#transitionCandidates(layer, stateId)) {
       this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
       if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, stateTime)) continue;
-      if (!transitionSatisfied(transition, stateTime, inputsById)) continue;
+      if (!this.#transitionSatisfied(transition, stateTime, inputsById)) continue;
       return transition;
     }
     return null;
@@ -374,7 +392,7 @@ export class MachineRuntime {
       if (!state || !['entry', 'any'].includes(state.type)) return;
       if (seen.has(state.id)) { runtime.stateId = null; runtime.transition = null; return; }
       seen.add(state.id);
-      const transition = (layer.transitions || []).find(candidate => referenceId(candidate.from, 'machineState') === state.id && transitionSatisfied(candidate, runtime.stateTime, inputsById));
+      const transition = (layer.transitions || []).find(candidate => referenceId(candidate.from, 'machineState') === state.id && this.#transitionSatisfied(candidate, runtime.stateTime, inputsById));
       if (!transition) return;
       const toId = referenceId(transition.to, 'machineState');
       const target = stateById(layer, toId);
@@ -604,6 +622,7 @@ export class MachineRuntime {
       layerEvaluations: 0,
       stateEvaluations: 0,
       transitionConditionEvaluations: 0,
+      dataConditionReads: 0,
       timelineEvaluations: 0,
       compositionApplications: 0,
       inactiveLayerSkips: 0,
@@ -619,6 +638,6 @@ export class MachineRuntime {
   }
 }
 
-export function createMachineRuntime(documentOrGetter, machineId) {
-  return new MachineRuntime(documentOrGetter, machineId);
+export function createMachineRuntime(documentOrGetter, machineId, options = {}) {
+  return new MachineRuntime(documentOrGetter, machineId, options);
 }

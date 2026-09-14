@@ -1143,6 +1143,13 @@ export class VeyraDataRuntime {
     const { instance, property } = this.#instanceProperty(instanceId, propertyId);
     return this.#value(instance, property, scopeKey(options.scopePath));
   }
+  getEndpointValue(endpointInput, options = {}) {
+    const endpoint = normalizeBindingEndpoint(endpointInput, 'runtime data endpoint');
+    if (endpoint.kind !== 'data') throw new TypeError('getEndpointValue requires a data endpoint.');
+    // No triggerReads set is supplied: this is a non-consuming observation of
+    // the current endpoint value, including nested View Model retargeting.
+    return this.#dataEndpointValue(endpoint, scopeKey(options.scopePath), new Map(), null, null);
+  }
   #propertyGroupValue(document, propertyId, scope) {
     const property = propertyGroupPropertyById(document, propertyId);
     if (!property) throw new TypeError(`Runtime Property Group target ${propertyId} does not exist.`);
