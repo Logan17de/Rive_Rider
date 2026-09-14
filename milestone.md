@@ -59,7 +59,7 @@ M8 acceptance preserves the documented contracts from C1–C5: canonical capabil
 # MILESTONE M9 — Layered State Machine Parity + Visual Graph Editor
 
 **Roadmap mapping:** `plan.md` M4 — State Machine parity + visual graph editor  
-**Status:** `READY`
+**Status:** `IN PROGRESS`
 
 ## Goal
 
@@ -108,14 +108,14 @@ Requirements:
 
 Support the roadmap state families in the canonical model/runtime/UI:
 
-- [ ] Entry pseudo-state;
-- [ ] Exit pseudo-state;
-- [ ] Any state;
-- [ ] Single Animation state;
+- [x] Entry pseudo-state;
+- [x] Exit pseudo-state;
+- [x] Any state;
+- [x] Single Animation state;
 - [ ] 1D Blend state;
 - [ ] Additive/Direct Blend state;
-- [ ] state speed, including reverse playback;
-- [ ] state captions and graph/editor metadata;
+- [x] state speed, including reverse playback;
+- [x] state captions and graph/editor metadata;
 - [ ] state start actions and state end actions.
 
 Blend-state requirements:
@@ -130,14 +130,23 @@ Blend-state requirements:
 
 Implement concurrent ordered layer evaluation with an explicit property-composition policy.
 
-- [ ] every enabled layer has independent current state, clock and transition state;
-- [ ] layers evaluate simultaneously in deterministic order;
-- [ ] property priority/composition is machine-readable and tested;
-- [ ] disabled layers perform no active runtime work and contribute no ownership;
+- [x] every enabled layer has independent current state, clock and transition state;
+- [x] layers evaluate simultaneously in deterministic order;
+- [x] property priority/composition is machine-readable and tested;
+- [x] disabled layers perform no active runtime work and contribute no ownership;
 - [ ] transitions/blends from multiple layers compose without mutating authored source values;
 - [ ] active owner stack reports authored value → timelines/blends → state/layer winner with evidence;
 - [ ] Component instances receive isolated per-instance machine runtime paths, including repeated/nested Components;
 - [ ] reset/prune/document replacement cleans only the relevant runtime scopes.
+
+## M9 implementation evidence — layered runtime slice
+
+- Production candidate tree implements concurrent ordered layer runtimes over the canonical `machineLayer` schema.
+- Compatibility getters (`stateId`, `stateTime`, `transition`) remain adapters over the stable `compatibilityLayer`; reordering layers cannot silently retarget legacy callers.
+- Entry/Exit/Any pseudo states, animation state speed (including reverse), state captions/graph metadata, deterministic later-layer property priority and layered ownership evidence are covered by `tests/veyra-m9-layered-runtime.test.mjs`.
+- Disabled layers are skipped and contribute no ownership; runtime work counters distinguish active/inactive layer work and reset with runtime reset so deterministic scrub/replay remains comparable.
+- Worker Actions run `34810074334`, job `103869484723`: syntax checks PASS, **48/48 suites PASS**, diff hygiene PASS.
+- Capability honesty: Blend state families remain **not exposed** until their evaluator/authoring contracts are implemented. M9 remains IN PROGRESS.
 
 ## Task 4 — Rive-class transition contract
 
@@ -192,16 +201,16 @@ Rebuild `MachineRuntime` around layer runtimes while retaining compatibility ada
 
 Required runtime behavior:
 
-- [ ] deterministic fixed-step/elapsed-time stepping;
-- [ ] current states for every layer;
-- [ ] transition progress and interpolation;
-- [ ] state speed/reverse playback;
+- [x] deterministic fixed-step/elapsed-time stepping;
+- [x] current states for every layer;
+- [x] transition progress and interpolation;
+- [x] state speed/reverse playback;
 - [ ] pause/exit-time behavior;
 - [ ] exact trigger/event consumption policy;
 - [ ] start/end actions fire exactly once;
 - [ ] Randomize Exit chooses once per decision and is replayable under a seed;
 - [ ] structural authored edits reconcile safely without leaving dangling state IDs;
-- [ ] observation/fork/read paths do not advance the live machine or consume live events;
+- [x] observation/fork/read paths do not advance the live machine or consume live events;
 - [ ] runtime errors are bounded per layer so an invalid independent layer cannot corrupt another layer's valid output;
 - [ ] settled/inactive layers stop continuous evaluation where possible.
 
