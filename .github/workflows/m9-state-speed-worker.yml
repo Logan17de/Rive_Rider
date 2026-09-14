@@ -16,8 +16,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply M9 state speed patch
+      - name: Normalize and apply M9 state speed patch
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-m9-state-speed.py')
+          p.write_text(p.read_text().replace('\n""\n)\n', '\n"""\n)\n'))
+          PY
           set +e
           python3 scripts/apply-m9-state-speed.py > /tmp/m9-state-speed-patch.log 2>&1
           status=$?
