@@ -126,6 +126,15 @@ Blend-state requirements:
 - ownership evidence identifies all contributing timelines and effective weights;
 - zero-weight/inactive branches do not do unnecessary evaluation work.
 
+### M9 blend-state implementation evidence — partial Task 2 advance
+
+- `blend1d` steady-state evaluation is implemented with stable `machineBlendChild` identity, strictly increasing thresholds, numeric machine-input control, deterministic neighboring-child interpolation, boundary clamping and zero-unused-child work.
+- `directBlend` steady-state evaluation is implemented with stable child identity, numeric per-child input weights, deterministic normalized ownership weights and zero-weight child sleeping.
+- Ownership evidence exposes every active child timeline, its stable blend-child ref and effective normalized weight.
+- Invalid thresholds, missing timelines, duplicate child IDs and non-number legacy inputs fail closed during canonical normalization.
+- Blend transitions are deliberately rejected until the richer transition compositor is implemented; Additive Blend, M8/View Model blend sources and canonical blend-child CRUD commands remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
+- Worker Actions run `34810521222`, job `103870774356`: syntax PASS, **49/49 suites PASS**, diff hygiene PASS.
+
 ## Task 3 — Ordered simultaneous layer evaluation
 
 Implement concurrent ordered layer evaluation with an explicit property-composition policy.
