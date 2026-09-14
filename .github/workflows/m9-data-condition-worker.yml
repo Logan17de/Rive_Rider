@@ -34,12 +34,12 @@ jobs:
           p.write_text(text.replace(old,new,1))
           PY
       - run: python3 scripts/apply-m9-data-condition-sources.py
-      - name: Add reset counter
+      - name: Preserve compatibility contracts
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('src/veyra/stateMachine.js')
-          text=p.read_text()
+          state=Path('src/veyra/stateMachine.js')
+          text=state.read_text()
           old="""      transitionConditionEvaluations: 0,
                 timelineEvaluations: 0,
           """
@@ -48,7 +48,21 @@ jobs:
                 timelineEvaluations: 0,
           """
           if text.count(old)!=1: raise SystemExit(f'reset stats target count {text.count(old)}')
-          p.write_text(text.replace(old,new,1))
+          state.write_text(text.replace(old,new,1))
+
+          data=Path('src/veyra/dataGraph.js')
+          text=data.read_text()
+          old="return this.#dataEndpointValue(this.#document(), endpoint, scopeKey(options.scopePath), new Map(), null, null);"
+          new="return this.#dataEndpointValue(endpoint, scopeKey(options.scopePath), new Map(), null, null);"
+          if text.count(old)!=1: raise SystemExit('getEndpointValue call target missing')
+          data.write_text(text.replace(old,new,1))
+
+          model=Path('src/veyra/model.js')
+          text=model.read_text()
+          old="throw new TypeError(`condition.value or condition.compare is required for operator ${op}.`);"
+          new="throw new TypeError(`condition.value is required for operator ${op} when condition.compare is absent.`);"
+          if text.count(old)!=1: raise SystemExit('creator validation wording target missing')
+          model.write_text(text.replace(old,new,1))
           PY
       - run: npm run check
       - run: npm test
