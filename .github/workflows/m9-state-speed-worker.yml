@@ -1,0 +1,35 @@
+name: M9 state speed worker
+on:
+  push:
+    branches: ['work/m9-state-speed']
+permissions:
+  contents: write
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 8
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply M9 state speed patch
+        run: python3 scripts/apply-m9-state-speed.py
+      - name: Syntax check
+        run: npm run check
+      - name: Full repository suites
+        run: npm test
+      - name: Remove worker-only machinery
+        run: rm scripts/apply-m9-state-speed.py .github/workflows/m9-state-speed-worker.yml
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit clean M9 state speed slice
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(m9): add state playback speed reverse and graph metadata'
+          git push origin HEAD:work/m9-state-speed
