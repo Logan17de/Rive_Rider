@@ -2,220 +2,398 @@
 
 `plan.md` is the product roadmap. `QUALITY.md` is the permanent lightweight/performance/fidelity contract. This is the **only active implementation milestone**.
 
-Complete only the active M9-C1 tasks below. Follow-up ideas belong in `suggestions`. The user explicitly assigned the combined verifier/implementer role; the normal separate-verifier boundary is recorded as overridden for this pass.
+Complete only the tasks below. Follow-up ideas belong in `suggestions`. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed for M9-C1 implementation
+## Progress snapshot — refreshed after independent M8 acceptance
 
-These are carry-forward approximate planning estimates, not measured vendor-parity scores, line-count metrics or test-pass percentages. C3, C4 and C5 corrections are green; M8's View Models/Data Binding correction program is accepted. The estimates remain conservative because C5 closes correctness debt rather than adding a new parity family.
+These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. M8 is now counted because its full View Model/Data Binding capability has passed independent verification through the original implementation and correction passes C1–C5.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~94–96%** | Previously accepted M0–M7 foundation plus verified effective two-way runtime identity. |
-| Core editor / engine foundation | **~93–95%** | Previously accepted foundation; all 46 suites remain green and invalid visual branches are isolated safely. |
-| Modern Rive editor/runtime parity | **~53–57%** | M8 corrections are accepted; no extra feature-family credit is assigned for correctness repair. |
-| Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No new interchange capability accepted. |
-| Full Veyra superset target | **~46–49%** | Rive-class capability + Lottie/dotLottie interoperability + AI-native semantics, subject to quality/modularity gates. |
-| Remaining full-target work | **~51–54%** | M8 correctness debt is closed; the next feature milestone remains unimplemented. |
+| AI-native identity / semantics / control architecture | **~96–97%** | Stable typed identity, universal semantics, canonical UI/AI control, ownership/dependency evidence, Components and the M8 data graph are independently verified. Remaining architecture work is mainly integration of later feature families into the same contracts. |
+| Core editor / engine foundation | **~95–96%** | Workspace, authoring, Components, interaction loop, data runtime, incremental caches and authored/evaluated boundaries are verified. |
+| Modern Rive editor/runtime parity | **~59–63%** | Components and View Models/Data Binding are now accepted; major remaining families include layered state machines, Layout, richer listeners/events/accessibility, drawing/effects/text/media, advanced rigging, scripting/shaders and production runtimes. |
+| Lottie / dotLottie / Creator ecosystem parity | **~28–32%** | No new interchange family was completed by M8. |
+| Full Veyra superset target | **~50–54%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
+| Remaining full-target work | **~46–50%** | Dominated by feature breadth, production runtime/export tooling and later editor/runtime systems rather than another identity/control-plane retrofit. |
 
 ### Roadmap position
 
-- Implementation M0–M7: previously VERIFIED, with documented limitations preserved.
-- `plan.md` M3 / implementation M8: **VERIFIED**.
-- C3, C4 and C5 reproduced failures: **FIXES CONFIRMED**. Preserve these fixes; do not restart their implementations.
-- Current implementation work: **M9-C1 — VERIFIED**, below. Reproducible evidence is recorded in `docs/M9-C1-layered-machine-contract.md`.
-- M9 / layered state machines: **C1 VERIFIED; C2 rich state/transition semantics is active**.
+- Implementation M0–M7: **VERIFIED**.
+- `plan.md` M3 / implementation M8 — View Models & Data Binding: **VERIFIED**.
+- M8-C1 through M8-C5 corrections: **VERIFIED as part of M8**; preserve their regression suites and contracts.
+- Current implementation work: **M9 — State Machine parity + visual graph editor**, below.
+- `plan.md` M5+ remains queued until M9 is independently accepted.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
 
----
+## Independent M8 acceptance evidence
 
-# MILESTONE M9-C1 — Layered State Machine Foundation
+Production acceptance baseline:
 
-**Topic:** Canonical layers, deterministic legacy migration, simultaneous evaluation, stable AI control
-**Roadmap mapping:** first implementation slice of `plan.md` M4 — State Machine parity + visual graph editor
-**Implementation status:** VERIFIED
+- Final production SHA: `602a62ef929f1fc73c3c15dcedc65abc9b9ea19b`.
+- Production Git tree: `b3fde9fbbaf310f56fc6dfee8304a8f6b157e671`.
+- Standard repository `Tests` #180, run `34797590046`, job `103833588196`: **SUCCESS on that exact production SHA**.
+- Exact-head standard log: **50/50 source syntax checks PASS; 46/46 repository suites PASS**.
+- Original M8 and C1/C2/C3/C4/C5 suites remain in normal discovery and all passed on the same production tree.
 
-## Goal
+Independent verifier replay:
 
-Replace the single-clock machine core with an ordered layer model without breaking legacy machine documents or compatibility reads. Every persisted layer must have a stable typed reference, every edit must use the canonical transaction/command surface, all enabled layers must advance from the same input snapshot, and later layers must have deterministic property priority.
+- Evidence branch: `verify/m8-c5-602a62e` based on the exact production SHA.
+- Independent Actions run `34798416681`, job `103835957436`: **SUCCESS**.
+- An unchanged-production diff/tree guard passed before tests.
+- The verifier independently reran **50/50 syntax checks and 46/46 suites**.
+- Additional independent M8-C5 composition probes: **6/6 PASS**:
+  1. direct derived-reference reverse write targets the current terminal without advancing the live runtime;
+  2. converter-derived references can retarget repeatedly and reverse writes follow the latest terminal;
+  3. an unresolved effective reverse write fails before touching the previous child;
+  4. an invalid ordinary-property binding suppresses its downstream consumer while independent outputs survive;
+  5. a trigger feeding an invalid visual branch remains queued until that branch becomes publishable, then consumes exactly once;
+  6. ordinary visual value constraints isolate/recover from invalid scale output.
+- Scope: executed Node runtime/control-plane/public-host verification. This does **not** claim real-browser visual/usability acceptance for future visual editor work.
 
-## Tasks
-
-- [x] Add a versioned `machineLayer` record with stable id, display name, enabled flag, weight, initial state, states and transitions. Migrate legacy root graphs deterministically to one base layer.
-- [x] Preserve legacy `machine.initial/states/transitions` as a first-layer compatibility view while making `layers` authoritative for new code and serialized round trips.
-- [x] Validate globally unique layer/state/transition/condition identities and same-layer transition endpoints. Reject duplicate or cross-layer graph references loudly.
-- [x] Add transactional add/update/remove/reorder layer commands. Existing state/transition commands default to the base layer and accept an explicit stable layer id.
-- [x] Advance all enabled layers simultaneously from one input snapshot and consume triggers only after every layer samples them.
-- [x] Evaluate layers in authored order. Later enabled layers override earlier properties; layer weight blends against accumulated output and authored values through the canonical animation evaluator.
-- [x] Expose per-layer clocks, active state/transition, evaluated timelines and stable refs through runtime results, scene summary, manifest capabilities, resolver, semantics and dependency graph.
-- [x] Preserve component runtimes, listener dispatch, undo/redo, project duplication, timeline deletion guards and legacy public machine reads.
-- [x] Add permanent migration/model/command/runtime/AI-surface regressions, then run all standard syntax and test gates on the exact final clean commit.
-
-## Explicitly deferred to the next M9 slices
-
-Entry/Exit/Any nodes, blend states, state actions/speed/editor metadata, data-bound transition sources, transition interpolation/exit controls/actions/randomization, and the visual graph editor remain required by the full M9 roadmap but are not part of C1.
-
-## Acceptance
-
-M9-C1 is accepted only when a legacy single-layer file round-trips deterministically, a multi-layer machine advances all layers using the same trigger, disabled layers remain frozen, ordered priority and partial layer weights evaluate correctly, every layer is addressable without names, all authoring operations are undoable, and all existing suites remain green.
+M8 acceptance preserves the documented contracts from C1–C5: canonical capability validation, nominal typed data definitions, scope-safe nested Components, collision-free runtime identity, retained incremental indexes, non-consuming observations, scoped typed lists, resolved nested endpoint identity, effective controller ownership, current-terminal two-way writes, safe ordinary visual output validation, event conservation, and authored/runtime separation.
 
 ---
 
-# MILESTONE M9-C2 — Rich State and Transition Semantics
+# MILESTONE M9 — Layered State Machine Parity + Visual Graph Editor
 
-**Topic:** Rive-style pseudo states, blend states, speed, exit/entry controls, actions and data-aware conditions
-**Roadmap mapping:** remaining runtime semantics in `plan.md` M4
-**Implementation status:** IN PROGRESS
+**Roadmap mapping:** `plan.md` M4 — State Machine parity + visual graph editor  
+**Status:** `IN PROGRESS`
 
 ## Goal
 
-Make the layered runtime expressive enough for real interactive animation graphs while retaining deterministic IDs, authored-vs-runtime separation, legacy machine inputs, and AI-readable diagnostics.
+Upgrade Veyra's current single-flat-machine animation-state runtime into a Rive-class layered state-machine system that is fully integrated with M8 View Models/Data Binding, Components, ownership/dependency reporting and the canonical human/AI command plane.
 
-## Tasks
+The human visual graph and the AI/control-plane representation must be two views of the **same persistent graph and runtime**, not separate implementations. Moving a graph node or renaming any state/layer must never change behavioral identity.
 
-- [ ] Add entry, exit and any pseudo-state behavior plus explicit single-animation state speed (including reverse playback), captions and editor metadata.
-- [ ] Add 1D, direct and additive blend states with validated source references and deterministic weight evaluation.
-- [ ] Add state start/end actions and transition start/end actions as typed, ordered records with runtime event evidence.
-- [ ] Add enabled transitions, exit-time gates, pause-source and allow-exit-during-transition controls, and authored interpolation.
-- [ ] Add fixed and data-bound condition sources using canonical View Model property references, compatible events and built-in artboard values.
-- [ ] Add weighted randomized exits with seeded deterministic selection and replay-safe runtime evidence.
-- [ ] Surface all new fields through commands, manifest, summary, resolver, dependency graph, browser API and component runtime mappings.
-- [ ] Add permanent adversarial tests and refresh the GitHub milestone with exact gate output before advancing to the visual graph editor slice.
+## Non-negotiable rules
 
-## Independent M8-C4 evidence
-
-- Production baseline: `b57b390b245b363f9024349d9b116996eb045e7a`.
-- Production Git tree: `0987af4e7c36aa367af320e862ea4ed8b85218dc`. The downloaded archive was independently indexed locally and reproduced this entire Git tree exactly.
-- Standard Tests #178, run `34426474579`: SUCCESS on the exact production baseline.
-- Independent local Node 22.16.0 and GitHub Node 22.23.2 reruns: **49/49 syntax checks and 45/45 existing suites PASS**. C4 reproduced/graph/types/context: **9 / 17 / 13 / 15 PASS**. Original M8/C1/C2 and C3 remain green.
-- Independent review commit `89e086caae68bc85b8e0e9d3d138af4cfc2b41c5`; Actions run `34428444954`, job `102718580904`.
-- The unchanged-production guard and baseline gates passed. Additional probes: **5 positive controls PASS, 5 regression assertions FAIL across two blocker families, 0 setup errors, 0 execution errors**. Local and GitHub observations agree.
-- Positive controls include resolved aliases, nominal enum rejection, scoped animation/context, callable correct terminal ownership recommendations, and bounded Property Group error isolation/recovery.
-- No production source or existing tests were changed by this review. The temporary verifier workflow was removed from its evidence branch and never entered main.
-- Scope: executed Node runtime/control-plane/public-host testing, **not real-browser visual/usability acceptance**.
-
-[Executed M8-C4 review](https://github.com/Logan17de/Rive_Rider/blob/c810199bdd6f049292b5c1a384a4ca4be7ec5a49/verification/M8-C4-review.md)
-
-[Reproduction source](https://github.com/Logan17de/Rive_Rider/blob/89e086caae68bc85b8e0e9d3d138af4cfc2b41c5/verification/m8-c4-review.mjs)
-
-The review branch is evidence, not a second implementation milestone. Convert demonstrated behavior into permanent regressions. Do not cherry-pick the temporary verifier workflow.
+1. **One machine model/evaluator.** Do not build a second visual-editor state machine or AI-only runtime.
+2. **Stable identity everywhere.** Layers, states, transitions, conditions and persistent actions use immutable typed refs. Human labels and graph positions are advisory/editor metadata.
+3. **M8 is the preferred data path.** View Model properties, events and built-in artboard values can drive transitions/blends. Legacy `number`/`bool`/`trigger` machine inputs remain compatible but are not the preferred new authoring path.
+4. **Layered ownership is explicit.** AI must be able to explain which layer/state/track currently owns a visible value and why a higher-priority layer won.
+5. **Runtime state stays ephemeral and scope-safe.** Component instance paths, clocks, transition progress, triggers and random choices never leak into authored serialization.
+6. **Deterministic/fail-closed behavior.** Ambiguous controller ownership, invalid transition graphs, bad data sources and cycles fail with bounded diagnostics instead of hanging or silently choosing an undocumented winner.
+7. **Preserve `QUALITY.md`.** Projects with no state machines pay effectively zero machine work; inactive/settled layers sleep; no per-frame full-project scans or DOM dependency inside the evaluator.
+8. **Migration first.** Existing flat Veyra machines load and behave compatibly after automatic migration into the new layered schema.
 
 ---
 
-# MILESTONE M8-C5 — Effective Reverse Writes & Safe Visual Outputs
+## Task 1 — Versioned layered machine schema + migration
 
-**Topic:** Two-Way Binding Identity, Actual Value Validation, Error Isolation & Event Safety
-**Roadmap mapping:** correction pass for `plan.md` M3 — View Models & Data Binding
-**M8 verdict:** `VERIFIED`
-**Implementation status:** `VERIFIED`
+Add a persistent layered machine contract with stable typed identity.
 
-## Goal
+Required persistent entities/capabilities:
 
-Close the two executed integration failures below without removing supported nested/two-way bindings, banning valid IDs/types, changing the product target, or starting M9. Keep C4's successful resolved graph, nominal type contracts and evaluated observation context.
+- `stateMachine`;
+- `machineLayer`;
+- `machineState`;
+- `machineTransition`;
+- `machineCondition`;
+- persistent state/transition action records where authored;
+- graph/editor metadata stored separately from behavioral state where practical.
 
-## Instructions for implementing agents
+Requirements:
 
-1. Read this milestone, the executed review, `QUALITY.md`, `docs/M8-C3-runtime-contract.md`, `docs/M8-C4-runtime-contract.md`, and relevant tests before editing.
-2. Preserve one evaluator, one effective graph, canonical authored validation/provenance/history, structural opaque identities and scoped ephemeral runtime values.
-3. Commit a failing regression for each demonstrated behavior before the production fix. Keep fixture/setup failures separate from product assertions. Do not hard-code IDs, prior render order or sample values.
-4. Preserve all 45 existing suites and the five new positive controls. Do not weaken assertions, bypass standard CI, or replace real public-port execution with metadata-only tests.
-5. Resolving the destination of a write is not event advancement. Do not consume events, move clocks, emit extra notifications or author data just to find the effective terminal.
-6. Use canonical property value constraints rather than a parallel set of magic bounds. Nominal type compatibility does not replace actual value validation.
-7. Keep performance counters truthful. Preserve direct scalar-write and settled-frame behavior; report any additional effective-resolution or validation cost explicitly.
-8. Reach `AWAITING VERIFICATION` with reproducible evidence before acceptance. For C5, the user then explicitly assigned the same agent as verifier; no M9 work or unsupported progress increase is allowed.
+- [ ] ordered layers with stable IDs, advisory names, enabled/disabled state and deterministic priority/order;
+- [ ] migrate every existing flat machine to one default layer without changing observable behavior;
+- [ ] old files round-trip deterministically through migration and save/load;
+- [ ] layer/state/transition/action IDs survive rename, reorder, graph movement and ordinary edits;
+- [ ] deleting/reordering layers cleans dependencies safely and fails closed when blocked;
+- [ ] references, resolver, semantics, manifest, summary and dependency graph recognize `machineLayer` and every persistent sub-object;
+- [ ] no migration of runtime clocks/current-state/transition progress into authored data.
 
-## Blocker A — Public two-way writes follow the wrong nested reference
+## Task 2 — Complete state families
 
-```text
-root.nested initially references child
-root.selector references child2
-reference_writer: root.selector -> root.nested
- two_way: root.nested.value <-> box.opacity
-```
+Support the roadmap state families in the canonical model/runtime/UI:
 
-Forward evaluation and ownership correctly resolve child2, displaying 0.9. But `host.setTwoWayBindingTarget('two_way', 0.47)` returns true, changes child.value to 0.47, leaves child2.value at 0.9 and leaves the visible result at 0.9.
+- [x] Entry pseudo-state;
+- [x] Exit pseudo-state;
+- [x] Any state;
+- [x] Single Animation state;
+- [ ] 1D Blend state;
+- [ ] Additive/Direct Blend state;
+- [x] state speed, including reverse playback;
+- [x] state captions and graph/editor metadata;
+- [ ] state start actions and state end actions.
 
-The same issue occurs inside real `[A, inner]` / `[B, inner]` Component paths. After A's selector is changed to child3, an immediate two-way edit to 0.63 changes A's old child; A remains 0.7. B remains correctly isolated at 0.9. This is wrong terminal resolution inside a scope, not cross-scope leakage or authored mutation.
+Blend-state requirements:
 
-### Task 1 — Reverse writes use the authoritative effective endpoint
+- stable child/input records where persistent;
+- deterministic thresholds/weights/order;
+- control from compatible View Model/data sources or legacy inputs;
+- ownership evidence identifies all contributing timelines and effective weights;
+- zero-weight/inactive branches do not do unnecessary evaluation work.
 
-- [x] Make runtime `setTwoWayTarget` and public `setTwoWayBindingTarget` resolve the same current effective source as forward evaluation and ownership.
-- [x] Include binding-derived reference values, current scope, current authored generation and pending reference retargeting. Retain the authored root/path for future retargets.
-- [x] Do not rely solely on raw defaults, a previous rendered frame, a stale cached terminal, or a caller-assembled virtual-value map. Reuse the canonical graph/evaluator meaning instead of a second resolver.
-- [x] Validate the effective writable endpoint before changing state. Missing/null/cyclic/invalid paths must not partially modify an unrelated child.
-- [x] Preserve the currently correct terminal ownership recommendation and direct runtime data-write behavior.
+### M9 blend-state implementation evidence — partial Task 2 advance
 
-### Task 2 — Prove write/read agreement under retargeting and event pressure
+- `blend1d` steady-state evaluation is implemented with stable `machineBlendChild` identity, strictly increasing thresholds, numeric machine-input control, deterministic neighboring-child interpolation, boundary clamping and zero-unused-child work.
+- `directBlend` steady-state evaluation is implemented with stable child identity, numeric per-child input weights, deterministic normalized ownership weights and zero-weight child sleeping.
+- Ownership evidence exposes every active child timeline, its stable blend-child ref and effective normalized weight.
+- Invalid thresholds, missing timelines, duplicate child IDs and non-number legacy inputs fail closed during canonical normalization.
+- Blend-state transitions now use the canonical transition compositor: animation↔blend and blend↔blend timed transitions compose outgoing/incoming child contributions with deterministic normalized effective weights. Additive Blend, M8/View Model blend sources and canonical blend-child CRUD commands remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
+- Blend steady-state worker Actions run `34810521222`, job `103870774356`: syntax PASS, **49/49 suites PASS**, diff hygiene PASS. Transition-compositor worker run `34812631038`, job `103876831686`: **50/50 syntax checks + 50/50 suites PASS**; exact-main standard Tests #186 (`34812754122`, job `103877176194`) also PASS on `00f85fff5a92284efb343bb316bf531469ca182c`.
 
-- [x] Test cold and warm graphs, both binding-ID orders, direct and converter-derived reference writers, and at least two successive reference changes.
-- [x] Test an edit immediately after reference change, before any read/render/advance, as well as after observation. The caller must not need to render first.
-- [x] Exercise real repeated nested Components and distinct scoped values; only the effective child in the requested scope may change.
-- [x] Snapshot old/effective/sibling child values, authored serialization/revision/history, notifications and runtime work counters; retained C4 observation tests preserve data/machine queues and clocks.
-- [x] Successful write gives the correct next evaluated value and only the intended mutation notification. Failed resolution leaves all values/queues/history unchanged.
+## Task 3 — Ordered simultaneous layer evaluation
 
-## Blocker B — Ordinary visual target values can abort an entire frame
+Implement concurrent ordered layer evaluation with an explicit property-composition policy.
 
-`#validateRuntimeEndpoint` validates data/Property Group values but returns early for ordinary `property` endpoints. A legal unconstrained numeric source can therefore send 2 to opacity. The graph publishes that override and consumes events, then `evaluateDocument` throws during document normalization.
+- [x] every enabled layer has independent current state, clock and transition state;
+- [x] layers evaluate simultaneously in deterministic order;
+- [x] property priority/composition is machine-readable and tested;
+- [x] disabled layers perform no active runtime work and contribute no ownership;
+- [x] transitions/blends from multiple layers compose without mutating authored source values;
+- [ ] active owner stack reports authored value → timelines/blends → state/layer winner with evidence;
+- [ ] Component instances receive isolated per-instance machine runtime paths, including repeated/nested Components;
+- [ ] reset/prune/document replacement cleans only the relevant runtime scopes.
 
-Executed failures:
+## M9 implementation evidence — layered runtime slice
 
-- Numeric 2 -> opacity: raw `nodes[0].opacity must be between 0 and 1.`; no scene returned.
-- An independent trigger in that same frame is consumed, but the event-bearing scene is never returned.
-- A conditional color branch switches from valid `#112233` to `not-a-color`: raw paint.stroke error; independent scene output is lost.
-- A numeric source with current default 2 -> opacity: preview returns `ok:false`, dispatch returns `ok:true` and mutates authored state, then canonical evaluation throws.
+- Production candidate tree implements concurrent ordered layer runtimes over the canonical `machineLayer` schema.
+- Compatibility getters (`stateId`, `stateTime`, `transition`) remain adapters over the stable `compatibilityLayer`; reordering layers cannot silently retarget legacy callers.
+- Entry/Exit/Any pseudo states, animation state speed (including reverse), state captions/graph metadata, deterministic later-layer property priority and layered ownership evidence are covered by `tests/veyra-m9-layered-runtime.test.mjs`.
+- Disabled layers are skipped and contribute no ownership; runtime work counters distinguish active/inactive layer work and reset with runtime reset so deterministic scrub/replay remains comparable.
+- Worker Actions run `34810074334`, job `103869484723`: syntax checks PASS, **48/48 suites PASS**, diff hygiene PASS.
+- Capability honesty: Blend state families remain **not exposed** until their evaluator/authoring contracts are implemented. M9 remains IN PROGRESS.
 
-The bounded Property Group positive control already diagnoses and suppresses bad values, preserves independent output, and recovers after a valid replacement. Ordinary visual destinations need the same safety boundary through their own canonical value contracts.
+## Task 4 — Rive-class transition contract
 
-### Task 3 — Validate actual ordinary-property outputs before publication
+Transitions must support, where meaningful for the source/target state types:
 
-- [x] Reuse canonical implemented property value/normalization rules for ordinary visual targets, including applicable numeric ranges, finiteness, discrete/geometry constraints and paint/color validity. Do not just check broad `number`/`color` labels.
-- [x] Validate before inserting invalid output into virtual downstream values, publishing scene overrides or irreversibly consuming events for that frame.
-- [x] Preserve legal differently ranged numeric source/target bindings. An invalid value needs rejection/diagnosis; a broad numeric source must not be banned merely because it can later produce out-of-range values.
-- [x] Preserve documented valid nullable/coercion behavior explicitly. A blanket early return is not a nullable-output policy.
-- [x] Do not normalize/clone the whole project once per binding as a substitute for a shared bounded value contract. Record real validation work.
+- [ ] View Model property conditions;
+- [ ] compatible events/triggers;
+- [ ] built-in artboard/runtime values supported by the roadmap;
+- [x] legacy machine inputs;
+- [x] comparison against fixed values;
+- [ ] comparison against compatible data-bound values;
+- [x] transition duration;
+- [x] exit time;
+- [x] pause source;
+- [ ] allow exit during transition;
+- [x] interpolation/easing;
+- [ ] transition start actions;
+- [ ] transition end actions;
+- [x] enabled/disabled transition;
+- [x] Any-state routing;
+- [x] Entry/Exit routing;
+- [ ] Randomize Exit with weighted outgoing paths.
 
-### Task 4 — Isolate invalid branches, conserve events and recover
+Randomized transitions need an explicit deterministic runtime RNG/seed contract for tests/replays. Never use a hidden global random source that makes verification nondeterministic.
 
-- [x] Return stable binding/effective-target/value/type evidence for runtime-invalid outputs. Suppress the failed binding and dependent consumers while keeping independent scene outputs available.
-- [x] The numeric fixture still returns the independent opacity 0.25 and triggered visibility true, instead of throwing after consuming the trigger.
-- [x] Unrecoverable publication failure does not silently drain event queues for a scene never returned. Live observation remains non-consuming.
-- [x] Valid replacement recovers without discarding unrelated scoped runtime values; the following unchanged frame returns to cached behavior.
-- [x] Exercise full `evaluateDocument` and public host read/scene paths in the permanent C5 suite while retaining the existing public advance and repeated Component contracts.
+### M9 transition implementation evidence — compositor + timing slice
 
-### Task 5 — Preview, dispatch and converter validation agree
+- Production `00f85fff5a92284efb343bb316bf531469ca182c` lifts the previous fail-closed blend-transition restriction. The same canonical compositor handles animation→blend, blend→animation and blend→blend timed transitions by converting absolute outgoing/incoming contributions into deterministic sequential timeline weights.
+- Transition interpolation now persists `enabled`, `easing` and bounded cubic-bezier parameters; runtime/debug evidence exposes both raw and eased progress. Structural machine invalidation includes the transition behavior rather than relying on stale runtime state.
+- Permanent `tests/veyra-m9-transition-compositor.test.mjs` covers animation→1D Blend, 1D Blend→Direct Blend, eased composition and invalid interpolation authoring. Worker run `34812631038`, job `103876831686`: **50/50 syntax + 50/50 suites PASS**. Standard Tests #186 (`34812754122`, job `103877176194`) is SUCCESS on that exact production SHA.
+- Production `fb0bfb1c90452a477833f36757ee3e3b3fe76dab` adds canonical Exit Time with `{unit: seconds|percent, value}`, speed-aware percent gating, and Pause Source behavior that freezes the exact outgoing source time captured when a transition starts while the incoming state continues.
+- Exit Time rejects invalid units/ranges and meaningless pseudo-state source usage. The legacy `after` gate remains a separate condition; the two contracts are not silently conflated.
+- Permanent `tests/veyra-m9-transition-exit-pause.test.mjs` covers seconds, percent, speed-adjusted percentage, paused-vs-live source clocks and invalid authored values. Worker run `34812931703`, job `103877684445`: syntax/full-suite/diff gates PASS. Standard exact-main Tests #187 is the required promotion gate for this SHA.
+- Compatibility boundary: `allow exit during transition` remains deliberately open because interruption needs a snapshot-safe source/target composition contract; start/end actions, View Model/data-bound conditions, deterministic Randomize Exit and Additive Blend also remain open.
 
-- [x] Prevent accepted authored bindings that immediately crash canonical evaluation through one documented bounded-diagnostic acceptance policy.
-- [x] Keep preview/dispatch consistent and preserve machine-readable runtime evidence plus undo/provenance for intentional authoring.
-- [x] Check statically demonstrable invalid converter definitions through existing C4 type validation and runtime-dependent converter values through the shared destination contract.
-- [x] Preserve the genuinely runtime-dependent invalid-color fixture and its recovery boundary.
+## Task 5 — Unified conditions, actions and data sources
 
-### Task 6 — Permanent regressions, lightweight gates and clean handoff
+Create one bounded machine-source/action registry rather than hard-coded editor-only cases.
 
-- [x] Convert all five executed failures and retained positive controls into permanent normal-discovery tests; add the combinations in Tasks 1–5.
-- [x] Rerun all 45 existing suites plus the new C5 suite, including the 54 C4 checks and all C3/C2/C1/M8/M0–M7 gates. Do not change earlier expectations merely to hide a regression.
-- [x] Preserve C3/C4 retained-index, scoped dependency, zero-binding and settled-work tests. Distinguish validation/resolution/output application work; no claim of zero total work from cache hits.
-- [x] Run `npm run check`, `npm test`, and unchanged standard `.github/workflows/test.yml` command sequence on the exact final clean local main SHA.
-- [x] Remove temporary implementation/transport workflows and scripts from promoted code. Preserve durable test/report evidence without moving the tested SHA unnecessarily.
-- [x] Report actual before/after values, event/history boundaries, performance impact, compatibility decisions and remaining limitations. Real-browser desktop and narrow-viewport smoke evidence is reported separately from independent acceptance.
+Data-source contract:
 
-## Acceptance and handoff
+- View Model/data endpoint;
+- event/trigger endpoint;
+- built-in artboard/runtime value where supported;
+- legacy machine input compatibility.
 
-M8 is eligible for independent acceptance only when effective two-way writes agree with evaluated identity, invalid values cannot crash otherwise valid scene evaluation or silently consume undelivered events, preview/dispatch/evaluation have coherent failure behavior, all previous corrections remain green and exact-final-head standard Tests succeeds.
+Action contract:
 
-No new feature family, runtime rewrite, broad UI redesign, scripting, Layout, Lottie/dotLottie, or M9 work belongs in this pass. Preserve the already-documented source-local scoped observation semantics and full-host observation cost; do not claim a path-only optimization here.
+- stable authored identity when persistent;
+- execution phase (`state-start`, `state-end`, `transition-start`, `transition-end`);
+- JSON-safe parameters and typed refs;
+- runtime-only vs authored mutation clearly classified;
+- canonical transport for View Model updates/events/timeline/runtime actions;
+- no direct document mutation from machine runtime actions;
+- exactly-once semantics per actual lifecycle event.
+
+Unsupported future action types must fail with capabilities/diagnostics rather than being silently ignored.
+
+## Task 6 — Runtime correctness and lifecycle
+
+Rebuild `MachineRuntime` around layer runtimes while retaining compatibility adapters for existing callers.
+
+Required runtime behavior:
+
+- [x] deterministic fixed-step/elapsed-time stepping;
+- [x] current states for every layer;
+- [x] transition progress and interpolation;
+- [x] state speed/reverse playback;
+- [x] pause/exit-time behavior;
+- [ ] exact trigger/event consumption policy;
+- [ ] start/end actions fire exactly once;
+- [ ] Randomize Exit chooses once per decision and is replayable under a seed;
+- [ ] structural authored edits reconcile safely without leaving dangling state IDs;
+- [x] observation/fork/read paths do not advance the live machine or consume live events;
+- [ ] runtime errors are bounded per layer so an invalid independent layer cannot corrupt another layer's valid output;
+- [ ] settled/inactive layers stop continuous evaluation where possible.
+
+## Task 7 — Visual graph editor
+
+Add a real human authoring surface backed by the canonical machine commands.
+
+Required UI:
+
+- [ ] layer list with create/remove/rename/reorder/enable-disable;
+- [ ] graph canvas for states and transitions;
+- [ ] create/select/delete/reconnect states/transitions;
+- [ ] drag states with deterministic graph positions and snapping;
+- [ ] Entry / Exit / Any visualization;
+- [ ] distinct visual representation for animation and blend states;
+- [ ] conditions inspector;
+- [ ] state/transition actions inspector;
+- [ ] transition timing/interpolation inspector;
+- [ ] blend-state child/threshold editor;
+- [ ] current runtime state and active transition highlighting;
+- [ ] layer runtime/debug view showing active state, time, weights and winning property contributions;
+- [ ] graph pan/zoom/selection behavior that does not mutate behavioral data accidentally.
+
+Graph positions, captions and layout metadata are editor-facing properties; changing them must not alter runtime behavior.
+
+## Task 8 — Canonical UI/AI command parity
+
+Every persistent graph operation must exist once in the canonical command registry and be used by both human UI and AI/browser adapters.
+
+At minimum provide commands for:
+
+- layer CRUD/reorder/enable;
+- state CRUD/update/move graph metadata;
+- blend-state child CRUD/reorder/update;
+- transition CRUD/reconnect/enable;
+- condition CRUD/reorder/update;
+- state/transition action CRUD/reorder/update;
+- initial/entry behavior where authored;
+- relevant persistent machine metadata.
+
+Runtime ports remain separate for stepping, reset, data/event input and debug observation.
+
+Every new persistent command must support validation, preview, transactional apply, provenance, undo/redo and verification/read-back.
+
+## Task 9 — Manifest, semantics, ownership and name independence
+
+Extend the AI-native surfaces so an agent can understand the entire machine without relying on names.
+
+- [ ] manifest enumerates layers, state types, transitions, conditions, actions, data sources, capabilities and current runtime ownership when requested;
+- [ ] semantic registry supports machine layers and all new persistent sub-objects;
+- [ ] dependency graph connects View Models/events/timelines/components to machine graph consumers;
+- [ ] `getOwnership()` identifies active layer/state/blend/track contributions and the effective place to edit;
+- [ ] resolver treats human machine/layer/state names only as advisory/explicit-human lookup hints;
+- [ ] random/duplicate/empty/misleading names do not change graph behavior or AI resolution;
+- [ ] moving nodes in the visual graph does not change machine identity or runtime behavior.
+
+AI gate from `plan.md`: the entire graph is addressable by IDs and semantic aliases; moving states in the visual graph or renaming them never changes behavioral identity.
+
+## Task 10 — Lightweight/runtime work accounting
+
+Preserve the permanent quality contract while adding the larger machine system.
+
+Required measured counters/gates:
+
+- machine catalog/index builds;
+- layer evaluations;
+- active/inactive layer counts;
+- state evaluations;
+- transition-condition evaluations;
+- blend-child/timeline evaluations;
+- actions emitted;
+- ownership/property-composition applications;
+- cache/sleep hits where meaningful.
+
+Performance fixtures:
+
+- no-machine project: O(1) machine bypass;
+- machine with multiple disabled/settled layers: no repeated timeline/condition work for inactive layers;
+- one changed View Model property wakes only dependent transition/blend work;
+- repeated Component instances keep runtime state isolated without rebuilding authored graph catalogs per instance/frame;
+- observation/read paths report their real copy/traversal work and do not pretend to be free.
+
+Do not introduce a new heavy dependency or editor framework solely for the graph UI.
+
+## Task 11 — Adversarial verification suite
+
+Add permanent tests covering at minimum:
+
+1. legacy flat-machine migration preserves behavior;
+2. save/load/undo/redo for layers, blend states, conditions and actions;
+3. two+ simultaneous layers controlling overlapping and non-overlapping properties;
+4. layer reorder/disable changes ownership deterministically;
+5. Entry/Exit/Any behavior;
+6. 1D blend thresholds and weights;
+7. Additive/Direct Blend composition;
+8. forward and reverse state speed;
+9. duration/exit-time/pause/allow-exit/interpolation behavior;
+10. View Model boolean/number/enum/trigger transition sources;
+11. comparison against data-bound values;
+12. exact-once state/transition start/end actions;
+13. Randomize Exit weighted deterministic replay;
+14. runtime graph edits/reconciliation during playback;
+15. nested/repeated Component instance isolation;
+16. live read/ownership does not advance clocks or consume triggers;
+17. conflict/ownership explanation across layered timelines + M8 bindings;
+18. random/duplicate/empty/misleading human names;
+19. rename/reorder/graph-position changes preserve stable identity;
+20. command/UI/helper ↔ canonical catalog parity;
+21. preview/failure/read/query/ownership non-mutation;
+22. no-machine and settled-layer performance counters;
+23. existing M0–M8 regression suites stay green;
+24. headless/browser DOM tests exercise actual visual-graph interactions rather than source-regex-only checks.
+
+## Explicit non-goals
+
+Do not expand M9 into the next roadmap families:
+
+- Layout/scrolling/responsive layout;
+- broad listener/event/accessibility parity beyond machine actions/data sources required here;
+- text/media/audio authoring;
+- drawing/effect families unrelated to machine output;
+- scripts/WGSL;
+- Lottie/dotLottie interchange;
+- Rust/WASM production-runtime rewrite;
+- collaboration/cloud history;
+- broad visual redesign outside the State Machine graph/editor surface.
+
+## M9 acceptance
+
+M9 may be independently VERIFIED only when:
+
+- the layered schema and legacy migration are deterministic;
+- all required state/transition families above are executable through one runtime;
+- View Models/Data Binding drive machine logic without a second data model;
+- ordered simultaneous layers have deterministic ownership/composition;
+- Component runtime isolation is preserved;
+- state/transition actions are exactly-once and use canonical transports;
+- the visual graph editor creates/edits the same persistent graph used by AI/runtime;
+- manifest/semantics/dependencies/ownership cover every new persistent entity;
+- rename/graph-position invariance passes;
+- lightweight/sleep/no-machine gates pass with honest counters;
+- existing M0–M8 suites remain green;
+- `npm run check` and `npm test` pass;
+- unchanged standard `.github/workflows/test.yml` succeeds on the **exact final clean `main` SHA**;
+- implementation handoff records that real-browser visual/usability acceptance was performed if available, or explicitly states the remaining browser-only acceptance boundary rather than claiming it.
+
+## Handoff
 
 ```text
 Handoff
-- Status: VERIFIED (combined verifier/implementer role explicitly assigned by user)
-- Implementation commits: 937cbda regression-only red; 1b209a1 production fix; final documentation/verification commit follows
-- Final clean main SHA / exact standard Tests run: resolve with git rev-parse HEAD after this handoff commit; npm ci, npm run check and npm test reproduced unchanged Tests workflow locally under Node 22
-- Five verifier failures -> permanent test mapping: tests/veyra-m8-c5-runtime-safety.test.mjs; original independent probe rerun 10/10 green
-- Effective two-way terminal / pending retarget / Component-scope proof: 0.9 -> requested 0.47 on child2; immediate scoped A retarget writes child3=0.63 while B remains 0.9
-- Event/notification/history non-mutation during resolution proof: private observation leaves live counters/history unchanged; success emits one binding-provenance notification; failed null resolution changes no candidate child
-- Canonical ordinary-property value validation proof: shared propertyValueContracts.js powers model normalization, direct writes and binding publication; opacity, color, geometry/discrete and recovery assertions pass
-- Invalid-branch isolation / event delivery / valid replacement proof: invalid opacity/color branches return a scene; independent opacity=0.25 and event visibility=true survive; replacement 0.6 recovers and next frame sleeps
-- Preview/dispatch/converter failure consistency proof: bounded-diagnostic acceptance stays safe; invalid default/color never reaches raw scene normalization; diagnostics include authored/effective endpoints, types and failure phase
-- All prior suites / syntax checks: 46/46 suites and 50/50 source checks pass; original 10-probe review passes
-- Actual validation/resolution/output work and size impact: address-local validation; one private observation per reverse edit; +11,584 raw normalized-LF bytes / +1,763 Brotli proxy bytes
-- Cleanup / compatibility / browser-acceptance limitations: no temporary workflow/script promoted; no remote Actions run claimed; desktop and 390x844 smoke pass, but narrow UI remains desktop-first and no pixel-perfect acceptance is claimed
+- Status: AWAITING VERIFICATION
+- Implementation commits:
+- Final clean main SHA / exact standard Tests run:
+- Legacy migration proof:
+- Layer/state/blend model + stable identity proof:
+- Transition/data-source/random-exit proof:
+- Action lifecycle exact-once proof:
+- Multi-layer ownership/composition proof:
+- Component-scope isolation proof:
+- Visual graph UI + canonical command parity proof:
+- Manifest/semantics/dependency/ownership/name-invariance proof:
+- Lightweight counters and performance fixtures:
+- Save/load/undo/redo/non-mutation proof:
+- Existing M0–M8 regression proof:
+- Browser/headless acceptance boundary:
+- Compatibility/migration/size limitations:
 ```

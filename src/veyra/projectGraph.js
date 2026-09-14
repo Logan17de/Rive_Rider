@@ -283,12 +283,10 @@ export function entityArtboardId(document, reference) {
   }
   if (reference.kind.startsWith('machine')) {
     for (const machine of document.stateMachines || []) {
-      const layers = machine.layers || [];
       if (machine.inputs?.some((item) => item.id === reference.id)
-        || layers.some((item) => item.id === reference.id)
-        || layers.some((layer) => layer.states?.some((item) => item.id === reference.id))
-        || layers.some((layer) => layer.transitions?.some((item) => item.id === reference.id))
-        || layers.some((layer) => layer.transitions?.some((item) => item.conditions?.some((condition) => condition.id === reference.id)))) return machine.artboard.id;
+        || machine.states?.some((item) => item.id === reference.id)
+        || machine.transitions?.some((item) => item.id === reference.id)
+        || machine.transitions?.some((item) => item.conditions?.some((condition) => condition.id === reference.id))) return machine.artboard.id;
     }
   }
   return null;
@@ -381,8 +379,7 @@ export function validateProjectGraph(document) {
     }
   }
   for (const machine of document.stateMachines) {
-    const states = machine.layers.flatMap((layer) => layer.states);
-    validateSameOwner(document, machine.artboard.id, states.map((state) => state.timeline), `State machine ${machine.id}`);
+    validateSameOwner(document, machine.artboard.id, machine.states.map((state) => state.timeline), `State machine ${machine.id}`);
   }
   for (const listener of document.listeners) {
     validateSameOwner(document, listener.artboard.id, [listener.target, listener.timeline, listener.machine].filter(Boolean), `Listener ${listener.id}`);
@@ -548,7 +545,7 @@ function idsForScopedEntity(document, artboardId) {
   for (const machine of document.stateMachines.filter((item) => item.artboard.id === artboardId)) {
     push('stateMachine', machine.id, 'machine');
     for (const input of machine.inputs) push('machineInput', input.id);
-    for (const layer of machine.layers) {
+    for (const layer of machine.layers || []) {
       push('machineLayer', layer.id);
       for (const state of layer.states) push('machineState', state.id);
       for (const transition of layer.transitions) {
@@ -621,7 +618,7 @@ export function duplicateArtboardIntoDocument(document, sourceArtboardId, option
       });
     } else if (kind === 'stateMachine') {
       source.inputs.forEach((item, index) => { copy.inputs[index].id = mapped('machineInput', item.id); });
-      source.layers.forEach((layer, layerIndex) => {
+      (source.layers || []).forEach((layer, layerIndex) => {
         copy.layers[layerIndex].id = mapped('machineLayer', layer.id);
         layer.states.forEach((item, stateIndex) => { copy.layers[layerIndex].states[stateIndex].id = mapped('machineState', item.id); });
         layer.transitions.forEach((item, transitionIndex) => {
@@ -629,6 +626,9 @@ export function duplicateArtboardIntoDocument(document, sourceArtboardId, option
           item.conditions.forEach((condition, conditionIndex) => { copy.layers[layerIndex].transitions[transitionIndex].conditions[conditionIndex].id = mapped('machineCondition', condition.id); });
         });
       });
+      const compatibilityId = copy.compatibilityLayer?.id;
+      const compatibility = copy.layers?.find((layer) => layer.id === compatibilityId) || copy.layers?.[0];
+      if (compatibility) { copy.initial = compatibility.initial; copy.states = compatibility.states; copy.transitions = compatibility.transitions; }
     } else if (kind === 'componentInstance') {
       source.overrides.forEach((item, index) => { copy.overrides[index].id = mapped('componentOverride', item.id); });
     } else if (kind === 'propertyGroup') {

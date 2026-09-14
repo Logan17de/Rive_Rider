@@ -26,6 +26,8 @@ export const VEYRA_REFERENCE_KINDS = Object.freeze([
   'machineInput',
   'machineTransition',
   'machineCondition',
+  'machineAction',
+  'machineBlendChild',
   'listener',
   'viewModel',
   'viewModelInstance',
@@ -70,6 +72,8 @@ export function createMachineStateRef(id) { return createReference('machineState
 export function createMachineInputRef(id) { return createReference('machineInput', id); }
 export function createMachineTransitionRef(id) { return createReference('machineTransition', id); }
 export function createMachineConditionRef(id) { return createReference('machineCondition', id); }
+export function createMachineActionRef(id) { return createReference('machineAction', id); }
+export function createMachineBlendChildRef(id) { return createReference('machineBlendChild', id); }
 export function createListenerRef(id) { return createReference('listener', id); }
 
 export function createPaintRef(ownerKindOrRef, ownerId = null) {

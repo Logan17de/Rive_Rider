@@ -3,14 +3,14 @@ Veyra milestone suggestions
 
 Current milestone
 -----------------
-- M0–M7 foundation, interaction, workspace, Components and vector-authoring UX are independently VERIFIED.
-- Active work is `milestone.md` M8 — View Models, Data Binding & Runtime Data Graph.
-- M8 must preserve `QUALITY.md`: projects without bindings should pay effectively zero binding runtime work, data evaluation stays DOM-free, and no second Component/state-machine/AI data model may appear.
+- M0–M8 foundation, interaction, workspace, Components, vector-authoring UX and View Models/Data Binding are independently VERIFIED.
+- Active work is `milestone.md` M9 — layered State Machine parity + visual graph editor (`plan.md` M4).
+- M9 must preserve `QUALITY.md`: one evaluator, one data graph, scope-safe Component runtime state, stable typed identity, explicit ownership and no-machine/inactive-layer sleep paths.
 
-Queued work after M8
+Queued work after M9
 --------------------
-1. Resume master `plan.md` with full layered state-machine parity + visual graph editor.
-2. Continue through Layout, listener/event/accessibility parity, drawing/paint/effects, text/media/assets, advanced rigging, animation-editor power, scripting/WGSL and production runtimes in plan order.
+1. Resume master `plan.md` with Layout / responsive layout / scrolling.
+2. Continue through listener/event/accessibility parity, drawing/paint/effects, text/media/assets, advanced rigging, animation-editor power, scripting/WGSL and production runtimes in plan order.
 3. Translate the checked-in `deep-research-report (6).md` into bounded Lottie JSON + dotLottie milestones: masks/mattes, Motion Tokens/slots, packages/themes, compatibility analysis, import/export fidelity and modular runtimes. Do not silently collapse these into generic Rive features.
 4. Introduce semantic shortcut/keymap profiles (Veyra / Rive / Lottie-AE / Custom) on top of M7's semantic editor-command layer.
 5. Add bundle-size/performance regression tooling once a compiled/distributable runtime target exists; enforce `QUALITY.md` budgets instead of deleting parity features.
@@ -21,6 +21,11 @@ Editor follow-ups
 -----------------
 - Broaden M7 grouping beyond the current safe same-artboard + same-parent + contiguous-sibling contract only when Veyra has explicit semantics for preserving animation/property coordinate domains and stacking relative to unselected siblings. The current behavior intentionally fails closed rather than changing appearance silently.
 - Add multi-selection transform operations (move/scale/rotate as a selection) as a later bounded editor-power milestone; M7 established selection/grouping identity but did not define shared transform semantics.
+
+Runtime optimization follow-ups
+-------------------------------
+- Investigate narrower immutable runtime snapshots and path-targeted canonical Component observation. M8 intentionally captures the real full-host evaluator context for correctness; retain nested/remap/mix/clock/event/ownership tests before optimizing traversal or copies. Report actual work/latency, not only live-cache counters.
+- Preserve M8's current-terminal reverse-write and safe-output tests if optimizing data-runtime fork/settle behavior.
 
 Longer-term lightweight/runtime principles
 ------------------------------------------
@@ -38,7 +43,3 @@ Guardrails
 - Stable IDs and human display names remain separate contracts.
 - UI convenience must not introduce a second mutation model or bypass the canonical control plane/Store validation boundary.
 - No interchange exporter may silently drop unsupported Veyra features.
-
-C4 handoff follow-up (not started)
-----------------------------------
-- After independent M8 acceptance, investigate narrower immutable runtime snapshots and path-targeted canonical Component observation. C4 intentionally captures the real full-host evaluator context for correctness; retain its nested/remap/mix/clock/event/ownership tests before optimizing away traversal or copies. Report actual work/latency, not only live-cache counters.

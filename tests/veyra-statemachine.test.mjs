@@ -97,7 +97,8 @@ function fixtureDocument() {
   const state = createMachineState({ name: 'Idle', timeline: 'timeline_x' });
   assert.deepStrictEqual(state.timeline, { kind: 'timeline', id: 'timeline_x' });
   assert.throws(() => createMachineState({ name: 'NoTimeline' }), /timeline reference/);
-  assert.throws(() => createMachineState({ name: 'Weird', type: 'entry' }), /Unsupported machine state type/);
+  assert.deepStrictEqual(createMachineState({ id: 'entry_state', name: 'Entry', type: 'entry' }).type, 'entry');
+  assert.throws(() => createMachineState({ name: 'Weird', type: 'unsupported' }), /Unsupported machine state type/);
 
   const transition = createMachineTransition({
     from: 's1',
