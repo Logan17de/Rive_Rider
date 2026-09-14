@@ -52,7 +52,7 @@ function machineSignature(machine) {
       layer.id,
       layer.initial ? referenceId(layer.initial, 'machineState') : null,
       (layer.states || []).map(state => [state.id, state.type]),
-      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, referenceId(condition.input, 'machineInput'), condition.op, condition.value])]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, referenceId(condition.input, 'machineInput'), condition.op, condition.value])]),
     ]),
   ]);
 }
@@ -105,6 +105,30 @@ function timelineEndSeconds(document, timelineId) {
   return Number(timeline.workEnd ?? timeline.duration) / Number(timeline.fps || 1);
 }
 
+function statePlaybackDurationSeconds(document, state) {
+  if (!state) return null;
+  const speed = Math.abs(stateSpeed(state));
+  if (!(speed > 0)) return null;
+  if (state.type === 'animation' && state.timeline) {
+    return timelineEndSeconds(document, referenceId(state.timeline, 'timeline')) / speed;
+  }
+  if (state.type === 'blend1d' || state.type === 'directBlend') {
+    const durations = (state.children || []).map(child => {
+      const childSpeed = Math.abs(speed * Number(child.speed ?? 1));
+      return childSpeed > 0 ? timelineEndSeconds(document, referenceId(child.timeline, 'timeline')) / childSpeed : 0;
+    });
+    return durations.length ? Math.max(...durations) : null;
+  }
+  return null;
+}
+
+function transitionExitTimeSatisfied(document, transition, state, stateTime) {
+  if (!transition?.exitTime) return true;
+  if (transition.exitTime.unit === 'seconds') return stateTime + 1e-9 >= transition.exitTime.value;
+  const duration = statePlaybackDurationSeconds(document, state);
+  return duration != null && stateTime + 1e-9 >= duration * transition.exitTime.value;
+}
+
 function timelineTimeForState(document, state, elapsed) {
   const speed = stateSpeed(state);
   if (!state?.timeline) return elapsed;
@@ -145,13 +169,15 @@ function transitionProgress(transition, stateTime) {
 
 function transitionView(runtime) {
   if (!runtime?.transition) return null;
-  const { transitionId, fromId, toId, duration, easing, easingParams } = runtime.transition;
+  const { transitionId, fromId, toId, duration, easing, easingParams, exitTime, pauseSource } = runtime.transition;
   const progress = transitionProgress(runtime.transition, runtime.stateTime);
   return {
     id: transitionId,
     fromId,
     toId,
     duration,
+    exitTime: cloneValue(exitTime || null),
+    pauseSource: Boolean(pauseSource),
     easing: easing || 'linear',
     ...(easingParams ? { easingParams: cloneValue(easingParams) } : {}),
     rawProgress: progress.raw,
@@ -314,12 +340,14 @@ export class MachineRuntime {
     const candidates = this.#transitionCandidates(layer, runtime);
     for (const transition of candidates) {
       this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
+      const sourceState = stateById(layer, runtime.stateId);
+      if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, runtime.stateTime)) continue;
       if (!transitionSatisfied(transition, runtime.stateTime, inputsById)) continue;
       const fromId = runtime.stateId;
       const toId = referenceId(transition.to, 'machineState');
       const target = stateById(layer, toId);
       if (transition.duration > 0 && target?.type !== 'entry' && target?.type !== 'any') {
-        runtime.transition = { transitionId: transition.id, fromId, toId, duration: transition.duration, startedAt: runtime.stateTime, easing: transition.easing || 'linear', ...(transition.easingParams ? { easingParams: cloneValue(transition.easingParams) } : {}) };
+        runtime.transition = { transitionId: transition.id, fromId, toId, duration: transition.duration, startedAt: runtime.stateTime, sourceTimeAtStart: runtime.stateTime, exitTime: cloneValue(transition.exitTime || null), pauseSource: Boolean(transition.pauseSource), easing: transition.easing || 'linear', ...(transition.easingParams ? { easingParams: cloneValue(transition.easingParams) } : {}) };
         events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
       } else {
         events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
@@ -430,7 +458,8 @@ export class MachineRuntime {
       const { fromId, toId, startedAt } = runtime.transition;
       const elapsed = runtime.stateTime - startedAt;
       const progress = transitionProgress(runtime.transition, runtime.stateTime).eased;
-      const outgoing = this.#steadyStateContributions(stateById(layer, fromId), runtime.stateTime, inputsById)
+      const outgoingTime = runtime.transition.pauseSource ? runtime.transition.sourceTimeAtStart : runtime.stateTime;
+      const outgoing = this.#steadyStateContributions(stateById(layer, fromId), outgoingTime, inputsById)
         .map(item => ({ ...item, effectiveWeight: Number(item.effectiveWeight ?? item.weight ?? 1) * (1-progress), transitionRole: 'outgoing' }));
       const incoming = this.#steadyStateContributions(stateById(layer, toId), elapsed, inputsById)
         .map(item => ({ ...item, effectiveWeight: Number(item.effectiveWeight ?? item.weight ?? 1) * progress, transitionRole: 'incoming' }));
