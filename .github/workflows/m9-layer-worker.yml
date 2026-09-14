@@ -12,12 +12,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 6
+          fetch-depth: 30
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply M9 layered schema patch
-        run: python3 scripts/apply-m9-layer-schema.py
+      - name: Restore full baseline manifest ratchet
+        run: git show 41ca9f408fee419b53a853f8bac97f3cfe320b88:tests/veyra-manifest.test.mjs > tests/veyra-manifest.test.mjs
+      - name: Prepare robust M9 base patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-m9-layer-schema.py')
+          t=p.read_text()
+          start=t.index('# Artboard duplication')
+          end=t.index("index=ROOT/'src/index.js'")
+          p.write_text(t[:start]+t[end:])
+          PY
+      - name: Apply M9 layered schema patches
+        run: |
+          python3 scripts/apply-m9-layer-schema.py
+          python3 scripts/apply-m9-layer-followup.py
       - name: Syntax check
         run: npm run check
       - name: Full repository suites with retained failure evidence
@@ -37,7 +51,7 @@ jobs:
             exit "$status"
           fi
       - name: Remove worker-only patch machinery
-        run: rm -f scripts/apply-m9-layer-schema.py .github/workflows/m9-layer-worker.yml verification/m9-layer-worker-failure.log
+        run: rm -f scripts/apply-m9-layer-schema.py scripts/apply-m9-layer-followup.py .github/workflows/m9-layer-worker.yml verification/m9-layer-worker-failure.log
       - name: Diff hygiene
         run: git diff --check
       - name: Commit clean M9 layer foundation
