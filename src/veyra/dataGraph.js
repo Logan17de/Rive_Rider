@@ -2,6 +2,7 @@ import { dataTypeDescriptor, dataTypeAccepts, bindingTypeError, converterTypeCon
 import { createReference, normalizeReference, referenceId } from './references.js';
 import { canonicalPropertyBindingCapabilities } from './propertyBinding.js';
 import { parsePropertyAddress, formatPropertyAddress } from './propertyAddress.js';
+import { validateBindingPropertyValue } from './propertyValueContract.js';
 
 export const VEYRA_DATA_VERSION = 6;
 export const VEYRA_DATA_PROPERTY_TYPES = Object.freeze([
@@ -1412,7 +1413,7 @@ export class VeyraDataRuntime {
     // Null list-index output is an existing nullable converter contract. Keep it
     // for ordinary visual targets (whose canonical writer defines coercion), but
     // never let it bypass a non-null data/Property Group definition.
-    if (resolution.endpoint.kind === 'property') return value;
+    if (resolution.endpoint.kind === 'property') return validateBindingPropertyValue(document, resolution.endpoint.address, value, `[binding-runtime-type] ${label}`);
     return validateTypedValueTarget(document, property, value, `[binding-runtime-type] ${label}`);
   }
 
@@ -1570,8 +1571,26 @@ export class VeyraDataRuntime {
     const source = normalizeBindingEndpoint(binding.source), capabilities = bindingEndpointCapabilities(document, source);
     if (!capabilities.reverseWritable) throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(source)} has no deterministic reverse-write port.`);
     if (source.kind === 'data') {
-      const terminal = this.resolveDataEndpoint(source, options);
-      return this.setValue(terminal.instance.id, terminal.property.id, value, { ...options, source: options.source || 'two-way-binding', provenance: { ...(options.provenance || {}), binding: createReference('binding', binding.id) } });
+      // Resolve reverse writes from the same settled effective graph used by
+      // forward evaluation. The private fork sees current scoped runtime values,
+      // authored generation changes and derived View Model reference writers, but
+      // cannot consume live triggers, mutate live caches/counters, or notify.
+      const scopePath = createDataRuntimeScope(options.scopePath ?? options.runtimeScopePath ?? []).path;
+      const artboardId = String(binding.artboard?.id || options.artboardId || document.artboards?.[0]?.id || '');
+      const probe = this.fork();
+      probe.evaluateBindings(document, { artboardId, scopePath });
+      const bucket = probe.#buckets.get(runtimeBucketKey(scopeKey(scopePath), artboardId));
+      const resolved = bucket?.resolutions.get(binding.id)?.source;
+      if (!resolved || resolved.error || !resolved.endpoint) {
+        const detail = resolved?.error?.message ? `: ${resolved.error.message}` : '';
+        throw new TypeError(`[binding-two-way-source-unresolved] ${binding.id} has no current effective reverse-write terminal${detail}`);
+      }
+      const terminal = normalizeBindingEndpoint(resolved.endpoint);
+      const effectiveCapabilities = bindingEndpointCapabilities(document, terminal);
+      if (terminal.kind !== 'data' || !effectiveCapabilities.reverseWritable) {
+        throw new TypeError(`[binding-two-way-source-unsupported] ${bindingEndpointKey(terminal)} has no deterministic reverse-write port.`);
+      }
+      return this.setValue(terminal.instance.id, terminal.path[0].id, value, { ...options, scopePath, source: options.source || 'two-way-binding', provenance: { ...(options.provenance || {}), binding: createReference('binding', binding.id) } });
     }
     if (source.kind === 'propertyGroupProperty') {
       return this.setPropertyGroupValue(source.property.id, value, { ...options, source: options.source || 'two-way-binding',

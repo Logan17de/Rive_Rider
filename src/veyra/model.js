@@ -4,6 +4,7 @@ import {
   normalizeConventions,
   VEYRA_COORDINATE_CONVENTIONS,
 } from './contracts.js';
+import { finite, bounded, integer, color, gradientColor } from './propertyValueContract.js';
 import {
   createBoneRef,
   createControlRef,
@@ -607,35 +608,6 @@ export function createDocument(overrides = {}) {
     lists: cloneValue(overrides.lists || []),
     bindings: cloneValue(overrides.bindings || []),
   };
-}
-
-function finite(value, path) {
-  if (!Number.isFinite(Number(value))) throw new TypeError(`${path} must be finite.`);
-  return Number(value);
-}
-
-function bounded(value, path, min, max) {
-  const number = finite(value, path);
-  if (number < min || number > max) throw new RangeError(`${path} must be between ${min} and ${max}.`);
-  return number;
-}
-
-function integer(value, path, min, max) {
-  const number = bounded(value, path, min, max);
-  if (!Number.isInteger(number)) throw new TypeError(`${path} must be an integer.`);
-  return number;
-}
-
-function color(value, path) {
-  const normalized = String(value || '').toLowerCase();
-  if (normalized === 'none' || /^#[0-9a-f]{6}$/.test(normalized)) return normalized;
-  throw new TypeError(`${path} must be "none" or a six-digit hex color.`);
-}
-
-function gradientColor(value, path) {
-  const normalized = color(value, path);
-  if (normalized === 'none') throw new TypeError(`${path} must be a six-digit hex color.`);
-  return normalized;
 }
 
 function normalizeGradientStops(stops, path) {
