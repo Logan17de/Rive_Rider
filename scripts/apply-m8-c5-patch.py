@@ -16,11 +16,17 @@ replace_once(
     "} from './contracts.js';\n",
     "} from './contracts.js';\nimport { finite, bounded, integer, color, gradientColor } from './propertyValueContract.js';\n",
 )
-replace_once(
-    model,
-    '''function finite(value, path) {\n  if (!Number.isFinite(Number(value))) throw new TypeError(`${path} must be finite.`);\n  return Number(value);\n}\n\nfunction bounded(value, path, min, max) {\n  const number = finite(value, path);\n  if (number < min || number > max) throw new RangeError(`${path} must be between ${min} and ${max}.`);\n  return number;\n}\n\nfunction integer(value, path, min, max) {\n  const number = bounded(value, path, min, max);\n  if (!Number.isInteger(number)) throw new TypeError(`${path} must be an integer.`);\n  return number;\n}\n\nfunction color(value, path) {\n  const normalized = String(value || '').toLowerCase();\n  if (normalized === 'none' || /^#[0-9a-f]{6}$/.test(normalized)) return normalized;\n  throw new TypeError(`${path} must be \\"none\\" or a six-digit hex color.`);\n}\n\nfunction gradientColor(value, path) {\n  const normalized = color(value, path);\n  if (normalized === 'none') throw new TypeError(`${path} must be a six-digit hex color.`);\n  return normalized;\n}\n\n''',
-    '',
+model_text = model.read_text()
+model_text, count = re.subn(
+    r"\nfunction finite\(value, path\) \{.*?\nfunction normalizeGradientStops",
+    "\nfunction normalizeGradientStops",
+    model_text,
+    count=1,
+    flags=re.S,
 )
+if count != 1:
+    raise SystemExit(f'{model}: expected one scalar-normalizer block, found {count}')
+model.write_text(model_text)
 
 data = ROOT / 'src/veyra/dataGraph.js'
 replace_once(
@@ -42,8 +48,7 @@ if count != 1:
     raise SystemExit(f'{data}: expected one setTwoWayTarget block, found {count}')
 data.write_text(text2)
 
-# Fix the regression assertion so it measures only the reverse-write operation,
-# before the intentional live forward evaluation that follows it.
+# Measure live evaluator counters before the intentional forward evaluation.
 test = ROOT / 'tests/veyra-m8-c5-effective-writes.test.mjs'
 replace_once(
     test,
