@@ -81,10 +81,18 @@ function evaluateCondition(condition, inputsById, readData) {
   }
 }
 
-function transitionSatisfied(transition, stateTime, inputsById, readData) {
-  if (transition.enabled === false) return false;
-  if (transition.after != null && stateTime < transition.after) return false;
-  return (transition.conditions || []).every(condition => evaluateCondition(condition, inputsById, readData));
+function transitionMatch(transition, stateTime, inputsById, readData) {
+  if (transition.enabled === false) return { matched: false, triggerSources: [] };
+  if (transition.after != null && stateTime < transition.after) return { matched: false, triggerSources: [] };
+  const triggerSources = [];
+  for (const condition of transition.conditions || []) {
+    if (!evaluateCondition(condition, inputsById, readData)) return { matched: false, triggerSources: [] };
+    // Legacy machine triggers intentionally keep their established one-step
+    // broadcast behavior. Only M8 queued data events participate in exact
+    // consume-on-selected-transition semantics.
+    if (condition.op === 'fired' && condition.source) triggerSources.push(cloneValue(condition.source));
+  }
+  return { matched: true, triggerSources };
 }
 
 function initialState(layer) {
@@ -216,6 +224,7 @@ export class MachineRuntime {
     stateEvaluations: 0,
     transitionConditionEvaluations: 0,
     dataConditionReads: 0,
+    triggerPulsesConsumed: 0,
     timelineEvaluations: 0,
     compositionApplications: 0,
     inactiveLayerSkips: 0,
@@ -287,8 +296,20 @@ export class MachineRuntime {
     return this.#dataRuntime.getEndpointValue(endpoint, { scopePath: this.#runtimeScopePath });
   }
 
-  #transitionSatisfied(transition, stateTime, inputsById) {
-    return transitionSatisfied(transition, stateTime, inputsById, endpoint => this.#readDataCondition(endpoint));
+  #transitionMatch(transition, stateTime, inputsById) {
+    return transitionMatch(transition, stateTime, inputsById, endpoint => this.#readDataCondition(endpoint));
+  }
+
+  #consumeTransitionTriggers(match) {
+    const seen = new Set();
+    for (const endpoint of match?.triggerSources || []) {
+      const key = JSON.stringify(endpoint);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (this.#dataRuntime.consumeEndpointTrigger(endpoint, { scopePath: this.#runtimeScopePath })) {
+        this.#stats.triggerPulsesConsumed += 1;
+      }
+    }
   }
 
   #resetRuntime(machine) {
@@ -323,13 +344,15 @@ export class MachineRuntime {
     for (const transition of this.#transitionCandidates(layer, stateId)) {
       this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
       if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, stateTime)) continue;
-      if (!this.#transitionSatisfied(transition, stateTime, inputsById)) continue;
-      return transition;
+      const match = this.#transitionMatch(transition, stateTime, inputsById);
+      if (!match.matched) continue;
+      return { transition, match };
     }
     return null;
   }
 
   #beginTransition(layer, runtime, transition, sourceStateId, sourceStateTime, inputsById, events, options = {}) {
+    this.#consumeTransitionTriggers(options.match);
     const toId = referenceId(transition.to, 'machineState');
     const target = stateById(layer, toId);
     if (transition.duration > 0 && target?.type !== 'entry' && target?.type !== 'any') {
@@ -366,8 +389,9 @@ export class MachineRuntime {
     if (!active?.allowExitDuringTransition) return false;
     const sourceStateId = active.toId;
     const sourceStateTime = runtime.stateTime - active.startedAt;
-    const next = this.#eligibleTransitionForState(layer, sourceStateId, sourceStateTime, inputsById);
-    if (!next) return false;
+    const selected = this.#eligibleTransitionForState(layer, sourceStateId, sourceStateTime, inputsById);
+    if (!selected) return false;
+    const { transition: next, match } = selected;
     const sourceSnapshot = this.#stateTimelineContributions(layer, runtime, inputsById);
     events.push({
       type: 'transition-end',
@@ -379,6 +403,7 @@ export class MachineRuntime {
       interruptedBy: next.id,
     });
     this.#beginTransition(layer, runtime, next, sourceStateId, sourceStateTime, inputsById, events, {
+      match,
       sourceSnapshot,
       interruptedFromTransitionId: active.transitionId,
     });
@@ -392,8 +417,15 @@ export class MachineRuntime {
       if (!state || !['entry', 'any'].includes(state.type)) return;
       if (seen.has(state.id)) { runtime.stateId = null; runtime.transition = null; return; }
       seen.add(state.id);
-      const transition = (layer.transitions || []).find(candidate => referenceId(candidate.from, 'machineState') === state.id && this.#transitionSatisfied(candidate, runtime.stateTime, inputsById));
-      if (!transition) return;
+      let selected = null;
+      for (const candidate of layer.transitions || []) {
+        if (referenceId(candidate.from, 'machineState') !== state.id) continue;
+        const match = this.#transitionMatch(candidate, runtime.stateTime, inputsById);
+        if (match.matched) { selected = { transition: candidate, match }; break; }
+      }
+      if (!selected) return;
+      const { transition, match } = selected;
+      this.#consumeTransitionTriggers(match);
       const toId = referenceId(transition.to, 'machineState');
       const target = stateById(layer, toId);
       events.push({ type: 'transition-start', transitionId: transition.id, fromId: state.id, toId, layerId: layer.id });
@@ -429,8 +461,8 @@ export class MachineRuntime {
       return;
     }
     runtime.stateTime += delta;
-    const transition = this.#eligibleTransitionForState(layer, runtime.stateId, runtime.stateTime, inputsById);
-    if (transition) this.#beginTransition(layer, runtime, transition, runtime.stateId, runtime.stateTime, inputsById, events);
+    const selected = this.#eligibleTransitionForState(layer, runtime.stateId, runtime.stateTime, inputsById);
+    if (selected) this.#beginTransition(layer, runtime, selected.transition, runtime.stateId, runtime.stateTime, inputsById, events, { match: selected.match });
   }
 
   step(deltaSeconds) {
@@ -623,6 +655,7 @@ export class MachineRuntime {
       stateEvaluations: 0,
       transitionConditionEvaluations: 0,
       dataConditionReads: 0,
+      triggerPulsesConsumed: 0,
       timelineEvaluations: 0,
       compositionApplications: 0,
       inactiveLayerSkips: 0,

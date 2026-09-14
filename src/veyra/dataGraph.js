@@ -1150,6 +1150,25 @@ export class VeyraDataRuntime {
     // the current endpoint value, including nested View Model retargeting.
     return this.#dataEndpointValue(endpoint, scopeKey(options.scopePath), new Map(), null, null);
   }
+  consumeEndpointTrigger(endpointInput, options = {}) {
+    const endpoint = normalizeBindingEndpoint(endpointInput, 'runtime trigger endpoint');
+    if (endpoint.kind !== 'data') throw new TypeError('consumeEndpointTrigger requires a data endpoint.');
+    const scopePathValue = createDataRuntimeScope(options.scopePath ?? options.runtimeScopePath ?? []).path;
+    const resolved = this.resolveDataEndpoint(endpoint, { scopePath: scopePathValue });
+    if (resolved.type !== 'trigger') throw new TypeError(`[data-trigger-type] ${bindingEndpointKey(endpoint)} is ${resolved.type}, not trigger.`);
+    const triggerReads = new Set();
+    const value = this.#dataEndpointValue(endpoint, scopeKey(scopePathValue), new Map(), triggerReads, null);
+    if (!value || !triggerReads.size) return false;
+    for (const key of triggerReads) {
+      const count = this.#triggers.get(key) || 0;
+      if (!count) continue;
+      if (count > 1) this.#triggers.set(key, count - 1); else this.#triggers.delete(key);
+      this.#stats.triggerPulsesConsumed += 1;
+      this.#invalidateDependency(key);
+      return true;
+    }
+    return false;
+  }
   #propertyGroupValue(document, propertyId, scope) {
     const property = propertyGroupPropertyById(document, propertyId);
     if (!property) throw new TypeError(`Runtime Property Group target ${propertyId} does not exist.`);
