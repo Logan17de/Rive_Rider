@@ -558,14 +558,22 @@ export function createMachineTransition(overrides = {}) {
   if (from.id === to.id) throw new TypeError('transitions cannot target the same state.');
   const duration = finite(overrides.duration ?? 0, 'transition.duration');
   if (duration < 0) throw new RangeError('transition.duration must be zero or positive.');
+  const easing = String(overrides.easing || 'linear');
+  if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`transition.easing must be one of ${VEYRA_EASING_TYPES.join(', ')}.`);
   const transition = {
     id: overrides.id || createId('machineTransition'),
     from,
     to,
+    enabled: overrides.enabled !== false,
     duration,
     after: overrides.after == null ? null : finite(overrides.after, 'transition.after'),
+    easing,
     conditions: (overrides.conditions || []).map((condition) => createMachineCondition(condition)),
   };
+  if (easing === 'cubic-bezier') {
+    if (!Array.isArray(overrides.easingParams) || overrides.easingParams.length !== 4) throw new TypeError('transition.easingParams must contain four values for cubic-bezier.');
+    transition.easingParams = overrides.easingParams.map((value,index)=>bounded(value,`transition.easingParams[${index}]`,0,1));
+  }
   if (transition.after !== null && transition.after < 0) {
     throw new RangeError('transition.after must be zero or positive.');
   }
@@ -1330,9 +1338,16 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
   if (from.id === to.id) throw new TypeError(`${path} cannot target the same state.`);
   const duration = bounded(transition.duration ?? 0, `${path}.duration`, 0, 10000);
   const after = transition.after == null ? null : bounded(transition.after, `${path}.after`, 0, 100000);
+  const easing = String(transition.easing || 'linear');
+  if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`${path}.easing must be one of ${VEYRA_EASING_TYPES.join(', ')}.`);
+  let easingParams;
+  if (easing === 'cubic-bezier') {
+    if (!Array.isArray(transition.easingParams) || transition.easingParams.length !== 4) throw new TypeError(`${path}.easingParams must contain four values for cubic-bezier.`);
+    easingParams=transition.easingParams.map((value,i)=>bounded(value,`${path}.easingParams[${i}]`,0,1));
+  }
   if (transition.conditions !== undefined && transition.conditions !== null && !Array.isArray(transition.conditions)) throw new TypeError(`${path}.conditions must be an array of conditions.`);
   const conditions=(Array.isArray(transition.conditions)?transition.conditions:[]).map((condition,i)=>normalizeMachineCondition(condition,`${path}.conditions[${i}]`,inputsById));
-  return { id, from, to, duration, after, conditions };
+  return { id, from, to, enabled: transition.enabled !== false, duration, after, easing, ...(easingParams?{easingParams}:{}), conditions };
 }
 
 function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsById, globalStateIds, globalTransitionIds) {
@@ -1346,8 +1361,6 @@ function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsByI
     stateIds.add(state.id); globalStateIds.add(state.id);
   }
   const transitions=(Array.isArray(layer?.transitions)?layer.transitions:[]).map((transition,i)=>normalizeMachineTransition(transition,i,path,stateIds,inputsById));
-  const blendIds=new Set(states.filter(state=>['blend1d','directBlend'].includes(state.type)).map(state=>state.id));
-  for(const transition of transitions) if(blendIds.has(referenceId(transition.from,'machineState')) || blendIds.has(referenceId(transition.to,'machineState'))) throw new TypeError(`${path} transitions to/from blend states are not yet supported by the canonical transition compositor.`);
   for(const transition of transitions){
     if(globalTransitionIds.has(transition.id)) throw new TypeError(`Duplicate machine transition id ${transition.id} in ${machinePath}.`);
     globalTransitionIds.add(transition.id);
