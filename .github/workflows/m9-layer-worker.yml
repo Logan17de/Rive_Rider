@@ -1,0 +1,35 @@
+name: M9 layer schema worker
+on:
+  push:
+    branches: ['work/m9-layer-schema']
+permissions:
+  contents: write
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply M9 layered schema patch
+        run: python3 scripts/apply-m9-layer-schema.py
+      - name: Syntax check
+        run: npm run check
+      - name: Full repository suites
+        run: npm test
+      - name: Remove worker-only patch machinery
+        run: rm scripts/apply-m9-layer-schema.py .github/workflows/m9-layer-worker.yml
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit clean M9 layer foundation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(m9): add layered machine schema and legacy migration'
+          git push origin HEAD:work/m9-layer-schema
