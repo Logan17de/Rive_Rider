@@ -18,7 +18,7 @@ jobs:
           node-version: 22
       - name: Restore full baseline manifest ratchet
         run: git show 41ca9f408fee419b53a853f8bac97f3cfe320b88:tests/veyra-manifest.test.mjs > tests/veyra-manifest.test.mjs
-      - name: Prepare robust M9 base patch
+      - name: Prepare robust M9 patch scripts
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -27,6 +27,8 @@ jobs:
           start=t.index('# Artboard duplication')
           end=t.index("index=ROOT/'src/index.js'")
           p.write_text(t[:start]+t[end:])
+          q=Path('scripts/apply-m9-layer-followup.py')
+          q.write_text(q.read_text().replace('\n""\n)\n', '\n"""\n)\n'))
           PY
       - name: Apply M9 base schema patch
         run: |
