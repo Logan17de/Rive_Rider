@@ -20,10 +20,10 @@ function fixture({easing='linear'}={}){
     constantTimeline('single',opacity,.1),
   ];
   const machine=createStateMachine({id:'machine',inputs:[
-    {id:'go',type:'bool',value:false},
-    {id:'mix',type:'number',value:.5},
-    {id:'w0',type:'number',value:1},
-    {id:'w1',type:'number',value:1},
+    {id:'go',name:'Go',type:'bool',value:false},
+    {id:'mix',name:'Mix',type:'number',value:.5},
+    {id:'w0',name:'Weight A',type:'number',value:1},
+    {id:'w1',name:'Weight B',type:'number',value:1},
   ],layers:[{id:'layer',initial:'single_state',states:[
     {id:'single_state',type:'animation',timeline:'single'},
     {id:'blend_state',type:'blend1d',input:'mix',children:[
