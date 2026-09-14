@@ -6,7 +6,7 @@ Complete only the tasks below. Follow-up ideas belong in `suggestions`. Implemen
 
 ## Progress snapshot — refreshed for the M9/M10 implementation slice
 
-These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. M8 is now counted because its full View Model/Data Binding capability has passed independent verification through the original implementation and correction passes C1–C5.
+These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. The percentages remain anchored to the independently accepted M0–M8 baseline. M9 has advanced materially on `main` through transition interruption, M8-driven conditions/events, exactly-once lifecycle actions and deterministic Randomize Exit, but M9 is still `IN PROGRESS` and has not had independent milestone acceptance, so no new verified percentage increment is claimed.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
@@ -117,7 +117,7 @@ Support the roadmap state families in the canonical model/runtime/UI:
 - [ ] Additive/Direct Blend state;
 - [x] state speed, including reverse playback;
 - [x] state captions and graph/editor metadata;
-- [ ] state start actions and state end actions.
+- [x] state start actions and state end actions.
 
 Blend-state requirements:
 
@@ -133,7 +133,9 @@ Blend-state requirements:
 - `directBlend` steady-state evaluation is implemented with stable child identity, numeric per-child input weights, deterministic normalized ownership weights and zero-weight child sleeping.
 - Ownership evidence exposes every active child timeline, its stable blend-child ref and effective normalized weight.
 - Invalid thresholds, missing timelines, duplicate child IDs and non-number legacy inputs fail closed during canonical normalization.
-- Blend-state transitions now use the canonical transition compositor: animation↔blend and blend↔blend timed transitions compose outgoing/incoming child contributions with deterministic normalized effective weights. Additive Blend, M8/View Model blend sources and canonical blend-child CRUD commands remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
+- Blend-state transitions use the canonical transition compositor: animation↔blend and blend↔blend timed transitions compose outgoing/incoming child contributions with deterministic normalized effective weights.
+- Lifecycle actions are now implemented for state-start/state-end and transition-start/transition-end phases with stable `machineAction` identity and exactly-once execution.
+- Additive Blend, M8/View Model blend control sources and canonical blend-child CRUD commands remain open. Therefore the full Task 2 blend checkboxes remain unchecked.
 - Blend steady-state worker Actions run `34810521222`, job `103870774356`: syntax PASS, **49/49 suites PASS**, diff hygiene PASS. Transition-compositor worker run `34812631038`, job `103876831686`: **50/50 syntax checks + 50/50 suites PASS**; exact-main standard Tests #186 (`34812754122`, job `103877176194`) also PASS on `00f85fff5a92284efb343bb316bf531469ca182c`.
 
 ## Task 3 — Ordered simultaneous layer evaluation
@@ -156,41 +158,46 @@ Implement concurrent ordered layer evaluation with an explicit property-composit
 - Entry/Exit/Any pseudo states, animation state speed (including reverse), state captions/graph metadata, deterministic later-layer property priority and layered ownership evidence are covered by `tests/veyra-m9-layered-runtime.test.mjs`.
 - Disabled layers are skipped and contribute no ownership; runtime work counters distinguish active/inactive layer work and reset with runtime reset so deterministic scrub/replay remains comparable.
 - Worker Actions run `34810074334`, job `103869484723`: syntax checks PASS, **48/48 suites PASS**, diff hygiene PASS.
-- Capability honesty: Blend state families remain **not exposed** until their evaluator/authoring contracts are implemented. M9 remains IN PROGRESS.
+- Capability honesty: steady 1D/Direct Blend evaluation and blend transition composition are implemented; Additive Blend and full blend authoring/UI remain open. M9 remains `IN PROGRESS`.
 
 ## Task 4 — Rive-class transition contract
 
 Transitions must support, where meaningful for the source/target state types:
 
-- [ ] View Model property conditions;
-- [ ] compatible events/triggers;
+- [x] View Model property conditions;
+- [x] compatible events/triggers;
 - [ ] built-in artboard/runtime values supported by the roadmap;
 - [x] legacy machine inputs;
 - [x] comparison against fixed values;
-- [ ] comparison against compatible data-bound values;
+- [x] comparison against compatible data-bound values;
 - [x] transition duration;
 - [x] exit time;
 - [x] pause source;
-- [ ] allow exit during transition;
+- [x] allow exit during transition;
 - [x] interpolation/easing;
-- [ ] transition start actions;
-- [ ] transition end actions;
+- [x] transition start actions;
+- [x] transition end actions;
 - [x] enabled/disabled transition;
 - [x] Any-state routing;
 - [x] Entry/Exit routing;
-- [ ] Randomize Exit with weighted outgoing paths.
+- [x] Randomize Exit with weighted outgoing paths.
 
 Randomized transitions need an explicit deterministic runtime RNG/seed contract for tests/replays. Never use a hidden global random source that makes verification nondeterministic.
 
-### M9 transition implementation evidence — compositor + timing slice
+### M9 transition implementation evidence — compositor + timing/lifecycle slices
 
 - Production `00f85fff5a92284efb343bb316bf531469ca182c` lifts the previous fail-closed blend-transition restriction. The same canonical compositor handles animation→blend, blend→animation and blend→blend timed transitions by converting absolute outgoing/incoming contributions into deterministic sequential timeline weights.
-- Transition interpolation now persists `enabled`, `easing` and bounded cubic-bezier parameters; runtime/debug evidence exposes both raw and eased progress. Structural machine invalidation includes the transition behavior rather than relying on stale runtime state.
+- Transition interpolation persists `enabled`, `easing` and bounded cubic-bezier parameters; runtime/debug evidence exposes both raw and eased progress. Structural machine invalidation includes transition behavior rather than relying on stale runtime state.
 - Permanent `tests/veyra-m9-transition-compositor.test.mjs` covers animation→1D Blend, 1D Blend→Direct Blend, eased composition and invalid interpolation authoring. Worker run `34812631038`, job `103876831686`: **50/50 syntax + 50/50 suites PASS**. Standard Tests #186 (`34812754122`, job `103877176194`) is SUCCESS on that exact production SHA.
 - Production `fb0bfb1c90452a477833f36757ee3e3b3fe76dab` adds canonical Exit Time with `{unit: seconds|percent, value}`, speed-aware percent gating, and Pause Source behavior that freezes the exact outgoing source time captured when a transition starts while the incoming state continues.
 - Exit Time rejects invalid units/ranges and meaningless pseudo-state source usage. The legacy `after` gate remains a separate condition; the two contracts are not silently conflated.
-- Permanent `tests/veyra-m9-transition-exit-pause.test.mjs` covers seconds, percent, speed-adjusted percentage, paused-vs-live source clocks and invalid authored values. Worker run `34812931703`, job `103877684445`: syntax/full-suite/diff gates PASS. Standard exact-main Tests #187 is the required promotion gate for this SHA.
-- Compatibility boundary: `allow exit during transition` remains deliberately open because interruption needs a snapshot-safe source/target composition contract; start/end actions, View Model/data-bound conditions, deterministic Randomize Exit and Additive Blend also remain open.
+- Permanent `tests/veyra-m9-transition-exit-pause.test.mjs` covers seconds, percent, speed-adjusted percentage, paused-vs-live source clocks and invalid authored values. Worker run `34812931703`, job `103877684445`: syntax/full-suite/diff gates PASS; standard Tests #187 also passed on that exact production SHA.
+- Production `db024269faf013db6254941053ce38499a4604f8` implements snapshot-safe Allow Exit During Transition. Interruptions evaluate outgoing transitions from the active target state, capture the exact composed in-flight pose as a runtime-only source snapshot, preserve target-clock Exit Time/Any routing, support repeated interruption and clone snapshots in forks. Standard Tests #189, run `34817067428`: **SUCCESS**.
+- Production `5c9c700ec956df0d05f73b116c17a730be2d38c8` adds typed M8 View Model data condition sources, nested runtime data paths, data-bound comparison endpoints and trigger `fired`/`!fired` sources with nominal definition validation and non-consuming observation. Standard Tests #190, run `34817951482`: **SUCCESS**.
+- Production `2d22041a984894ae170655b1305074fc35f8a4ca` defines exact queued M8 trigger consumption: candidates observe non-destructively, the selected transition consumes exactly one pulse, failed/gated candidates and observation conserve queues, duplicate conditions spend one pulse, ordered layers consume deterministically and forks spend only private queues. Standard Tests #191, run `34820131793`: **SUCCESS**.
+- Production `3d9b71c7430e6636366c2c62c270016ba8f910a4` adds stable persistent `machineAction` records and exactly-once state-start/state-end/transition-start/transition-end execution across initial activation, timed/zero-duration transitions and interruption. Data/input actions mutate runtime state only; emit/timeline actions surface typed effects/requests without authored document mutation. Standard Tests #192, run `34821289759`: **SUCCESS**.
+- Production `f68c3980930f42bd012a26be4773353cdeaa72d8` adds deterministic weighted Randomize Exit using an internal unsigned-32-bit seeded LCG rather than global randomness. Only eligible outgoing paths enter the weighted pool; choices expose seed/draw/sample/candidate evidence; reset/scrub replay from the configured seed; forks clone PRNG position; non-random states keep first-match behavior. Standard Tests #193, run `34821761018`, job `103904706876`: **SUCCESS on the exact production SHA with 50/50 syntax checks and 56/56 suites PASS**.
+- Remaining transition-source gap: built-in artboard/runtime values. Broader open M9 work includes Additive Blend, full owner-stack evidence, Component-scoped runtime isolation, visual graph/editor command parity, machine manifest/semantic/dependency completion and final performance/browser acceptance.
 
 ## Task 5 — Unified conditions, actions and data sources
 
@@ -215,6 +222,16 @@ Action contract:
 
 Unsupported future action types must fail with capabilities/diagnostics rather than being silently ignored.
 
+### M9 data/lifecycle implementation evidence
+
+- View Model/data condition sources and compatible data-bound comparisons are implemented through the existing M8 endpoint model, including nested View Model paths and nominal type compatibility. No second machine data model was introduced.
+- M8 trigger endpoints are valid machine event sources. Candidate evaluation and read/fork observation are non-consuming; a selected transition spends exactly one queued pulse according to the permanent trigger-consumption tests.
+- Persistent machine actions have stable typed identity and explicit lifecycle phase. Implemented runtime transports cover View Model/data updates, legacy input updates, emitted typed effects and timeline/runtime requests without direct authored mutation.
+- Lifecycle actions execute exactly once for actual state/transition lifecycle events, including zero-duration transitions and snapshot-safe interruption. Forks isolate action side effects.
+- Deterministic Randomize Exit is replayable under a seed and composes with the same selected-transition trigger consumption and lifecycle-action path.
+- Permanent suites now include `veyra-m9-transition-interruption`, `veyra-m9-data-condition-sources`, `veyra-m9-trigger-consumption`, `veyra-m9-lifecycle-actions` and `veyra-m9-randomize-exit`; all are in standard discovery and pass on exact-head Tests #193.
+- Built-in artboard/runtime values remain unimplemented as condition sources; unsupported future source/action kinds must continue to fail closed through canonical capabilities/normalization.
+
 ## Task 6 — Runtime correctness and lifecycle
 
 Rebuild `MachineRuntime` around layer runtimes while retaining compatibility adapters for existing callers.
@@ -226,9 +243,9 @@ Required runtime behavior:
 - [x] transition progress and interpolation;
 - [x] state speed/reverse playback;
 - [x] pause/exit-time behavior;
-- [ ] exact trigger/event consumption policy;
-- [ ] start/end actions fire exactly once;
-- [ ] Randomize Exit chooses once per decision and is replayable under a seed;
+- [x] exact trigger/event consumption policy;
+- [x] start/end actions fire exactly once;
+- [x] Randomize Exit chooses once per decision and is replayable under a seed;
 - [ ] structural authored edits reconcile safely without leaving dangling state IDs;
 - [x] observation/fork/read paths do not advance the live machine or consume live events;
 - [ ] runtime errors are bounded per layer so an invalid independent layer cannot corrupt another layer's valid output;
@@ -343,6 +360,8 @@ Add permanent tests covering at minimum:
 22. no-machine and settled-layer performance counters;
 23. existing M0–M8 regression suites stay green;
 24. headless/browser DOM tests exercise actual visual-graph interactions rather than source-regex-only checks.
+
+Current permanent coverage explicitly exercises acceptance families #9–#13 through the transition compositor/exit-pause/interruption, data-condition/trigger-consumption, lifecycle-action and Randomize Exit suites. This does not make M9 ready for acceptance while the remaining numbered families and UI/ownership/runtime-isolation gates are open.
 
 ## Explicit non-goals
 
