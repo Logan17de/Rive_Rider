@@ -62,7 +62,7 @@ import { createInteractionDispatcher } from './src/veyra/interactionTransport.js
 import { createMachineInteractionBridge } from './src/veyra/interactionHost.js';
 import { createComponentRuntimeRegistry, createComponentRuntimeScope } from './src/veyra/components.js';
 import { createVeyraPlayer } from './src/veyra/player.js';
-import { createGraphEditorState, renderMachineGraphSvg } from './src/veyra/graphEditor.js';
+import { createGraphEditorState, renderMachineGraphSvg } from './src/veyra/graphEditor.js?v=20260915-production4';
 import { exportDotLottie, exportLottie, importDotLottie, importLottie } from './src/veyra/lottie.js';
 import { featureCollections, featureGraphSummary, featureRecords } from './src/veyra/featureGraph.js';
 import {
@@ -111,6 +111,85 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_KEY = 'veyra.autosave.v1';
 const UI_THEME_KEY = 'veyra.ui-theme.v1';
 const UI_LAYOUT_KEY = 'veyra.workspace-layout.v1';
+
+// Inspector summaries are built with text nodes rather than interpolated
+// HTML. Imported document names/IDs are untrusted content and must never be
+// able to execute markup in the editor surface.
+function setSummaryContent(element, primary, secondary, secondaryClass = '') {
+  element.replaceChildren();
+  const first = document.createElement('span');
+  first.textContent = String(primary ?? '');
+  const second = document.createElement('strong');
+  if (secondaryClass) second.className = secondaryClass;
+  second.textContent = String(secondary ?? '');
+  element.append(first, second);
+  return element;
+}
+
+let activeVeyraModal = null;
+
+function openVeyraModal({ title, message, initial = '', confirmOnly = false }) {
+  if (activeVeyraModal) activeVeyraModal(null);
+  const dialog = document.createElement('dialog');
+  dialog.className = 'veyraModal';
+  dialog.setAttribute('aria-modal', 'true');
+  const form = document.createElement('form');
+  form.className = 'veyraModalForm';
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    finish(confirmOnly ? true : input?.value ?? null);
+  });
+  const heading = document.createElement('h3');
+  heading.textContent = String(title || 'Veyra');
+  const copy = document.createElement('p');
+  copy.textContent = String(message || '');
+  form.append(heading, copy);
+  let input = null;
+  if (!confirmOnly) {
+    input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'veyraModalInput';
+    input.value = String(initial ?? '');
+    input.setAttribute('aria-label', String(title || 'Value'));
+    form.appendChild(input);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'veyraModalActions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'textButton';
+  cancel.textContent = 'Cancel';
+  const accept = document.createElement('button');
+  accept.type = 'button';
+  accept.className = 'primaryButton';
+  accept.textContent = confirmOnly ? 'Confirm' : 'Continue';
+  actions.append(cancel, accept);
+  form.appendChild(actions);
+  dialog.appendChild(form);
+  document.body.appendChild(dialog);
+  let settled = false;
+  let resolveResult;
+  const result = new Promise((resolve) => { resolveResult = resolve; });
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    if (activeVeyraModal === finish) activeVeyraModal = null;
+    if (dialog.open && typeof dialog.close === 'function') dialog.close();
+    dialog.remove();
+    resolveResult(value);
+  };
+  activeVeyraModal = finish;
+  cancel.addEventListener('click', () => finish(confirmOnly ? false : null));
+  accept.addEventListener('click', () => finish(confirmOnly ? true : input.value));
+  dialog.addEventListener('cancel', (event) => { event.preventDefault(); finish(confirmOnly ? false : null); });
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
+  (input || accept).focus();
+  return result;
+}
+
+function askText(title, initial = '') { return openVeyraModal({ title, message: title, initial }); }
+function askConfirm(message) { return openVeyraModal({ title: 'Confirm action', message, confirmOnly: true }); }
 
 const documentName = $('documentName');
 const saveState = $('saveState');
@@ -941,7 +1020,12 @@ function inspectorAction(label, iconName, onClick) {
   const text = document.createElement('span');
   text.textContent = label;
   button.appendChild(text);
-  button.onclick = onClick;
+  button.onclick = (event) => {
+    try {
+      const result = onClick?.(event);
+      if (result && typeof result.catch === 'function') result.catch((error) => showToast(error?.message || String(error), true));
+    } catch (error) { showToast(error?.message || String(error), true); }
+  };
   return button;
 }
 
@@ -1006,24 +1090,24 @@ function appendDataGraphInspector() {
   authored.grid.classList.add('oneColumn');
   const counts = document.createElement('div');
   counts.className = 'vertexSummary';
-  counts.innerHTML = `<span>${models.length} models · ${instances.length} instances · ${bindings.length} bindings</span><strong>${groups.length} groups · ${lists.length} lists</strong>`;
+  setSummaryContent(counts, `${models.length} models · ${instances.length} instances · ${bindings.length} bindings`, `${groups.length} groups · ${lists.length} lists`);
   authored.fieldset.appendChild(counts);
 
   const actions = document.createElement('div');
   actions.className = 'inlineActions';
   actions.append(
-    inspectorAction('New View Model', 'plus', () => {
-      const name = prompt('View Model name:', `View Model ${models.length + 1}`);
+    inspectorAction('New View Model', 'plus', async () => {
+      const name = await askText('View Model name', `View Model ${models.length + 1}`);
       if (!name) return;
       projectCommand('createViewModel', { overrides: { name } }, `Create View Model ${name}`);
     }),
-    inspectorAction('New Property Group', 'plus', () => {
-      const name = prompt('Property Group name:', `Properties ${groups.length + 1}`);
+    inspectorAction('New Property Group', 'plus', async () => {
+      const name = await askText('Property Group name', `Properties ${groups.length + 1}`);
       if (!name) return;
       projectCommand('createPropertyGroup', { overrides: { name, artboard: activeArtboardRef() } }, `Create Property Group ${name}`);
     }),
-    inspectorAction('New Enum', 'plus', () => {
-      const name = prompt('Enum name:', `Enum ${(store.document.enums || []).length + 1}`);
+    inspectorAction('New Enum', 'plus', async () => {
+      const name = await askText('Enum name', `Enum ${(store.document.enums || []).length + 1}`);
       if (!name) return;
       projectCommand('createEnum', { overrides: { name, values: [{ name: 'Value' }] } }, `Create enum ${name}`);
     }),
@@ -1035,9 +1119,9 @@ function appendDataGraphInspector() {
     authored.grid.append(field('Model name', model.name, (name) => projectCommand('updateViewModel', { modelId: model.id, changes: { name } }, `Rename ${model.name}`)));
     const modelActions = document.createElement('div'); modelActions.className = 'inlineActions';
     modelActions.append(
-      inspectorAction('Add property', 'plus', () => {
-        const name = prompt('Property name:', `Property ${model.properties.length + 1}`); if (!name) return;
-        const type = prompt(`Property type (${VEYRA_DATA_PROPERTY_TYPES.join(', ')}):`, 'number'); if (!type) return;
+      inspectorAction('Add property', 'plus', async () => {
+        const name = await askText('Property name', `Property ${model.properties.length + 1}`); if (!name) return;
+        const type = await askText(`Property type (${VEYRA_DATA_PROPERTY_TYPES.join(', ')})`, 'number'); if (!type) return;
         const overrides = { name, type };
         if (type === 'enum') { const item = store.document.enums?.[0]; if (!item) return showToast('Create an enum through the API before adding an enum property.', true); overrides.enum = { kind: 'enum', id: item.id }; }
         if (type === 'viewModel') overrides.viewModel = { kind: 'viewModel', id: model.id };
@@ -1064,8 +1148,8 @@ function appendDataGraphInspector() {
     if (enumValue) authored.grid.append(field('First enum value', enumValue.name, (name) => projectCommand('updateEnumValue', { enumId: enumDefinition.id, valueId: enumValue.id, changes: { name } }, `Rename enum value ${enumValue.id}`)));
     const enumActions = document.createElement('div'); enumActions.className = 'inlineActions';
     enumActions.append(
-      inspectorAction('Add enum value', 'plus', () => {
-        const name = prompt('Enum value:', `Value ${enumDefinition.values.length + 1}`); if (!name) return;
+      inspectorAction('Add enum value', 'plus', async () => {
+        const name = await askText('Enum value', `Value ${enumDefinition.values.length + 1}`); if (!name) return;
         projectCommand('addEnumValue', { enumId: enumDefinition.id, overrides: { name } }, `Add enum value ${name}`);
       }),
       ...(enumValue ? [inspectorAction('Delete first enum value', 'delete', () => projectCommand('removeEnumValue', { enumId: enumDefinition.id, valueId: enumValue.id }, `Delete enum value ${enumValue.name}`))] : []),
@@ -1076,8 +1160,8 @@ function appendDataGraphInspector() {
 
   const converter = converters[0] || null;
   const converterActions = document.createElement('div'); converterActions.className = 'inlineActions';
-  converterActions.append(inspectorAction('New converter', 'plus', () => {
-    const type = prompt(`Converter type (${VEYRA_CONVERTER_TYPES.join(', ')}):`, 'numberToString');
+  converterActions.append(inspectorAction('New converter', 'plus', async () => {
+    const type = await askText(`Converter type (${VEYRA_CONVERTER_TYPES.join(', ')})`, 'numberToString');
     if (!type) return;
     projectCommand('createConverter', { overrides: { name: type, type } }, `Create converter ${type}`);
   }));
@@ -1100,8 +1184,8 @@ function appendDataGraphInspector() {
     authored.grid.append(field('Property Group', group.name, (name) => projectCommand('updatePropertyGroup', { groupId: group.id, changes: { name } }, `Rename Property Group ${group.id}`)));
     const groupActions = document.createElement('div'); groupActions.className = 'inlineActions';
     groupActions.append(
-      inspectorAction('Add group property', 'plus', () => {
-        const name = prompt('Property Group property name:', `Value ${group.properties.length + 1}`); if (!name) return;
+      inspectorAction('Add group property', 'plus', async () => {
+        const name = await askText('Property Group property name', `Value ${group.properties.length + 1}`); if (!name) return;
         projectCommand('addPropertyGroupProperty', { groupId: group.id, overrides: { name, type: 'number', value: 0, keyable: true } }, `Add ${name}`);
       }),
       inspectorAction('Delete Property Group', 'delete', () => projectCommand('removePropertyGroup', { groupId: group.id }, `Delete Property Group ${group.name}`)),
@@ -1151,8 +1235,8 @@ function appendDataGraphInspector() {
     authored.grid.append(field('List name', ownedList.name, (name) => projectCommand('updateList', { listId: ownedList.id, changes: { name } }, `Rename list ${ownedList.id}`)));
     const itemActions = document.createElement('div'); itemActions.className = 'inlineActions';
     itemActions.append(
-      inspectorAction('Add authored item', 'plus', () => {
-        const value = prompt('List item value:', 'Item'); if (value == null) return;
+      inspectorAction('Add authored item', 'plus', async () => {
+        const value = await askText('List item value', 'Item'); if (value == null) return;
         projectCommand('addListItem', { listId: ownedList.id, overrides: { value } }, `Add item to ${ownedList.name}`);
       }),
       inspectorAction('Delete list', 'delete', () => projectCommand('removeList', { listId: ownedList.id }, `Delete list ${ownedList.name}`)),
@@ -1172,12 +1256,12 @@ function appendDataGraphInspector() {
 
   if (instance && model?.properties.length) {
     const bindingActions = document.createElement('div'); bindingActions.className = 'inlineActions';
-    bindingActions.append(inspectorAction('Bind data → property', 'link', () => {
+    bindingActions.append(inspectorAction('Bind data → property', 'link', async () => {
       const sourceProperty = dataViewModelById(store.document, instance.viewModel.id)?.properties[0];
       if (!sourceProperty) return showToast('The instance needs a data property first.', true);
       const defaultTarget = store.selectedNode ? nodePropertyAddress(store.selectedNode.id, 'opacity') : store.document.nodes[0] ? nodePropertyAddress(store.document.nodes[0].id, 'opacity') : '';
-      const address = prompt('Target property address:', defaultTarget); if (!address) return;
-      const mode = prompt('Binding mode (oneWay or twoWay):', 'oneWay') || 'oneWay';
+      const address = await askText('Target property address', defaultTarget); if (!address) return;
+      const mode = await askText('Binding mode (oneWay or twoWay)', 'oneWay') || 'oneWay';
       projectCommand('createBinding', { overrides: { name: `${sourceProperty.name} Binding`, artboard: activeArtboardRef(), source: { kind: 'data', instance: { kind: 'viewModelInstance', id: instance.id }, path: [{ kind: 'dataProperty', id: sourceProperty.id }] }, target: { kind: 'property', address }, mode } }, `Create binding ${sourceProperty.name}`);
     }));
     authored.fieldset.appendChild(bindingActions);
@@ -1205,8 +1289,8 @@ function appendDataGraphInspector() {
   for (const current of instances) {
     const currentModel = dataViewModelById(store.document, current.viewModel.id);
     if (!currentModel) continue;
-    const summary = document.createElement('div'); summary.className = 'vertexSummary';
-    summary.innerHTML = `<span>${current.name}</span><strong>${current.id}</strong>`; runtime.fieldset.appendChild(summary);
+    const summary = setSummaryContent(document.createElement('div'), current.name, current.id);
+    summary.className = 'vertexSummary'; runtime.fieldset.appendChild(summary);
     for (const property of currentModel.properties) {
       if (property.type === 'trigger') {
         const row = document.createElement('div'); row.className = 'inlineActions';
@@ -1225,8 +1309,8 @@ function appendDataGraphInspector() {
   const runtimeActions = document.createElement('div'); runtimeActions.className = 'inlineActions';
   runtimeActions.append(inspectorAction('Reset runtime', 'reset', () => { dataRuntime.reset({ source: 'human-preview' }); evaluateCurrentFrame(); renderInspector(); }));
   const runtimeList = lists.find((item) => instances.some((candidate) => candidate.id === item.owner.id));
-  if (runtimeList) runtimeActions.append(inspectorAction('Add runtime list item', 'plus', () => {
-    const value = prompt('Runtime list value:', 'Preview Item'); if (value == null) return;
+  if (runtimeList) runtimeActions.append(inspectorAction('Add runtime list item', 'plus', async () => {
+    const value = await askText('Runtime list value', 'Preview Item'); if (value == null) return;
     dataRuntime.insertListItem(runtimeList.id, value); evaluateCurrentFrame(); renderInspector();
   }));
   runtime.fieldset.appendChild(runtimeActions);
@@ -1448,7 +1532,7 @@ function appendListenerInspector(node) {
   for (const listener of attached) {
     const summary = document.createElement('div');
     summary.className = 'vertexSummary';
-    summary.innerHTML = `<span>${listener.event} → ${listener.action}</span><strong>${listener.id}</strong>`;
+    setSummaryContent(summary, `${listener.event} → ${listener.action}`, listener.id);
     interactions.fieldset.appendChild(summary);
     interactions.grid.append(
       field('Event', listener.event, (event) => listenerCommand('updateListener', { listenerId: listener.id, changes: { event } }, `Set listener ${listener.id} event`), {
@@ -1636,7 +1720,7 @@ function renderNodeInspector(node) {
         );
       }
       const summary = document.createElement('div'); summary.className = 'vertexSummary';
-      summary.innerHTML = `<span>Stable pathVertex refs</span><strong>${node.geometry.vertices.length}</strong>`;
+      setSummaryContent(summary, 'Stable pathVertex refs', node.geometry.vertices.length);
       const actions = document.createElement('div'); actions.className = 'pathVertexActions';
       actions.append(
         inspectorAction('Add vertex', 'plus', () => addPathVertex(node)),
@@ -1766,7 +1850,7 @@ function renderMeshInspector(mesh) {
   const nonNormalized = weightSums.filter((sum) => sum > 0 && Math.abs(sum - 1) > 1e-6).length;
   const stats = document.createElement('div');
   stats.className = 'vertexSummary';
-  stats.innerHTML = `<span>${mesh.vertices.length} vertices · ${mesh.triangles.length} triangles</span><strong class="${unweighted || nonNormalized ? 'diagnosticWarn' : 'diagnosticGood'}">${unweighted} unweighted / ${nonNormalized} off-sum</strong>`;
+  setSummaryContent(stats, `${mesh.vertices.length} vertices · ${mesh.triangles.length} triangles`, `${unweighted} unweighted / ${nonNormalized} off-sum`, unweighted || nonNormalized ? 'diagnosticWarn' : 'diagnosticGood');
   weights.fieldset.appendChild(stats);
   const actions = document.createElement('div');
   actions.className = 'inlineActions';
@@ -2523,7 +2607,12 @@ function graphInspectorButton(label, onClick, className = 'graphInspectorButton'
   button.type = 'button';
   button.className = className;
   button.textContent = label;
-  button.addEventListener('click', onClick);
+  button.addEventListener('click', (event) => {
+    try {
+      const result = onClick?.(event);
+      if (result && typeof result.catch === 'function') result.catch((error) => showToast(error?.message || String(error), true));
+    } catch (error) { showToast(error?.message || String(error), true); }
+  });
   return button;
 }
 
@@ -2665,8 +2754,8 @@ function renderGraphInspector(machine, layer, evaluation) {
     machineOwnershipReadout.appendChild(name);
     const actions = document.createElement('div');
     actions.className = 'graphInspectorActions';
-    actions.appendChild(graphInspectorButton('Delete state', () => {
-      if (confirm(`Delete state “${state.name}”?`)) projectCommand('removeMachineState', { machineId: machine.id, stateId: state.id }, `Delete state ${state.name}`);
+    actions.appendChild(graphInspectorButton('Delete state', async () => {
+      if (await askConfirm(`Delete state “${state.name}”?`)) projectCommand('removeMachineState', { machineId: machine.id, stateId: state.id }, `Delete state ${state.name}`);
     }, 'graphInspectorButton graphDanger'));
     machineOwnershipReadout.appendChild(actions);
     appendBlendChildInspector(machineOwnershipReadout, machine, layer, state);
@@ -2724,8 +2813,8 @@ function renderGraphInspector(machine, layer, evaluation) {
   appendConditionInspector(machineOwnershipReadout, machine, transition);
   appendMachineActionInspector(machineOwnershipReadout, machine, 'transition', transition);
   const actions = document.createElement('div'); actions.className = 'graphInspectorActions';
-  actions.appendChild(graphInspectorButton('Delete transition', () => {
-    if (confirm('Delete this transition?')) projectCommand('removeMachineTransition', { machineId: machine.id, transitionId: transition.id }, `Delete transition ${transition.id}`);
+  actions.appendChild(graphInspectorButton('Delete transition', async () => {
+    if (await askConfirm('Delete this transition?')) projectCommand('removeMachineTransition', { machineId: machine.id, transitionId: transition.id }, `Delete transition ${transition.id}`);
   }, 'graphInspectorButton graphDanger'));
   machineOwnershipReadout.appendChild(actions);
 }
@@ -2775,21 +2864,21 @@ function wireMachineGraph() {
     graphLayerId = machineLayerSelect.value || null;
     renderMachineGraphPanel();
   });
-  machineAddMachine?.addEventListener('click', () => {
-    const name = prompt('State machine name:', `Machine ${(store.document.stateMachines || []).length + 1}`);
+  machineAddMachine?.addEventListener('click', async () => {
+    const name = await askText('State machine name', `Machine ${(store.document.stateMachines || []).length + 1}`);
     if (!name) return;
     const id = projectCommand('addStateMachine', { overrides: { name } }, `Create state machine ${name}`);
     if (id) { graphMachineId = id; graphLayerId = null; renderMachineGraphPanel(); showToast(`State machine “${name}” created`); }
   });
-  machineAddLayer?.addEventListener('click', () => {
+  machineAddLayer?.addEventListener('click', async () => {
     const machine = graphMachine(); if (!machine) return;
-    const name = prompt('Layer name:', `Layer ${machine.layers.length + 1}`); if (!name) return;
+    const name = await askText('Layer name', `Layer ${machine.layers.length + 1}`); if (!name) return;
     const id = projectCommand('addMachineLayer', { machineId: machine.id, overrides: { name } }, `Add layer ${name}`);
     if (id) { graphLayerId = id; renderMachineGraphPanel(); }
   });
-  machineRenameLayer?.addEventListener('click', () => {
+  machineRenameLayer?.addEventListener('click', async () => {
     const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer) return;
-    const name = prompt('Layer name:', layer.name); if (!name || name === layer.name) return;
+    const name = await askText('Layer name', layer.name); if (!name || name === layer.name) return;
     projectCommand('updateMachineLayer', { machineId: machine.id, layerId: layer.id, changes: { name } }, `Rename layer ${layer.id}`);
   });
   const moveLayer = (delta) => {
@@ -2804,9 +2893,9 @@ function wireMachineGraph() {
     const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer) return;
     projectCommand('updateMachineLayer', { machineId: machine.id, layerId: layer.id, changes: { enabled: layer.enabled === false } }, `${layer.enabled === false ? 'Enable' : 'Disable'} layer ${layer.name}`);
   });
-  machineRemoveLayer?.addEventListener('click', () => {
+  machineRemoveLayer?.addEventListener('click', async () => {
     const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer || machine.layers.length <= 1) return;
-    if (confirm(`Remove layer “${layer.name}”?`)) projectCommand('removeMachineLayer', { machineId: machine.id, layerId: layer.id }, `Remove layer ${layer.name}`);
+    if (await askConfirm(`Remove layer “${layer.name}”?`)) projectCommand('removeMachineLayer', { machineId: machine.id, layerId: layer.id }, `Remove layer ${layer.name}`);
   });
   machineAddState?.addEventListener('click', () => {
     const machine = graphMachine(); const layer = graphLayer(machine); if (!machine || !layer) return;
@@ -2842,7 +2931,7 @@ function wireMachineGraph() {
     const stateId = event.target.closest?.('[data-state-id]')?.dataset.stateId;
     if (!stateId || event.button !== 0) return;
     const point = graphPointerPoint(event);
-    if (!graphEditorState.beginDrag(stateId, point)) return;
+    if (!graphEditorState.beginDrag(stateId, point, { additive: event.shiftKey })) return;
     graphDrag = { stateId, machineId: graphMachine()?.id, pointerId: event.pointerId };
     machineGraphCanvas.setPointerCapture?.(event.pointerId);
     event.preventDefault();
@@ -2868,14 +2957,14 @@ function wireMachineGraph() {
     } else graphEditorState.panBy({ x: event.shiftKey ? -event.deltaY : -event.deltaX, y: event.shiftKey ? 0 : -event.deltaY });
     renderGraphSvgOnly();
   }, { passive: false });
-  machineGraphCanvas.addEventListener('keydown', (event) => {
+  machineGraphCanvas.addEventListener('keydown', async (event) => {
     if (event.key === '+' || event.key === '=') graphEditorState.zoomAt(1.1);
     else if (event.key === '-' || event.key === '_') graphEditorState.zoomAt(0.9);
     else if (event.key === '0') graphEditorState.setPan({ x: 0, y: 0 });
     else if (event.key === 'Delete' || event.key === 'Backspace') {
       const selected = graphEditorState.selected; const machine = graphMachine();
-      if (selected?.kind === 'machineState' && machine && confirm('Delete selected state?')) projectCommand('removeMachineState', { machineId: machine.id, stateId: selected.id }, 'Delete selected state');
-      if (selected?.kind === 'machineTransition' && machine && confirm('Delete selected transition?')) projectCommand('removeMachineTransition', { machineId: machine.id, transitionId: selected.id }, 'Delete selected transition');
+      if (selected?.kind === 'machineState' && machine && await askConfirm('Delete selected state?')) projectCommand('removeMachineState', { machineId: machine.id, stateId: selected.id }, 'Delete selected state');
+      if (selected?.kind === 'machineTransition' && machine && await askConfirm('Delete selected transition?')) projectCommand('removeMachineTransition', { machineId: machine.id, transitionId: selected.id }, 'Delete selected transition');
     }
     renderMachineGraphPanel();
   });
@@ -3151,8 +3240,8 @@ documentName.addEventListener('change', () => {
   commit('Rename document', (documentModel) => { documentModel.name = next; });
 });
 
-$('newDocument').onclick = () => {
-  if (store.revision !== savedRevision && !confirm('Create a new Veyra document? Your current work is autosaved but not downloaded.')) return;
+$('newDocument').onclick = async () => {
+  if (store.revision !== savedRevision && !await askConfirm('Create a new Veyra document? Your current work is autosaved but not downloaded.')) return;
   store.replaceDocument(createDocument({ name: 'Untitled Veyra' }), 'new document');
   activeArtboardId = store.document.artboards[0].id;
   savedRevision = store.revision;
@@ -3256,8 +3345,8 @@ timelineSelect.onchange = () => {
   renderTimeline();
 };
 
-timelineAdd.onclick = () => {
-  const name = prompt('Timeline name:', `Timeline ${store.document.timelines.length + 1}`);
+timelineAdd.onclick = async () => {
+  const name = await askText('Timeline name', `Timeline ${store.document.timelines.length + 1}`);
   if (!name) return;
   try {
     const id = store.addTimeline({ name, duration: 60, fps: 30, artboard: activeArtboardRef() }, `Create timeline ${name}`);
@@ -3269,10 +3358,10 @@ timelineAdd.onclick = () => {
   }
 };
 
-timelineDelete.onclick = () => {
+timelineDelete.onclick = async () => {
   if (!activeTimelineId) return;
   const timeline = timelineById(store.document, activeTimelineId);
-  if (!confirm(`Delete timeline "${timeline.name}"?`)) return;
+  if (!await askConfirm(`Delete timeline "${timeline.name}"?`)) return;
   try {
     store.removeTimeline(activeTimelineId, `Delete timeline ${timeline.name}`);
     activeTimelineId = store.document.timelines[0]?.id || null;
@@ -4285,8 +4374,13 @@ globalThis.veyra = Object.freeze({
       source: 'script',
     });
   },
-  addMachineState: (machineId, { name = 'State', timelineId, type = 'animation', layerId } = {}) => {
-    return dispatchCompatibilityCommand('addMachineState', { machineId, layerId, overrides: { name, type, timelineId } }, {
+  addMachineState: (machineId, options = {}) => {
+    const { name = 'State', timelineId, type = 'animation', layerId, ...rest } = options || {};
+    return dispatchCompatibilityCommand('addMachineState', {
+      machineId,
+      layerId,
+      overrides: { ...rest, name, type, ...(timelineId === undefined ? {} : { timelineId }) },
+    }, {
       label: `Add state ${name}`,
       source: 'script',
     });
@@ -4296,12 +4390,15 @@ globalThis.veyra = Object.freeze({
       label: 'Delete machine state', source: 'script',
     }));
   },
-  addMachineTransition: (machineId, { from, to, duration = 0, after, conditions = [], layerId } = {}) => {
+  addMachineTransition: (machineId, options = {}) => {
+    const { from, to, duration = 0, after, conditions = [], layerId, ...rest } = options || {};
     return dispatchCompatibilityCommand('addMachineTransition', {
       machineId, layerId,
       overrides: {
-        from, to, duration, after,
-        conditions: conditions.map((condition) => ({ input: condition.input, op: condition.op, value: condition.value })),
+        ...rest,
+        from, to, duration,
+        ...(after === undefined ? {} : { after }),
+        conditions: conditions.map((condition) => ({ ...condition })),
       },
     }, { label: 'Add machine transition', source: 'script' });
   },
@@ -4374,6 +4471,8 @@ globalThis.veyra = Object.freeze({
   })),
   setMachineInput: (machineId, nameOrId, value) => machineRuntime(machineId).setInput(nameOrId, value),
   fireMachineInput: (machineId, nameOrId) => machineRuntime(machineId).fire(nameOrId),
+  setMachineRuntimeValue: (machineId, name, value) => machineRuntime(machineId).setRuntimeValue(name, value),
+  getMachineRuntimeValue: (machineId, name) => machineRuntime(machineId).getRuntimeValue(name),
   stepMachine: (machineId, deltaSeconds = 1 / 30) => machineRuntime(machineId).step(deltaSeconds),
   getMachineState: (machineId) => cloneValue(machineRuntime(machineId).evaluate()),
   resetMachine: (machineId) => machineRuntime(machineId).reset(),

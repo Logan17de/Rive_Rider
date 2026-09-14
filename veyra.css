@@ -287,6 +287,18 @@ button svg,
 .textButton { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 700; }
 .textButton:hover:not(:disabled) { border-color: #9f1239; color: #fecdd3; background: rgb(159 18 57 / 18%); }
 
+/* Browser-safe replacement for blocking prompt()/confirm() calls. The
+   editor also runs in embedded browser shells where those APIs are disabled. */
+.veyraModal { width: min(420px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-2); color: var(--text); box-shadow: 0 24px 70px rgb(0 0 0 / 48%); }
+.veyraModal::backdrop { background: rgb(4 3 7 / 68%); backdrop-filter: blur(2px); }
+.veyraModalForm { display: grid; gap: 12px; padding: 18px; }
+.veyraModalForm h3 { margin: 0; color: var(--text-strong); font-size: 15px; }
+.veyraModalForm p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.veyraModalInput { width: 100%; min-height: 36px; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); }
+.veyraModalInput:focus { outline: 2px solid var(--ui-accent); outline-offset: 1px; }
+.veyraModalActions { display: flex; justify-content: flex-end; gap: 8px; }
+.veyraModalActions .textButton, .veyraModalActions .primaryButton { width: auto; min-width: 88px; }
+
 .stagePanel { display: grid; grid-template-rows: auto auto minmax(0, 1fr) 34px; }
 
 .stageToolbar { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }

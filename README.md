@@ -21,8 +21,13 @@ names.
 From the repository root:
 
 ```powershell
-python -m http.server 8000
+npm start
 ```
+
+The dependency-free Node server binds to `127.0.0.1:8000` by default. Set
+`PORT` or `VEYRA_HOST` to change the bind address; `npm run dev` is an alias.
+Python's `http.server` remains a compatible fallback for environments that
+already use it.
 
 Then open `http://localhost:8000/`. The root redirects to
 `http://localhost:8000/veyra.html`.

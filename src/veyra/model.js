@@ -73,6 +73,34 @@ export const VEYRA_LISTENER_ACTIONS = Object.freeze(['setInput', 'fire', 'play',
 export const VEYRA_POINTER_EVENT_MODES = Object.freeze(['auto', 'none', 'pass-through']);
 export const VEYRA_MIME = 'application/vnd.veyra+json';
 export const VEYRA_ASSET_TYPES = Object.freeze(['image', 'font', 'audio']);
+// Generous ceilings keep untrusted imports from turning normalization or
+// rendering into an unbounded memory/time operation.
+export const VEYRA_DOCUMENT_LIMITS = Object.freeze({
+  nodes: 10000,
+  assets: 5000,
+  bones: 10000,
+  meshes: 5000,
+  meshTriangles: 200000,
+  controls: 5000,
+  constraints: 10000,
+  timelines: 2000,
+  tracksPerTimeline: 10000,
+  keyframesPerTrack: 100000,
+  stateMachines: 500,
+  machineLayers: 1000,
+  machineInputs: 5000,
+  statesPerLayer: 10000,
+  transitionsPerLayer: 20000,
+  conditionsPerTransition: 10000,
+  actionsPerOwner: 10000,
+  blendChildrenPerState: 10000,
+  listeners: 10000,
+  featureRecords: 10000,
+  textRunsPerRecord: 10000,
+  layoutItemsPerRecord: 10000,
+  eventActionsPerRecord: 10000,
+  assetSourceChars: 32 * 1024 * 1024,
+});
 export const VEYRA_CONSTRAINT_TYPES = Object.freeze([
   'ik',
   'distance',
@@ -114,6 +142,18 @@ export const VEYRA_CONDITION_OPS = Object.freeze([
   '!=',
   'fired',
   '!fired',
+]);
+// Built-in condition sources are deliberately finite and typed. They expose
+// stable artboard metadata plus runtime values supplied by the player/host;
+// arbitrary property paths are rejected during normalization so a document
+// cannot turn transition evaluation into an ambient object read.
+export const VEYRA_MACHINE_BUILTIN_ARTBOARD_VALUES = Object.freeze([
+  'x', 'y', 'width', 'height', 'aspect', 'area',
+]);
+export const VEYRA_MACHINE_BUILTIN_RUNTIME_VALUES = Object.freeze([
+  'time', 'frame', 'progress', 'stateTime', 'stateProgress',
+  'transitionProgress', 'speed', 'playing', 'pointerX', 'pointerY',
+  'scrollX', 'scrollY', 'viewportWidth', 'viewportHeight',
 ]);
 export const VEYRA_MACHINE_ACTION_PHASES = Object.freeze([
   'state-start', 'state-end', 'transition-start', 'transition-end',
@@ -563,13 +603,45 @@ function normalizeMachineDataEndpoint(value, path) {
   return endpoint;
 }
 
+function normalizeMachineBuiltinSource(value, path) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${path} must be a built-in source object.`);
+  }
+  const kind = String(value.kind || '');
+  if (kind === 'artboard') {
+    const property = String(value.property ?? value.path ?? value.value ?? '');
+    if (!VEYRA_MACHINE_BUILTIN_ARTBOARD_VALUES.includes(property)) {
+      throw new TypeError(`${path}.property must be one of ${VEYRA_MACHINE_BUILTIN_ARTBOARD_VALUES.join(', ')}.`);
+    }
+    const artboardValue = value.artboard ?? value.artboardId;
+    const artboard = artboardValue == null || artboardValue === ''
+      ? null
+      : requiredReference(artboardValue, 'artboard', `${path}.artboard`);
+    return { kind, property, ...(artboard ? { artboard } : {}) };
+  }
+  if (kind === 'runtime') {
+    const property = String(value.property ?? value.path ?? value.value ?? '');
+    if (!VEYRA_MACHINE_BUILTIN_RUNTIME_VALUES.includes(property)) {
+      throw new TypeError(`${path}.property must be one of ${VEYRA_MACHINE_BUILTIN_RUNTIME_VALUES.join(', ')}.`);
+    }
+    return { kind, property };
+  }
+  throw new TypeError(`${path}.kind must be data, artboard, or runtime.`);
+}
+
+function normalizeMachineSource(value, path) {
+  if (value?.kind === 'data') return normalizeMachineDataEndpoint(value, path);
+  if (value?.kind === 'artboard' || value?.kind === 'runtime') return normalizeMachineBuiltinSource(value, path);
+  throw new TypeError(`${path} must be a View Model data endpoint or built-in source.`);
+}
+
 export function createMachineCondition(overrides = {}) {
   const op = String(overrides.op || '');
   if (!VEYRA_CONDITION_OPS.includes(op)) throw new TypeError(`Unsupported condition operator: ${op}`);
   const hasDataSource = overrides.source != null;
   const hasLegacyInput = overrides.input != null || overrides.inputId != null;
   if (hasDataSource && hasLegacyInput) throw new TypeError('condition cannot define both source and input.');
-  const source = hasDataSource ? normalizeMachineDataEndpoint(overrides.source, 'condition.source') : null;
+  const source = hasDataSource ? normalizeMachineSource(overrides.source, 'condition.source') : null;
   const input = hasLegacyInput ? normalizeReference(overrides.input ?? overrides.inputId, 'machineInput', 'condition.input') : null;
   if (!source && !input) throw new TypeError('condition.source or condition.input is required.');
   const condition = {
@@ -582,7 +654,7 @@ export function createMachineCondition(overrides = {}) {
     return condition;
   }
   if (overrides.compare != null && overrides.value !== undefined) throw new TypeError('condition cannot define both compare and value.');
-  if (overrides.compare != null) condition.compare = normalizeMachineDataEndpoint(overrides.compare, 'condition.compare');
+  if (overrides.compare != null) condition.compare = normalizeMachineSource(overrides.compare, 'condition.compare');
   else {
     if (overrides.value === undefined) throw new TypeError(`condition.value is required for operator ${op} when condition.compare is absent.`);
     condition.value = cloneValue(overrides.value);
@@ -591,6 +663,8 @@ export function createMachineCondition(overrides = {}) {
 }
 
 export function createMachineLayer(overrides = {}) {
+  if (Array.isArray(overrides.states) && overrides.states.length > VEYRA_DOCUMENT_LIMITS.statesPerLayer) throw new RangeError(`machineLayer.states exceeds the ${VEYRA_DOCUMENT_LIMITS.statesPerLayer} state limit.`);
+  if (Array.isArray(overrides.transitions) && overrides.transitions.length > VEYRA_DOCUMENT_LIMITS.transitionsPerLayer) throw new RangeError(`machineLayer.transitions exceeds the ${VEYRA_DOCUMENT_LIMITS.transitionsPerLayer} transition limit.`);
   const states = (overrides.states || []).map((state) => createMachineState(state));
   const transitions = (overrides.transitions || []).map((transition) => createMachineTransition(transition));
   const layer = {
@@ -628,8 +702,8 @@ export function createMachineBlendChild(overrides = {}) {
   if (overrides.threshold != null) child.threshold = finite(overrides.threshold, 'blendChild.threshold');
   if (overrides.input != null || overrides.inputId != null) {
     const input = overrides.input ?? overrides.inputId;
-    child.input = input && typeof input === 'object' && input.kind === 'data'
-      ? normalizeMachineDataEndpoint(input, 'blendChild.input')
+    child.input = input && typeof input === 'object' && (input.kind === 'data' || input.kind === 'artboard' || input.kind === 'runtime')
+      ? normalizeMachineSource(input, 'blendChild.input')
       : normalizeReference(input, 'machineInput', 'blendChild.input');
   }
   return child;
@@ -659,19 +733,22 @@ export function createMachineState(overrides = {}) {
     ...(overrides.randomizeExit ? { randomizeExit: true } : {}),
   };
   if (result.randomizeExit && ['entry', 'exit', 'any'].includes(type)) throw new TypeError(`${type} pseudo-states cannot enable Randomize Exit.`);
+  if (Array.isArray(overrides.actions) && overrides.actions.length > VEYRA_DOCUMENT_LIMITS.actionsPerOwner) throw new RangeError(`state.actions exceeds the ${VEYRA_DOCUMENT_LIMITS.actionsPerOwner} action limit.`);
   const actions = (overrides.actions || []).map(createMachineAction);
   if (actions.some(action => !['state-start', 'state-end'].includes(action.phase))) throw new TypeError('State lifecycle action phase must be state-start or state-end.');
   if (['entry', 'exit', 'any'].includes(type) && actions.length) throw new TypeError(`${type} pseudo-states cannot own lifecycle actions.`);
   if (actions.length) result.actions = actions;
   if (type === 'blend1d') {
     const input = overrides.input ?? overrides.inputId;
-    result.input = input && typeof input === 'object' && input.kind === 'data'
-      ? normalizeMachineDataEndpoint(input, 'state.input')
+    result.input = input && typeof input === 'object' && (input.kind === 'data' || input.kind === 'artboard' || input.kind === 'runtime')
+      ? normalizeMachineSource(input, 'state.input')
       : normalizeReference(input, 'machineInput', 'state.input');
     if (!result.input) throw new TypeError('blend1d states require a numeric machine input reference.');
+    if (Array.isArray(overrides.children) && overrides.children.length > VEYRA_DOCUMENT_LIMITS.blendChildrenPerState) throw new RangeError(`state.children exceeds the ${VEYRA_DOCUMENT_LIMITS.blendChildrenPerState} child limit.`);
     result.children = (overrides.children || []).map(createMachineBlendChild);
     if (result.children.length < 2) throw new TypeError('blend1d states require at least two children.');
   } else if (type === 'directBlend' || type === 'additiveBlend') {
+    if (Array.isArray(overrides.children) && overrides.children.length > VEYRA_DOCUMENT_LIMITS.blendChildrenPerState) throw new RangeError(`state.children exceeds the ${VEYRA_DOCUMENT_LIMITS.blendChildrenPerState} child limit.`);
     result.children = (overrides.children || []).map(createMachineBlendChild);
     if (!result.children.length) throw new TypeError(`${type} states require at least one child.`);
     if (result.children.some(child => !child.input)) throw new TypeError(`${type} children require numeric machine input references.`);
@@ -706,6 +783,7 @@ export function createMachineTransition(overrides = {}) {
   if (duration < 0) throw new RangeError('transition.duration must be zero or positive.');
   const easing = String(overrides.easing || 'linear');
   if (!VEYRA_EASING_TYPES.includes(easing)) throw new TypeError(`transition.easing must be one of ${VEYRA_EASING_TYPES.join(', ')}.`);
+  if (Array.isArray(overrides.conditions) && overrides.conditions.length > VEYRA_DOCUMENT_LIMITS.conditionsPerTransition) throw new RangeError(`transition.conditions exceeds the ${VEYRA_DOCUMENT_LIMITS.conditionsPerTransition} condition limit.`);
   const transition = {
     id: overrides.id || createId('machineTransition'),
     from,
@@ -724,6 +802,7 @@ export function createMachineTransition(overrides = {}) {
     if (!(randomWeight > 0)) throw new RangeError('transition.randomWeight must be positive.');
     transition.randomWeight = randomWeight;
   }
+  if (Array.isArray(overrides.actions) && overrides.actions.length > VEYRA_DOCUMENT_LIMITS.actionsPerOwner) throw new RangeError(`transition.actions exceeds the ${VEYRA_DOCUMENT_LIMITS.actionsPerOwner} action limit.`);
   const actions = (overrides.actions || []).map(createMachineAction);
   if (actions.some(action => !['transition-start', 'transition-end'].includes(action.phase))) throw new TypeError('Transition lifecycle action phase must be transition-start or transition-end.');
   if (actions.length) transition.actions = actions;
@@ -745,6 +824,8 @@ export function createStateMachine(overrides = {}) {
       id: `machineLayer_${id}_default`, name: 'Base Layer', order: 0, enabled: true,
       initial: overrides.initial ?? null, states: overrides.states || [], transitions: overrides.transitions || [], graph: { x: 0, y: 0 },
     }];
+  if (rawLayers.length > VEYRA_DOCUMENT_LIMITS.machineLayers) throw new RangeError(`stateMachine.layers exceeds the ${VEYRA_DOCUMENT_LIMITS.machineLayers} layer limit.`);
+  if (Array.isArray(overrides.inputs) && overrides.inputs.length > VEYRA_DOCUMENT_LIMITS.machineInputs) throw new RangeError(`stateMachine.inputs exceeds the ${VEYRA_DOCUMENT_LIMITS.machineInputs} input limit.`);
   const layers = rawLayers.map((layer, index) => createMachineLayer({ ...layer, order: layer.order ?? index }));
   layers.sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id));
   layers.forEach((layer,index)=>{ layer.order=index; });
@@ -846,6 +927,19 @@ export function createDocument(overrides = {}) {
     propertyGroups: cloneValue(overrides.propertyGroups || []),
     lists: cloneValue(overrides.lists || []),
     bindings: cloneValue(overrides.bindings || []),
+    // Feature graph collections are optional on the raw builder so legacy
+    // callers keep their compact shape, but callers can now author a complete
+    // document in one `createDocument({ ... })` call without silently losing
+    // text/layout/event/media records before normalization.
+    ...(overrides.texts !== undefined ? { texts: cloneValue(overrides.texts || []) } : {}),
+    ...(overrides.layouts !== undefined ? { layouts: cloneValue(overrides.layouts || []) } : {}),
+    ...(overrides.events !== undefined ? { events: cloneValue(overrides.events || []) } : {}),
+    ...(overrides.accessibility !== undefined ? { accessibility: cloneValue(overrides.accessibility || []) } : {}),
+    ...(overrides.scripts !== undefined ? { scripts: cloneValue(overrides.scripts || []) } : {}),
+    ...(overrides.shaders !== undefined ? { shaders: cloneValue(overrides.shaders || []) } : {}),
+    ...(overrides.renderPresets !== undefined ? { renderPresets: cloneValue(overrides.renderPresets || []) } : {}),
+    ...(overrides.interchangeAssets !== undefined ? { interchangeAssets: cloneValue(overrides.interchangeAssets || []) } : {}),
+    ...(overrides.featureVersion !== undefined ? { featureVersion: overrides.featureVersion } : {}),
   };
 }
 
@@ -1039,8 +1133,8 @@ function normalizeAsset(asset, index) {
     throw new TypeError(`assets[${index}].source.kind must be "external" or "embedded".`);
   }
   const source = sourceKind === 'external'
-    ? { kind: sourceKind, uri: String(asset.source.uri || '') }
-    : { kind: sourceKind, data: String(asset.source.data || '') };
+    ? { kind: sourceKind, uri: safeAssetUri(asset.source.uri, `assets[${index}].source.uri`) }
+    : { kind: sourceKind, data: boundedAssetSource(asset.source.data, `assets[${index}].source.data`) };
   const optionalMetric = (value, path) => value == null ? null : bounded(value, path, 0, 1000000000);
   return {
     id,
@@ -1054,6 +1148,21 @@ function normalizeAsset(asset, index) {
       duration: optionalMetric(asset.metadata?.duration, `assets[${index}].metadata.duration`),
     },
   };
+}
+
+function safeAssetUri(value, path) {
+  const uri = String(value || '').trim();
+  if (/^(?:javascript|vbscript):/i.test(uri)) throw new TypeError(`${path} cannot use a script URL.`);
+  if (/^data:text\/html/i.test(uri)) throw new TypeError(`${path} cannot use an HTML data URL.`);
+  return uri;
+}
+
+function boundedAssetSource(value, path) {
+  const data = String(value || '');
+  if (data.length > VEYRA_DOCUMENT_LIMITS.assetSourceChars) {
+    throw new RangeError(`${path} exceeds the ${VEYRA_DOCUMENT_LIMITS.assetSourceChars} character asset limit.`);
+  }
+  return data;
 }
 
 function normalizeRigTransform(transform, path, anglesUseDegrees) {
@@ -1142,6 +1251,9 @@ function normalizeMesh(mesh, index, inputVersion) {
     };
   });
   if (!Array.isArray(mesh.triangles)) throw new TypeError(`meshes[${index}].triangles must be an array.`);
+  if (mesh.triangles.length > VEYRA_DOCUMENT_LIMITS.meshTriangles) {
+    throw new RangeError(`meshes[${index}].triangles exceeds the ${VEYRA_DOCUMENT_LIMITS.meshTriangles} triangle limit.`);
+  }
   const triangles = mesh.triangles.map((triangle, triangleIndex) => {
     if (!Array.isArray(triangle) || triangle.length !== 3) {
       throw new TypeError(`meshes[${index}].triangles[${triangleIndex}] must contain three vertex references.`);
@@ -1333,6 +1445,9 @@ function normalizeTrack(track, timelinePath, index, inputVersion) {
   if (!Array.isArray(track?.keyframes)) {
     throw new TypeError(`${trackPath}.keyframes must be an array.`);
   }
+  if (track.keyframes.length > VEYRA_DOCUMENT_LIMITS.keyframesPerTrack) {
+    throw new RangeError(`${trackPath}.keyframes exceeds the ${VEYRA_DOCUMENT_LIMITS.keyframesPerTrack} keyframe limit.`);
+  }
   const keyframes = track.keyframes
     .map((keyframe, kfIndex) => normalizeKeyframe(keyframe, trackPath, kfIndex, address, inputVersion, id))
     .sort((a, b) => a.frame - b.frame);
@@ -1355,6 +1470,9 @@ function normalizeTimeline(timeline, index, inputVersion) {
   }
   if (!Array.isArray(timeline?.tracks)) {
     throw new TypeError(`timelines[${index}].tracks must be an array.`);
+  }
+  if (timeline.tracks.length > VEYRA_DOCUMENT_LIMITS.tracksPerTimeline) {
+    throw new RangeError(`timelines[${index}].tracks exceeds the ${VEYRA_DOCUMENT_LIMITS.tracksPerTimeline} track limit.`);
   }
   const tracks = timeline.tracks.map((track, trackIndex) =>
     normalizeTrack(track, `timelines[${index}]`, trackIndex, inputVersion)
@@ -1412,7 +1530,7 @@ function normalizeMachineCondition(condition, path, inputsById) {
   const hasLegacyInput = condition?.input != null || condition?.inputId != null;
   if (hasDataSource && hasLegacyInput) throw new TypeError(`${path} cannot define both source and input.`);
   let source = null, input = null;
-  if (hasDataSource) source = normalizeMachineDataEndpoint(condition.source, `${path}.source`);
+  if (hasDataSource) source = normalizeMachineSource(condition.source, `${path}.source`);
   else {
     const inputRef = requiredReference(condition?.input ?? condition?.inputId, 'machineInput', `${path}.input`);
     const inputKey = referenceId(inputRef, 'machineInput');
@@ -1437,7 +1555,7 @@ function normalizeMachineCondition(condition, path, inputsById) {
   }
   const result = { id, ...(source ? { source } : { input: { kind: 'machineInput', id: input.id } }), op };
   if (op === 'fired' || op === '!fired') return result;
-  if (hasCompare) result.compare = normalizeMachineDataEndpoint(condition.compare, `${path}.compare`);
+  if (hasCompare) result.compare = normalizeMachineSource(condition.compare, `${path}.compare`);
   else {
     if (condition?.value === undefined) throw new TypeError(`${path}.value or compare is required for operator ${op}.`);
     result.value = cloneValue(condition.value);
@@ -1470,6 +1588,25 @@ function machineDataEndpointDescriptor(document, endpointInput, path) {
   return dataTypeDescriptor(property);
 }
 
+function machineBuiltinSourceDescriptor(document, endpointInput, path) {
+  const endpoint = normalizeMachineBuiltinSource(endpointInput, path);
+  if (endpoint.kind === 'artboard') {
+    const artboardId = endpoint.artboard?.id || document.artboards?.[0]?.id;
+    const artboard = (document.artboards || []).find((candidate) => candidate.id === artboardId);
+    if (!artboard) throw new TypeError(`${path}.artboard references missing artboard ${artboardId}.`);
+    return { type: 'number', ...(endpoint.property === 'width' ? { min: artboard.width, max: artboard.width } : {}), ...(endpoint.property === 'height' ? { min: artboard.height, max: artboard.height } : {}) };
+  }
+  const numeric = ['time', 'frame', 'progress', 'stateTime', 'stateProgress', 'transitionProgress', 'speed', 'pointerX', 'pointerY', 'scrollX', 'scrollY', 'viewportWidth', 'viewportHeight'];
+  return { type: numeric.includes(endpoint.property) ? 'number' : 'boolean' };
+}
+
+function machineSourceDescriptor(document, endpointInput, path) {
+  const endpoint = normalizeMachineSource(endpointInput, path);
+  return endpoint.kind === 'data'
+    ? machineDataEndpointDescriptor(document, endpoint, path)
+    : machineBuiltinSourceDescriptor(document, endpoint, path);
+}
+
 function machineLiteralDescriptor(document, value, declared) {
   if (value == null) return { type: 'null' };
   if (typeof value === 'number') return Number.isFinite(value) ? { type: 'number', min: value, max: value } : { type: 'invalid-number' };
@@ -1496,11 +1633,23 @@ function machineLiteralDescriptor(document, value, declared) {
 function validateMachineDataConditions(document) {
   for (const machine of document.stateMachines || []) {
     const inputs = new Map(machine.inputs.map(input => [input.id, input]));
-    for (const layer of machine.layers || []) for (const transition of layer.transitions || []) {
+    for (const layer of machine.layers || []) {
+      for (const state of layer.states || []) {
+        const numericSources = [];
+        if (state.input) numericSources.push({ source: state.input, path: `stateMachine ${machine.id}/layer ${layer.id}/state ${state.id}/input` });
+        for (const child of state.children || []) if (child.input) numericSources.push({ source: child.input, path: `stateMachine ${machine.id}/layer ${layer.id}/state ${state.id}/blendChild ${child.id}/input` });
+        for (const item of numericSources) {
+          const descriptor = item.source.kind === 'machineInput'
+            ? machineInputDescriptor(inputs.get(item.source.id))
+            : machineSourceDescriptor(document, item.source, item.path);
+          if (descriptor?.type !== 'number') throw new TypeError(`[machine-blend-source] ${item.path} requires a numeric source.`);
+        }
+      }
+      for (const transition of layer.transitions || []) {
       for (const condition of transition.conditions || []) {
         const label = `stateMachine ${machine.id}/layer ${layer.id}/transition ${transition.id}/condition ${condition.id}`;
         const source = condition.source
-          ? machineDataEndpointDescriptor(document, condition.source, `${label}.source`)
+          ? machineSourceDescriptor(document, condition.source, `${label}.source`)
           : machineInputDescriptor(inputs.get(referenceId(condition.input, 'machineInput')));
         if (!source) throw new TypeError(`[machine-condition-source] ${label} has no resolvable source.`);
         if (condition.op === 'fired' || condition.op === '!fired') {
@@ -1509,7 +1658,7 @@ function validateMachineDataConditions(document) {
         }
         if (source.type === 'trigger') throw new TypeError(`[machine-condition-type] ${label} cannot compare a trigger source.`);
         const compare = condition.compare
-          ? machineDataEndpointDescriptor(document, condition.compare, `${label}.compare`)
+          ? machineSourceDescriptor(document, condition.compare, `${label}.compare`)
           : machineLiteralDescriptor(document, condition.value, source);
         if (VEYRA_MACHINE_ORDERING_OPS.includes(condition.op) && (source.type !== 'number' || compare.type !== 'number')) {
           throw new TypeError(`[machine-condition-type] ${label}.${condition.op} requires number sources on both sides.`);
@@ -1518,6 +1667,7 @@ function validateMachineDataConditions(document) {
           throw new TypeError(`[machine-condition-type] ${label} compares incompatible definitions ${JSON.stringify(source)} and ${JSON.stringify(compare)}.`);
         }
       }
+    }
     }
   }
 }
@@ -1550,8 +1700,10 @@ function validateMachineDataActions(document) {
 }
 
 function resolveMachineNumberInput(value, path, inputsById) {
-  if (value && typeof value === 'object' && value.kind === 'data') {
-    return normalizeMachineDataEndpoint(value, path);
+  if (value && typeof value === 'object' && ['data', 'artboard', 'runtime'].includes(value.kind)) {
+    const source = normalizeMachineSource(value, path);
+    if (source.kind === 'runtime' && source.property === 'playing') throw new TypeError(`${path} requires a numeric runtime value.`);
+    return source;
   }
   const ref = requiredReference(value, 'machineInput', path);
   const key = referenceId(ref, 'machineInput');
@@ -1623,11 +1775,13 @@ function normalizeMachineState(state, index, layerPath, timelineIds, inputsById)
   if (result.randomizeExit && ['entry', 'exit', 'any'].includes(type)) throw new TypeError(`${path}.${type} pseudo-state cannot enable Randomize Exit.`);
   if (timeline) result.timeline = timeline;
   if (state.actions !== undefined && state.actions !== null && !Array.isArray(state.actions)) throw new TypeError(`${path}.actions must be an array.`);
+  if (Array.isArray(state.actions) && state.actions.length > VEYRA_DOCUMENT_LIMITS.actionsPerOwner) throw new RangeError(`${path}.actions exceeds the ${VEYRA_DOCUMENT_LIMITS.actionsPerOwner} action limit.`);
   const actions = (Array.isArray(state.actions) ? state.actions : []).map((action,i)=>normalizeMachineAction(action,i,path,'state',timelineIds,inputsById));
   if (['entry', 'exit', 'any'].includes(type) && actions.length) throw new TypeError(`${path}.${type} pseudo-state cannot own lifecycle actions.`);
   if (actions.length) result.actions = actions;
   if (type === 'blend1d' || type === 'directBlend' || type === 'additiveBlend') {
     if (!Array.isArray(state?.children)) throw new TypeError(`${path}.children must be an array.`);
+    if (state.children.length > VEYRA_DOCUMENT_LIMITS.blendChildrenPerState) throw new RangeError(`${path}.children exceeds the ${VEYRA_DOCUMENT_LIMITS.blendChildrenPerState} child limit.`);
     result.children = state.children.map((child,i)=>normalizeBlendChild(child,i,path,timelineIds,inputsById,type));
     const childIds = new Set();
     for (const child of result.children) {
@@ -1671,8 +1825,10 @@ function normalizeMachineTransition(transition, index, layerPath, stateIds, inpu
     easingParams=transition.easingParams.map((value,i)=>bounded(value,`${path}.easingParams[${i}]`,0,1));
   }
   if (transition.conditions !== undefined && transition.conditions !== null && !Array.isArray(transition.conditions)) throw new TypeError(`${path}.conditions must be an array of conditions.`);
+  if (Array.isArray(transition.conditions) && transition.conditions.length > VEYRA_DOCUMENT_LIMITS.conditionsPerTransition) throw new RangeError(`${path}.conditions exceeds the ${VEYRA_DOCUMENT_LIMITS.conditionsPerTransition} condition limit.`);
   const conditions=(Array.isArray(transition.conditions)?transition.conditions:[]).map((condition,i)=>normalizeMachineCondition(condition,`${path}.conditions[${i}]`,inputsById));
   if (transition.actions !== undefined && transition.actions !== null && !Array.isArray(transition.actions)) throw new TypeError(`${path}.actions must be an array.`);
+  if (Array.isArray(transition.actions) && transition.actions.length > VEYRA_DOCUMENT_LIMITS.actionsPerOwner) throw new RangeError(`${path}.actions exceeds the ${VEYRA_DOCUMENT_LIMITS.actionsPerOwner} action limit.`);
   const actions=(Array.isArray(transition.actions)?transition.actions:[]).map((action,i)=>normalizeMachineAction(action,i,path,'transition',timelineIds,inputsById));
   return { id, from, to, enabled: transition.enabled !== false, duration, after, exitTime, pauseSource, allowExitDuringTransition, ...(randomWeight != null ? { randomWeight } : {}), easing, ...(easingParams?{easingParams}:{}), conditions, ...(actions.length?{actions}: {}) };
 }
@@ -1681,6 +1837,8 @@ function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsByI
   const path=`${machinePath}.layers[${index}]`;
   const id=String(layer?.id || '');
   if (!id) throw new TypeError(`${path}.id is required.`);
+  if (Array.isArray(layer?.states) && layer.states.length > VEYRA_DOCUMENT_LIMITS.statesPerLayer) throw new RangeError(`${path}.states exceeds the ${VEYRA_DOCUMENT_LIMITS.statesPerLayer} state limit.`);
+  if (Array.isArray(layer?.transitions) && layer.transitions.length > VEYRA_DOCUMENT_LIMITS.transitionsPerLayer) throw new RangeError(`${path}.transitions exceeds the ${VEYRA_DOCUMENT_LIMITS.transitionsPerLayer} transition limit.`);
   const states=(Array.isArray(layer?.states)?layer.states:[]).map((state,i)=>normalizeMachineState(state,i,path,timelineIds,inputsById));
   const stateIds=new Set();
   for(const state of states){
@@ -1707,6 +1865,7 @@ function normalizeStateMachine(machine, index, timelineIds) {
   const machinePath=`stateMachines[${index}]`;
   const id=String(machine?.id || '');
   if(!id) throw new TypeError(`${machinePath}.id is required.`);
+  if (Array.isArray(machine?.inputs) && machine.inputs.length > VEYRA_DOCUMENT_LIMITS.machineInputs) throw new RangeError(`${machinePath}.inputs exceeds the ${VEYRA_DOCUMENT_LIMITS.machineInputs} input limit.`);
   const inputs=(Array.isArray(machine?.inputs)?machine.inputs:[]).map((input,i)=>normalizeMachineInput(input,i,machinePath));
   const inputsById=new Map(), inputNames=new Set();
   for(const input of inputs){
@@ -1716,6 +1875,7 @@ function normalizeStateMachine(machine, index, timelineIds) {
   }
   let rawLayers;
   if(Array.isArray(machine?.layers) && machine.layers.length){
+    if (machine.layers.length > VEYRA_DOCUMENT_LIMITS.machineLayers) throw new RangeError(`${machinePath}.layers exceeds the ${VEYRA_DOCUMENT_LIMITS.machineLayers} layer limit.`);
     rawLayers=machine.layers.map((layer,i)=>({...cloneValue(layer),order:layer.order ?? i}));
   } else {
     rawLayers=[{id:`machineLayer_${id}_default`,name:'Base Layer',enabled:true,order:0,initial:machine?.initial ?? null,states:Array.isArray(machine?.states)?machine.states:[],transitions:Array.isArray(machine?.transitions)?machine.transitions:[],graph:{x:0,y:0}}];
@@ -1915,7 +2075,29 @@ export function normalizeDocument(input) {
     throw new TypeError(`Unsupported Veyra version ${input.version}; expected one of ${VEYRA_SUPPORTED_VERSIONS.join(', ')}.`);
   }
   if (!Array.isArray(input.nodes)) throw new TypeError('nodes must be an array.');
-  if (input.nodes.length > 10000) throw new RangeError('Veyra document contains too many nodes.');
+  if (input.nodes.length > VEYRA_DOCUMENT_LIMITS.nodes) throw new RangeError(`Veyra document contains too many nodes (max ${VEYRA_DOCUMENT_LIMITS.nodes}).`);
+  const arrayLimits = [
+    ['assets', VEYRA_DOCUMENT_LIMITS.assets], ['bones', VEYRA_DOCUMENT_LIMITS.bones],
+    ['meshes', VEYRA_DOCUMENT_LIMITS.meshes], ['controls', VEYRA_DOCUMENT_LIMITS.controls],
+    ['constraints', VEYRA_DOCUMENT_LIMITS.constraints], ['timelines', VEYRA_DOCUMENT_LIMITS.timelines],
+    ['stateMachines', VEYRA_DOCUMENT_LIMITS.stateMachines], ['listeners', VEYRA_DOCUMENT_LIMITS.listeners],
+    ['texts', VEYRA_DOCUMENT_LIMITS.featureRecords], ['layouts', VEYRA_DOCUMENT_LIMITS.featureRecords],
+    ['events', VEYRA_DOCUMENT_LIMITS.featureRecords], ['accessibility', VEYRA_DOCUMENT_LIMITS.featureRecords],
+    ['scripts', VEYRA_DOCUMENT_LIMITS.featureRecords], ['shaders', VEYRA_DOCUMENT_LIMITS.featureRecords],
+    ['renderPresets', VEYRA_DOCUMENT_LIMITS.featureRecords], ['interchangeAssets', VEYRA_DOCUMENT_LIMITS.featureRecords],
+  ];
+  for (const [key, limit] of arrayLimits) {
+    if (Array.isArray(input[key]) && input[key].length > limit) throw new RangeError(`Veyra document ${key} exceeds the ${limit} record limit.`);
+  }
+  for (const [index, text] of (Array.isArray(input.texts) ? input.texts : []).entries()) {
+    if ((text.runs || []).length > VEYRA_DOCUMENT_LIMITS.textRunsPerRecord) throw new RangeError(`texts[${index}].runs exceeds the ${VEYRA_DOCUMENT_LIMITS.textRunsPerRecord} record limit.`);
+  }
+  for (const [index, layout] of (Array.isArray(input.layouts) ? input.layouts : []).entries()) {
+    if ((layout.items || []).length > VEYRA_DOCUMENT_LIMITS.layoutItemsPerRecord) throw new RangeError(`layouts[${index}].items exceeds the ${VEYRA_DOCUMENT_LIMITS.layoutItemsPerRecord} record limit.`);
+  }
+  for (const [index, event] of (Array.isArray(input.events) ? input.events : []).entries()) {
+    if ((event.actions || []).length > VEYRA_DOCUMENT_LIMITS.eventActionsPerRecord) throw new RangeError(`events[${index}].actions exceeds the ${VEYRA_DOCUMENT_LIMITS.eventActionsPerRecord} record limit.`);
+  }
 
   const anglesUseDegrees = inputAnglesUseDegrees(input.conventions);
   const conventions = normalizeConventions(input.conventions);

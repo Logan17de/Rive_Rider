@@ -5,10 +5,13 @@ import { evaluateTimeline, normalizeFrame } from './animation.js';
 import { createMachineRuntime } from './stateMachine.js';
 import { createVeyraDataRuntime } from './dataGraph.js';
 import { renderSvgString } from './geometry.js';
+import { propertyTargetStatus } from './properties.js';
+import { normalizeCanonicalPropertyValue } from './propertyBinding.js';
 
 export const VEYRA_PLAYER_EVENTS = Object.freeze([
   'load', 'play', 'pause', 'stop', 'seek', 'frame', 'complete', 'marker',
   'transition-start', 'transition-end', 'machine-action', 'error', 'render',
+  'event', 'navigate', 'script-request',
 ]);
 
 function asDocument(source) {
@@ -72,6 +75,8 @@ export class VeyraPlayer {
   #listeners = new Map();
   #options;
   #lastFrame = null;
+  #runtimeOverrides = new Map();
+  #onceActions = new Set();
 
   constructor(documentOrGetter, options = {}) {
     this.#source = documentOrGetter;
@@ -128,6 +133,8 @@ export class VeyraPlayer {
     this.#document = asDocument(documentOrGetter);
     this.#options = { ...this.#options, ...options };
     this.#dataRuntime = options.dataRuntime || createVeyraDataRuntime(() => this.#document);
+    this.#runtimeOverrides.clear();
+    this.#onceActions.clear();
     const hasTimeline = Object.prototype.hasOwnProperty.call(options, 'timelineId');
     const hasMachine = Object.prototype.hasOwnProperty.call(options, 'machineId');
     const currentTimeline = !hasTimeline && this.#document.timelines.some((timeline) => timeline.id === this.#timelineId) ? this.#timelineId : null;
@@ -138,7 +145,9 @@ export class VeyraPlayer {
     if (options.speed !== undefined) this.setSpeed(options.speed);
     this.#time = 0;
     this.#createMachineRuntime();
-    this.#emit('load', { documentId: this.#document.id });
+    const detail = { documentId: this.#document.id };
+    this.#runFeatureEvents('load', detail);
+    this.#emit('load', detail);
     return this;
   }
 
@@ -189,6 +198,8 @@ export class VeyraPlayer {
     this.#cancelSchedule();
     this.#time = 0;
     this.#machineRuntime?.reset();
+    this.#runtimeOverrides.clear();
+    this.#onceActions.clear();
     this.#emit('stop', { time: 0 });
     this.#render();
     return this;
@@ -205,6 +216,123 @@ export class VeyraPlayer {
   }
   setInput(nameOrId, value) { if (!this.#machineRuntime) throw new TypeError('Player has no state machine.'); return this.#machineRuntime.setInput(nameOrId, value); }
   fire(nameOrId) { if (!this.#machineRuntime) throw new TypeError('Player has no state machine.'); return this.#machineRuntime.fire(nameOrId); }
+  setRuntimeValue(name, value) { if (!this.#machineRuntime) throw new TypeError('Player has no state machine.'); return this.#machineRuntime.setRuntimeValue(name, value); }
+  getRuntimeValue(name) { return this.#machineRuntime?.getRuntimeValue(name); }
+
+  #actionTarget(action, key) {
+    const target = action?.target ?? action?.params?.[key] ?? action?.params?.target;
+    if (target && typeof target === 'object' && target.address) return target.address;
+    return target;
+  }
+
+  #inputTarget(action) {
+    const target = this.#actionTarget(action, 'input');
+    return target && typeof target === 'object' ? (target.id || target.name) : target;
+  }
+
+  #executeFeatureAction(action, detail, depth) {
+    const value = action.value !== null && action.value !== undefined ? action.value : action.params?.value;
+    switch (action.type) {
+      case 'setProperty': {
+        const address = this.#actionTarget(action, 'address');
+        if (!address || propertyTargetStatus(this.#document, String(address)) !== 'animatable') {
+          throw new TypeError(`Event action ${action.id} requires an animatable property address.`);
+        }
+        const normalizedValue = normalizeCanonicalPropertyValue(
+          this.#document,
+          String(address),
+          value,
+          `Event action ${action.id}`,
+        );
+        this.#runtimeOverrides.set(String(address), cloneValue(normalizedValue));
+        return { kind: 'setProperty', address: String(address), value: cloneValue(normalizedValue), mutation: 'runtime-only' };
+      }
+      case 'setData': {
+        const endpoint = this.#actionTarget(action, 'endpoint');
+        if (!endpoint || endpoint.kind !== 'data') throw new TypeError(`Event action ${action.id} requires a data endpoint.`);
+        const resolved = this.#dataRuntime.resolveDataEndpoint(endpoint, { scopePath: this.#options.runtimeScopePath || [] });
+        const changed = this.#dataRuntime.setValue(resolved.instance.id, resolved.property.id, cloneValue(value), { scopePath: this.#options.runtimeScopePath || [], source: 'player-event' });
+        return { kind: 'setData', target: cloneValue(endpoint), changed: Boolean(changed), value: cloneValue(value), mutation: 'runtime-only' };
+      }
+      case 'fireTrigger': {
+        const input = this.#inputTarget(action);
+        this.fire(input);
+        return { kind: 'fireTrigger', input: cloneValue(input), mutation: 'runtime-only' };
+      }
+      case 'play': this.play(); return { kind: 'play' };
+      case 'pause': this.pause(); return { kind: 'pause' };
+      case 'stop': this.stop(); return { kind: 'stop' };
+      case 'seek': this.seek(Number(value ?? action.params?.time ?? 0)); return { kind: 'seek', time: this.#time };
+      case 'setInput': {
+        const input = this.#inputTarget(action);
+        const normalized = this.setInput(input, value);
+        return { kind: 'setInput', input: cloneValue(input), value: cloneValue(normalized), mutation: 'runtime-only' };
+      }
+      case 'emit': {
+        const eventType = String(action.params?.event || action.params?.type || action.value || '');
+        if (!eventType) throw new TypeError(`Event action ${action.id} requires an emitted event name.`);
+        const payload = cloneValue(action.params?.payload ?? action.params?.detail ?? detail ?? null);
+        this.#emit(eventType, { detail: payload, sourceEvent: detail?.eventId || null });
+        if (depth < 8) this.#runFeatureEvents(eventType, payload, depth + 1);
+        return { kind: 'emit', event: eventType, payload };
+      }
+      case 'navigate': {
+        const destination = cloneValue(action.params?.url ?? action.params?.path ?? value ?? action.target ?? null);
+        this.#emit('navigate', { destination, detail: cloneValue(detail) });
+        return { kind: 'navigate', destination };
+      }
+      case 'script': {
+        const request = { script: cloneValue(action.params?.script ?? action.target ?? value ?? null), detail: cloneValue(detail) };
+        this.#emit('script-request', request);
+        return { kind: 'script-request', ...request, executed: false };
+      }
+      default: throw new TypeError(`Unsupported event action type ${action.type}.`);
+    }
+  }
+
+  #runFeatureEvents(type, detail = {}, depth = 0) {
+    if (depth > 8) return { type: String(type), matched: 0, actions: [], errors: [{ error: 'Event dispatch recursion limit exceeded.' }] };
+    const eventType = String(type || 'custom');
+    const records = (this.#document.events || []).filter((record) => {
+      if (record.enabled === false) return false;
+      if (eventType === 'marker') {
+        return record.type === 'marker' && (!record.marker || record.marker === detail?.marker);
+      }
+      if (record.type === eventType) return true;
+      if (record.type === 'custom' && record.event === eventType) return true;
+      return false;
+    });
+    const actions = [];
+    const errors = [];
+    for (const record of records) {
+      if (record.target?.id && detail?.targetId && record.target.id !== detail.targetId) continue;
+      for (const action of record.actions || []) {
+        if (action.enabled === false || (action.once && this.#onceActions.has(action.id))) continue;
+        try {
+          const effect = this.#executeFeatureAction(action, detail, depth);
+          actions.push({ eventId: record.id, actionId: action.id, type: action.type, effect });
+          if (action.once) this.#onceActions.add(action.id);
+        } catch (error) {
+          const failure = { eventId: record.id, actionId: action.id, type: action.type, error: String(error?.message || error) };
+          errors.push(failure);
+          this.#emit('error', failure);
+        }
+      }
+    }
+    return { type: eventType, matched: records.length, actions, errors };
+  }
+
+  /** Dispatch an authored feature-graph event and execute its runtime-only actions. */
+  dispatchEvent(type, detail = {}) {
+    const eventType = typeof type === 'string' ? type : type?.type;
+    if (!eventType) throw new TypeError('Player dispatchEvent requires an event type.');
+    const result = this.#runFeatureEvents(eventType, detail);
+    this.#emit('event', { eventType, detail: cloneValue(detail), result: cloneValue(result) });
+    return result;
+  }
+
+  dispatch(type, detail = {}) { return this.dispatchEvent(type, detail); }
+  emit(type, detail = {}) { return this.dispatchEvent(type, detail); }
 
   advance(deltaSeconds) {
     const delta = Number(deltaSeconds);
@@ -222,7 +350,9 @@ export class VeyraPlayer {
     if (reachedEnd && this.#loop === 'none') {
       this.#time = this.#speed >= 0 ? duration : 0;
       if (this.#playing) { this.#playing = false; this.#cancelSchedule(); }
-      this.#emit('complete', { time: this.#time });
+      const completeDetail = { time: this.#time };
+      this.#runFeatureEvents('complete', completeDetail);
+      this.#emit('complete', completeDetail);
     } else if (duration > 0) this.#time = loopTime(this.#time, duration, this.#loop);
     events = [...events, ...markerEventsBetween(
       this.#document,
@@ -233,7 +363,10 @@ export class VeyraPlayer {
       Number(timelineById(this.#document, this.#timelineId)?.fps || 1),
       this.#speed,
     )];
-    for (const event of events) this.#emit(event.type, event);
+    for (const event of events) {
+      if (event.type === 'marker') this.#runFeatureEvents('marker', event);
+      this.#emit(event.type, event);
+    }
     this.#emit('frame', { time: this.#time, frame: this.frame, events });
     this.#render();
     return { time: this.#time, frame: this.frame, events, scene: this.evaluate() };
@@ -243,7 +376,7 @@ export class VeyraPlayer {
     const timeline = timelineById(this.#document, this.#timelineId);
     const animation = timeline ? evaluateTimeline(timeline, this.#time, { loop: this.#loop }) : {};
     const machine = this.#machineRuntime?.evaluate() || null;
-    const overrides = { ...(machine?.overrides || {}), ...animation };
+    const overrides = { ...(machine?.overrides || {}), ...animation, ...Object.fromEntries(this.#runtimeOverrides) };
     return evaluateDocument(this.#document, { animation: overrides }, null, {
       dataRuntime: this.#dataRuntime,
       artboardId: this.#options.artboardId || this.#document.artboards[0]?.id,
@@ -310,6 +443,18 @@ export function registerVeyraPlayerElement(tagName = 'veyra-player') {
     pause() { this.#player?.pause(); return this; }
     stop() { this.#player?.stop(); return this; }
     seek(time) { this.#player?.seek(time); return this; }
+    setInput(nameOrId, value) { this.#player?.setInput(nameOrId, value); return this; }
+    fire(nameOrId) { this.#player?.fire(nameOrId); return this; }
+    setRuntimeValue(name, value) { this.#player?.setRuntimeValue(name, value); return this; }
+    getRuntimeValue(name) { return this.#player?.getRuntimeValue(name); }
+    dispatchEvent(type, detail) {
+      if (type && typeof type === 'object' && typeof type.type === 'string') {
+        const nativeResult = super.dispatchEvent(type);
+        this.#player?.dispatchEvent(type.type, type.detail ?? detail ?? {});
+        return nativeResult;
+      }
+      return this.#player?.dispatchEvent(type, detail) || null;
+    }
   }
   globalThis.customElements.define(tagName, VeyraPlayerElement);
   return true;

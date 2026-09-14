@@ -8,6 +8,7 @@ import {
   createTrack,
   normalizeDocument,
   cloneValue,
+  VEYRA_DOCUMENT_LIMITS,
 } from './model.js';
 import { createReference, referenceId } from './references.js';
 import { createInterchangeAsset, createText, createEvent } from './featureGraph.js';
@@ -26,6 +27,13 @@ function parseJson(value, path = 'Lottie') {
 }
 function number(value, fallback = 0) { const result = Number(value); return Number.isFinite(result) ? result : fallback; }
 function clamp(value, min = 0, max = 1) { return Math.max(min, Math.min(max, number(value, min))); }
+function boundedDimension(value, fallback, label) {
+  const result = value == null ? Number(fallback) : Number(value);
+  if (!Number.isFinite(result) || result <= 0 || result > 100000) {
+    throw new RangeError(`${label} must be a finite dimension between 1 and 100000.`);
+  }
+  return Math.trunc(result);
+}
 function colorFromLottie(value, fallback = '#ffffff') {
   const c = Array.isArray(value) ? value : value?.k;
   if (!Array.isArray(c)) return typeof value === 'string' ? value : fallback;
@@ -37,6 +45,45 @@ function colorToLottie(value, fallback = [1, 1, 1, 1]) {
   if (!match) return fallback;
   const hex = match[1];
   return [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255).concat(hex.length >= 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1);
+}
+
+function gradientStopsFromLottie(fill, idPrefix) {
+  const raw = firstPropertyValue(fill?.g, null);
+  if (!Array.isArray(raw) || raw.length < 5) return null;
+  const count = Math.max(0, Math.trunc(number(raw[0], 0)));
+  if (count > 256) throw new RangeError('Lottie gradient contains too many stops (max 256).');
+  if (count < 2 || raw.length < 1 + count * 4) return null;
+  const alphaStart = 1 + count * 4;
+  const alphaStops = raw.length >= alphaStart + count * 2
+    ? Array.from({ length: count }, (_, index) => ({ offset: clamp(raw[alphaStart + index * 2]), opacity: clamp(raw[alphaStart + index * 2 + 1]) }))
+    : [];
+  return Array.from({ length: count }, (_, index) => {
+    const offset = clamp(raw[1 + index * 4]);
+    const color = colorFromLottie(raw.slice(2 + index * 4, 5 + index * 4), '#ffffff');
+    const alpha = alphaStops[index]?.opacity;
+    return { id: `${idPrefix}_gradient_stop_${index + 1}`, offset, color, opacity: alpha == null ? 1 : alpha };
+  });
+}
+
+function gradientFromLottie(fill, idPrefix) {
+  const stops = gradientStopsFromLottie(fill, idPrefix);
+  if (!stops) return null;
+  const start = firstPropertyValue(fill.s, [0, 0]);
+  const end = firstPropertyValue(fill.e, [1, 1]);
+  if (Number(fill.t) === 2) {
+    const cx = Array.isArray(start) ? number(start[0], 0.5) : 0.5;
+    const cy = Array.isArray(start) ? number(start[1], 0.5) : 0.5;
+    const ex = Array.isArray(end) ? number(end[0], cx + 1) : cx + 1;
+    const ey = Array.isArray(end) ? number(end[1], cy) : cy;
+    return { type: 'radialGradient', stops, cx, cy, r: Math.max(0.0001, Math.hypot(ex - cx, ey - cy)), fx: cx, fy: cy };
+  }
+  return {
+    type: 'linearGradient', stops,
+    x1: Array.isArray(start) ? number(start[0], 0) : 0,
+    y1: Array.isArray(start) ? number(start[1], 0) : 0,
+    x2: Array.isArray(end) ? number(end[0], 1) : 1,
+    y2: Array.isArray(end) ? number(end[1], 1) : 1,
+  };
 }
 function propertyValue(property, fallback) {
   if (property == null) return fallback;
@@ -54,6 +101,7 @@ function transformValue(ks, key, fallback, index = 0) {
 function lottieKeyframes(property, convert = (value) => value) {
   if (!property) return [];
   if (property.a !== 1 || !Array.isArray(property.k)) return [{ frame: 0, value: convert(propertyValue(property, 0)) }];
+  if (property.k.length > VEYRA_DOCUMENT_LIMITS.keyframesPerTrack) throw new RangeError(`Lottie property contains too many keyframes (max ${VEYRA_DOCUMENT_LIMITS.keyframesPerTrack}).`);
   return property.k.flatMap((keyframe) => {
     if (!keyframe || keyframe.t == null) return [];
     const values = keyframe.s ?? keyframe.k ?? keyframe.e ?? 0;
@@ -73,6 +121,7 @@ function flattenShapeItems(shapes = []) {
 function pathGeometryFromLottie(shape, vertexPrefix = 'path') {
   const value = firstPropertyValue(shape?.ks, null);
   if (!value || typeof value !== 'object' || !Array.isArray(value.v)) return null;
+  if (value.v.length > 100000) throw new RangeError('Lottie path contains too many vertices (max 100000).');
   const vertices = value.v.map((point, index) => {
     const x = number(point?.[0]);
     const y = number(point?.[1]);
@@ -120,7 +169,7 @@ function importShapeLayer(layer, index, state) {
   const shapes = flattenShapeItems(layer.shapes);
   let shapeIndex = 0;
   for (const shape of shapes) {
-    if (!shape || ['gr', 'fl', 'st', 'tr'].includes(shape.ty)) continue;
+    if (!shape || ['gr', 'fl', 'gf', 'st', 'tr'].includes(shape.ty)) continue;
     const type = shape.ty === 'rc' ? 'rectangle' : shape.ty === 'el' ? 'ellipse' : shape.ty === 'sr' ? (Number(propertyValue(shape.sy, 1)) === 2 ? 'star' : 'polygon') : shape.ty === 'sh' ? 'path' : null;
     if (!type) { state.unsupported.push({ layer: layer.ind ?? index + 1, shape: shape.ty || 'unknown' }); continue; }
     const nodeId = uniqueId(`${groupId}_${type}_${shapeIndex + 1}`, state.nodeIds);
@@ -137,9 +186,10 @@ function importShapeLayer(layer, index, state) {
             : type === 'star' ? { outerRadius: number(propertyValue(shape.or, 88), 88), innerRadius: number(propertyValue(shape.ir, 42), 42), points: Math.max(3, Math.trunc(number(propertyValue(shape.pt, 5), 5))) }
             : pathGeometryFromLottie(shape, nodeId) || undefined,
     });
-    const fill = shapes.find((candidate) => candidate?.ty === 'fl');
+    const fill = shapes.find((candidate) => candidate?.ty === 'fl' || candidate?.ty === 'gf');
     const stroke = shapes.find((candidate) => candidate?.ty === 'st');
-    if (fill) node.paint.fill = { type: 'solid', color: colorFromLottie(propertyValue(fill.c, [1, 1, 1, 1])) };
+    if (fill?.ty === 'gf') node.paint.fill = gradientFromLottie(fill, nodeId) || { type: 'solid', color: '#ffffff' };
+    else if (fill) node.paint.fill = { type: 'solid', color: colorFromLottie(propertyValue(fill.c, [1, 1, 1, 1])) };
     if (stroke) { node.paint.stroke = colorFromLottie(propertyValue(stroke.c, [0, 0, 0, 1]), '#000000'); node.paint.strokeWidth = number(propertyValue(stroke.w, 0)); }
     state.nodes.push(node);
     shapeIndex += 1;
@@ -214,8 +264,8 @@ function importMarkers(raw, state) {
 }
 
 function stateForLottie(raw, options = {}) {
-  const w = Math.max(1, Math.trunc(number(raw.w, options.width || 960)));
-  const h = Math.max(1, Math.trunc(number(raw.h, options.height || 640)));
+  const w = boundedDimension(raw.w, options.width || 960, 'Lottie width');
+  const h = boundedDimension(raw.h, options.height || 640, 'Lottie height');
   const ip = number(raw.ip, 0);
   const op = Math.max(ip + 1, number(raw.op, 60));
   const fps = Math.max(1, number(raw.fr, 30));
@@ -262,6 +312,9 @@ function stateForLottie(raw, options = {}) {
 export function importLottie(input, options = {}) {
   const raw = parseJson(input, 'Lottie');
   if (raw.v === undefined && !Array.isArray(raw.layers)) throw new TypeError('Lottie input must contain layers.');
+  if (Array.isArray(raw.layers) && raw.layers.length > VEYRA_DOCUMENT_LIMITS.nodes) throw new RangeError(`Lottie layers exceed the ${VEYRA_DOCUMENT_LIMITS.nodes} node limit.`);
+  if (Array.isArray(raw.assets) && raw.assets.length > VEYRA_DOCUMENT_LIMITS.assets) throw new RangeError(`Lottie assets exceed the ${VEYRA_DOCUMENT_LIMITS.assets} asset limit.`);
+  if (Array.isArray(raw.markers) && raw.markers.length > VEYRA_DOCUMENT_LIMITS.featureRecords) throw new RangeError(`Lottie markers exceed the ${VEYRA_DOCUMENT_LIMITS.featureRecords} record limit.`);
   const state = stateForLottie(raw, options);
   const assets = (raw.assets || []).filter((asset) => asset && (asset.p || asset.u || asset.e)).map((asset, index) => createAsset('image', {
     id: `asset_lottie_${asset.id || index + 1}`,
@@ -281,6 +334,32 @@ function staticOrAnimated(values, convert = (value) => value) {
   const frames = values || [];
   if (frames.length <= 1) return { a: 0, k: convert(frames[0]?.value ?? 0) };
   return { a: 1, k: frames.map((item, index) => ({ t: item.frame, s: [convert(item.value)], e: [convert(frames[index + 1]?.value ?? item.value)], i: { x: [0.33], y: [1] }, o: { x: [0.67], y: [0] } })) };
+}
+
+function gradientToLottie(fill) {
+  const stops = Array.isArray(fill?.stops) ? fill.stops : [];
+  if (stops.length < 2) return null;
+  const colorStops = [stops.length];
+  const alphaStops = [];
+  for (const stop of stops) {
+    const color = colorToLottie(stop.color, [1, 1, 1, 1]);
+    colorStops.push(number(stop.offset), color[0], color[1], color[2]);
+    alphaStops.push(number(stop.offset), clamp(number(color[3], 1) * number(stop.opacity, 1)));
+  }
+  const data = [...colorStops, ...alphaStops];
+  const gradient = {
+    ty: 'gf', t: fill.type === 'radialGradient' ? 2 : 1,
+    o: { a: 0, k: 100 }, r: 1,
+    g: { p: stops.length, k: data },
+  };
+  if (fill.type === 'radialGradient') {
+    gradient.s = { a: 0, k: [number(fill.cx, 0.5), number(fill.cy, 0.5)] };
+    gradient.e = { a: 0, k: [number(fill.cx, 0.5) + number(fill.r, 0.5), number(fill.cy, 0.5)] };
+  } else {
+    gradient.s = { a: 0, k: [number(fill.x1, 0), number(fill.y1, 0)] };
+    gradient.e = { a: 0, k: [number(fill.x2, 1), number(fill.y2, 1)] };
+  }
+  return gradient;
 }
 function trackFor(document, timeline, nodeId, path) { return timeline?.tracks?.find((track) => track.address === `node:${nodeId}/${path}`) || null; }
 function nodeToLottieLayer(document, node, index, timeline, visualIndexById) {
@@ -319,8 +398,10 @@ function nodeToLottieLayer(document, node, index, timeline, visualIndexById) {
   else if (node.type === 'polygon') layer.shapes.push({ ty: 'sr', sy: 1, p: { a: 0, k: [0, 0] }, pt: { a: 0, k: number(g?.sides, 6) }, or: { a: 0, k: number(g?.radius, 50) }, nm: node.name });
   else if (node.type === 'star') layer.shapes.push({ ty: 'sr', sy: 2, p: { a: 0, k: [0, 0] }, pt: { a: 0, k: number(g?.points, 5) }, or: { a: 0, k: number(g?.outerRadius, 88) }, ir: { a: 0, k: number(g?.innerRadius, 42) }, nm: node.name });
   else if (node.type === 'path') layer.shapes.push({ ty: 'sh', ks: { a: 0, k: { c: Boolean(g?.closed), v: (g?.vertices || []).map((vertex) => [number(vertex.x), number(vertex.y)]), i: (g?.vertices || []).map((vertex) => [number(vertex.inX), number(vertex.inY)]), o: (g?.vertices || []).map((vertex) => [number(vertex.outX), number(vertex.outY)]) } }, nm: node.name });
-  const fill = node.paint?.fill?.type === 'solid' ? node.paint.fill.color : '#ffffff';
-  layer.shapes.push({ ty: 'fl', c: { a: 0, k: colorToLottie(fill) }, o: { a: 0, k: 100 }, r: 1, nm: 'Fill' });
+  const fill = node.paint?.fill;
+  const gradient = fill?.type === 'solid' ? null : gradientToLottie(fill);
+  if (gradient) layer.shapes.push({ ...gradient, nm: 'Gradient Fill' });
+  else layer.shapes.push({ ty: 'fl', c: { a: 0, k: colorToLottie(fill?.color || '#ffffff') }, o: { a: 0, k: 100 }, r: 1, nm: 'Fill' });
   if (node.paint?.stroke && node.paint.stroke !== 'none' && Number(node.paint.strokeWidth) > 0) {
     layer.shapes.push({ ty: 'st', c: { a: 0, k: colorToLottie(node.paint.stroke, [0, 0, 0, 1]) }, o: { a: 0, k: 100 }, w: { a: 0, k: number(node.paint.strokeWidth, 0) }, lc: 2, lj: 2, nm: 'Stroke' });
   }
@@ -364,6 +445,8 @@ function assetToLottieAsset(asset) {
 export function exportLottie(input, options = {}) {
   const document = normalizeDocument(input);
   const timeline = document.timelines.find((item) => item.id === options.timelineId) || document.timelines[0] || null;
+  const width = boundedDimension(options.width, document.artboard.width, 'Lottie width');
+  const height = boundedDimension(options.height, document.artboard.height, 'Lottie height');
   // Export all authored nodes by default so nested groups, paths and shape
   // children survive a round trip. Hosts that only want painter roots can opt
   // into the compact legacy view with `includeChildren: false`.
@@ -375,7 +458,7 @@ export function exportLottie(input, options = {}) {
     ...visualNodes.map((node, index) => nodeToLottieLayer(document, node, index, timeline, visualIndexById)),
     ...(document.texts || []).map((text, index) => textToLottieLayer(text, document, visualNodes.length + index, timeline)),
   ];
-  const result = { v: String(options.version || '5.7.0'), fr: number(timeline?.fps, 30), ip: number(timeline?.workStart, 0), op: number(timeline?.workEnd, timeline?.duration || 60), w: number(options.width, document.artboard.width), h: number(options.height, document.artboard.height), nm: String(options.name || document.name), ddd: 0, assets: (document.assets || []).filter((asset) => asset.type === 'image').map(assetToLottieAsset), layers: layers.reverse(), markers: (document.events || []).filter((event) => event.type === 'marker').map((event) => ({ tm: number(event.payload?.frame, 0), dr: number(event.payload?.duration, 0), cm: event.marker || event.name })), __veyra: { format: 'veyra-lottie-bridge', version: VEYRA_LOTTIE_VERSION, unsupported: (document.interchangeAssets || []).flatMap((item) => item.unsupported || []), extensions: cloneValue(document.interchangeAssets?.find((item) => item.format === 'lottie')?.extensions || {}) } };
+  const result = { v: String(options.version || '5.7.0'), fr: number(timeline?.fps, 30), ip: number(timeline?.workStart, 0), op: number(timeline?.workEnd, timeline?.duration || 60), w: width, h: height, nm: String(options.name || document.name), ddd: 0, assets: (document.assets || []).filter((asset) => asset.type === 'image').map(assetToLottieAsset), layers: layers.reverse(), markers: (document.events || []).filter((event) => event.type === 'marker').map((event) => ({ tm: number(event.payload?.frame, 0), dr: number(event.payload?.duration, 0), cm: event.marker || event.name })), __veyra: { format: 'veyra-lottie-bridge', version: VEYRA_LOTTIE_VERSION, unsupported: (document.interchangeAssets || []).flatMap((item) => item.unsupported || []), extensions: cloneValue(document.interchangeAssets?.find((item) => item.format === 'lottie')?.extensions || {}) } };
   return options.as === 'string' ? JSON.stringify(result, null, 2) : result;
 }
 
@@ -384,6 +467,9 @@ export function serializeLottie(input, options = {}) { return JSON.stringify(exp
 /** A JSON-safe dotLottie package representation. Binary ZIP hosting can wrap this object. */
 export function exportDotLottie(input, options = {}) {
   const animationId = String(options.animationId || 'animation');
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(animationId)) {
+    throw new TypeError('dotLottie animationId must be 1-64 safe filename characters (letters, numbers, _ or -).');
+  }
   // The package's animation member is always JSON, even when the caller asks
   // for the outer dotLottie package as a string.
   const animation = exportLottie(input, { ...options, as: undefined });

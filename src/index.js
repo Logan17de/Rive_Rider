@@ -153,10 +153,115 @@ export {
 export { createVeyraRuntimeHost } from './veyra/runtimeHost.js';
 export { VEYRA_DATA_RUNTIME_PORTS, VEYRA_DATA_RUNTIME_CONTRACT } from './veyra/runtimePorts.js';
 
+// Core document/evaluation APIs are intentionally public.  The browser editor
+// is one adapter over these primitives; embedders, exporters and AI agents can
+// construct, normalize, inspect, evaluate and serialize the same document
+// without importing internal module paths.
+export {
+  VEYRA_FORMAT,
+  VEYRA_VERSION,
+  VEYRA_SUPPORTED_VERSIONS,
+  VEYRA_LISTENER_VERSION,
+  VEYRA_LISTENER_KINDS,
+  VEYRA_LISTENER_EVENTS,
+  VEYRA_LISTENER_ACTIONS,
+  VEYRA_MIME,
+  VEYRA_ASSET_TYPES,
+  VEYRA_CONSTRAINT_TYPES,
+  VEYRA_NODE_TYPES,
+  VEYRA_VERTEX_HANDLE_MODES,
+  VEYRA_EASING_TYPES,
+  VEYRA_LOOP_MODES,
+  VEYRA_FILL_TYPES,
+  VEYRA_MACHINE_INPUT_TYPES,
+  VEYRA_CONDITION_OPS,
+  VEYRA_MACHINE_BUILTIN_ARTBOARD_VALUES,
+  VEYRA_MACHINE_BUILTIN_RUNTIME_VALUES,
+  VEYRA_MACHINE_ORDERING_OPS,
+  VEYRA_PROPERTY_BOUNDS,
+  createId,
+  cloneValue,
+  createGradientStop,
+  createSolidFill,
+  createLinearGradient,
+  createRadialGradient,
+  createNode,
+  createSemanticRecord,
+  createAsset,
+  createBone,
+  createControl,
+  createMesh,
+  createConstraint,
+  createKeyframe,
+  createTimeline,
+  createTrack,
+  createMachineInput,
+  createStateMachine,
+  createPointerListener,
+  createDocument,
+  createStarterDocument,
+  normalizeDocument,
+  semanticsFor,
+  semanticFor,
+  semanticRecordById,
+  nodeById,
+  boneById,
+  meshById,
+  controlById,
+  constraintById,
+  assetById,
+  meshVertexById,
+  gradientStopById,
+  trackById,
+  keyframeById,
+  machineById,
+  machineStateById,
+  machineInputById,
+  machineTransitionById,
+  machineConditionById,
+  listenerById,
+  timelineById,
+  trackByAddress,
+  childrenOf,
+  descendantIds,
+} from './veyra/model.js';
+export {
+  OBSERVED_EVALUATION_CONTEXT,
+  VEYRA_EVALUATION_ORDER,
+  evaluateDocument,
+  propertySource,
+} from './veyra/evaluation.js';
+export {
+  transformAttribute,
+  regularPolygonPoints,
+  starPoints,
+  pointsAttribute,
+  pathSegments,
+  pathData,
+  localBounds,
+  geometryDescriptor,
+  paintServerId,
+  gradientDescriptor,
+  fillPaintValue,
+  renderSvgString,
+} from './veyra/geometry.js';
+export { VeyraRenderer } from './veyra/renderer.js';
+export { VEYRA_COMMAND_SOURCES, VeyraStore } from './veyra/store.js';
+export {
+  canonicalVeyraValue,
+  serializeVeyra,
+  parseVeyra,
+  safeFilename,
+  downloadBlob,
+  downloadVeyra,
+  downloadSvg,
+} from './veyra/io.js';
+
 // M9 layered state-machine schema primitives and the canonical runtime. Every
 // graph operation is also present in the command registry consumed by the UI
 // and AI/browser adapters.
 export {
+  VEYRA_DOCUMENT_LIMITS,
   VEYRA_MACHINE_LAYER_VERSION,
   VEYRA_MACHINE_ACTION_PHASES,
   VEYRA_MACHINE_ACTION_TYPES,
@@ -176,6 +281,7 @@ export {
 } from './veyra/model.js';
 export { createMachineLayerRef, createMachineBlendChildRef, createMachineActionRef, createMachineConditionRef } from './veyra/references.js';
 export { VEYRA_MACHINE_CAPABILITIES, MachineRuntime, createMachineRuntime } from './veyra/stateMachine.js';
+export { VEYRA_LAYOUT_EVALUATION_MODES, evaluateLayouts } from './veyra/layout.js';
 export {
   VEYRA_COMMAND_ACTIONS,
   VEYRA_COMMAND_TABLE,

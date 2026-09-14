@@ -28,6 +28,49 @@ function applyAttributes(element, attributes) {
   }
 }
 
+function assetHref(asset) {
+  if (!asset?.source) return '';
+  if (asset.source.kind === 'embedded') {
+    const mime = asset.mimeType || 'application/octet-stream';
+    return `data:${mime};base64,${String(asset.source.data || '')}`;
+  }
+  return String(asset.source.uri || '');
+}
+
+function textContent(text) {
+  return (text?.runs || []).map((run) => String(run?.text || '')).join('');
+}
+
+function renderTextRecord(text) {
+  const element = svgElement('text', {
+    class: 'sceneText',
+    'pointer-events': 'none',
+    'text-anchor': text.align === 'center' ? 'middle' : text.align === 'end' ? 'end' : 'start',
+    'aria-label': textContent(text),
+  });
+  let firstLine = true;
+  for (const run of text.runs || []) {
+    const lines = String(run.text || '').split('\n');
+    for (const line of lines) {
+      const span = svgElement('tspan', {
+        x: 0,
+        dy: firstLine ? 0 : Number(run.lineHeight || 1.2) * Number(run.fontSize || 16),
+        'font-family': run.fontFamily || 'Inter',
+        'font-size': Number(run.fontSize || 16),
+        'font-weight': Number(run.fontWeight || 400),
+        'letter-spacing': Number(run.letterSpacing || 0),
+        fill: run.fill || '#ffffff',
+        stroke: run.stroke || 'none',
+        'stroke-width': Number(run.strokeWidth || 0),
+      });
+      span.textContent = line;
+      element.appendChild(span);
+      firstLine = false;
+    }
+  }
+  return element;
+}
+
 function gradientElement(fill, id) {
   const descriptor = gradientDescriptor(fill, id);
   if (!descriptor) return null;
@@ -278,13 +321,24 @@ export class VeyraRenderer {
 
     const sceneGroup = svgElement('g', { class: 'veyraScene' });
     const children = new Map();
+    const assetsById = new Map((scene.assets || []).map((asset) => [asset.id, asset]));
+    const textsByNode = new Map();
+    for (const text of scene.features?.texts || scene.texts || []) {
+      const nodeId = referenceId(text.node, 'node');
+      if (!nodeId) continue;
+      if (!textsByNode.has(nodeId)) textsByNode.set(nodeId, []);
+      textsByNode.get(nodeId).push(text);
+    }
+    const semanticsByNode = new Map((scene.semantics || [])
+      .filter((semantic) => semantic.target?.kind === 'node' && semantic.target.id)
+      .map((semantic) => [semantic.target.id, semantic]));
     for (const node of scene.nodes) {
       const key = referenceId(node.parent, 'node') || '__root__';
       if (!children.has(key)) children.set(key, []);
       children.get(key).push(node);
     }
     for (const node of children.get('__root__') || []) {
-      sceneGroup.appendChild(this.#renderNode(node, children));
+      sceneGroup.appendChild(this.#renderNode(node, children, assetsById, textsByNode, semanticsByNode));
     }
     const meshGroup = this.#renderMeshes();
     const rigOverlay = this.#renderRigOverlay();
@@ -318,7 +372,8 @@ export class VeyraRenderer {
     return group;
   }
 
-  #renderNode(node, children) {
+  #renderNode(node, children, assetsById, textsByNode, semanticsByNode) {
+    const semantic = semanticsByNode?.get(node.id);
     const group = svgElement('g', {
       'data-node-id': node.id,
       'data-node-type': node.type,
@@ -326,6 +381,9 @@ export class VeyraRenderer {
       opacity: node.opacity,
       visibility: node.visible ? 'visible' : 'hidden',
       class: `sceneNode${node.locked ? ' isLocked' : ''}`,
+      ...(semantic?.description || semantic?.canonicalRole ? {
+        'aria-label': semantic.description || semantic.canonicalRole,
+      } : {}),
     });
 
     if (node.type !== 'group') {
@@ -337,13 +395,19 @@ export class VeyraRenderer {
         'stroke-width': node.paint.strokeWidth,
         class: 'sceneShape',
         tabindex: '-1',
+        ...(descriptor.tag === 'image' ? {
+          href: assetHref(assetsById?.get(referenceId(node.asset, 'asset'))),
+          'aria-label': semantic?.description || node.name || 'Image',
+        } : {}),
       });
       shape.addEventListener('pointerdown', (event) => this.#startNodeDrag(event, node, group));
       group.appendChild(shape);
     }
 
+    for (const text of textsByNode?.get(node.id) || []) group.appendChild(renderTextRecord(text));
+
     for (const child of children.get(node.id) || []) {
-      group.appendChild(this.#renderNode(child, children));
+      group.appendChild(this.#renderNode(child, children, assetsById, textsByNode, semanticsByNode));
     }
 
     const selected = this.selectedRefs.some((ref) => ref.kind === 'node' && ref.id === node.id);

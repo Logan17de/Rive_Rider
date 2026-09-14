@@ -199,6 +199,32 @@ export function evaluateTimeline(timeline, time, options = {}) {
 
 export function evaluateTimelines(document, timelineStates) {
   const combined = {};
+  const additiveBases = new Map();
+
+  function additiveCompose(address, current, value, weight) {
+    const base = additiveBases.has(address)
+      ? additiveBases.get(address)
+      : (() => {
+        try { return cloneValue(readProperty(document, address)); } catch { return cloneValue(current); }
+      })();
+    if (!additiveBases.has(address)) additiveBases.set(address, cloneValue(base));
+    const blend = (left, right, rest) => {
+      if (typeof left === 'number' && typeof right === 'number') return left + (right - Number(rest || 0)) * weight;
+      if (Array.isArray(left) && Array.isArray(right) && left.length === right.length) {
+        return left.map((item, index) => blend(item, right[index], Array.isArray(rest) ? rest[index] : undefined));
+      }
+      if (left && right && typeof left === 'object' && typeof right === 'object' && !Array.isArray(left) && !Array.isArray(right)) {
+        const result = {};
+        for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+          if (key === 'id' || key === 'type') result[key] = cloneValue(right[key] ?? left[key]);
+          else result[key] = blend(left[key], right[key], rest?.[key]);
+        }
+        return result;
+      }
+      return cloneValue(weight >= 0.5 ? value : left);
+    };
+    return blend(current ?? base, value, base);
+  }
 
   for (const state of timelineStates) {
     const timeline = timelineById(document, state.timelineId);
@@ -209,7 +235,9 @@ export function evaluateTimelines(document, timelineStates) {
     const overrides = evaluateTimeline(timeline, state.time, { loop: state.loop });
 
     for (const [address, value] of Object.entries(overrides)) {
-      if (weight >= 1) {
+      if (state.additive) {
+        combined[address] = additiveCompose(address, combined[address], value, weight);
+      } else if (weight >= 1) {
         combined[address] = value;
       } else if (combined[address] !== undefined) {
         combined[address] = interpolateValue(combined[address], value, weight);

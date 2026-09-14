@@ -7,6 +7,7 @@ import { artboardById } from './projectGraph.js';
 import { evaluateComponentContent } from './components.js';
 import { createVeyraDataRuntime } from './dataGraph.js';
 import { featureCollections, featureRecords } from './featureGraph.js';
+import { evaluateLayouts } from './layout.js';
 
 // Internal observation handoff. JSON options cannot spoof an evaluated context.
 export const OBSERVED_EVALUATION_CONTEXT = Symbol('veyra-observed-evaluation-context');
@@ -16,6 +17,7 @@ export const VEYRA_EVALUATION_ORDER = Object.freeze([
   'animation',
   'playback',
   'data-binding',
+  'layout',
   'constraints',
   'interactive',
 ]);
@@ -101,6 +103,8 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     scopePath: options.runtimeScopePath || [],
   });
   applyLayer(evaluatedDocument, dataResult.overrides, 'data-binding', sources);
+  const layoutResult = evaluateLayouts(evaluatedDocument, options);
+  applyLayer(evaluatedDocument, layoutResult.overrides, 'layout', sources);
   applyLayer(evaluatedDocument, layers.constraints, 'constraints', sources);
   // Position controls need to reach the solver before it runs. The same
   // interactive layer is reapplied after solving so direct bone overrides win.
@@ -147,6 +151,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
     ...(featureRecords(evaluatedDocument).length ? { features: { ...featureCollections(evaluatedDocument), records: featureRecords(evaluatedDocument).map(({ kind, ref, owner, record }) => ({ kind, ref, ...(owner ? { owner } : {}), ...cloneValue(record) })) } } : {}),
     diagnostics: cloneValue({
       ...rig.diagnostics,
+      layout: cloneValue(layoutResult.diagnostics),
       collisions: [
         ...(rig.diagnostics?.collisions || []),
         ...diagnostics.collisions,
@@ -160,6 +165,7 @@ export function evaluateDocument(authoredDocument, layers = {}, animationPlaybac
       virtualValues: dataResult.virtualValues || {},
       diagnostics: dataResult.diagnostics,
       stats: dataResult.stats,
+      layoutStats: cloneValue(layoutResult.stats),
       runtimeScopePath: options.runtimeScopePath || [],
     }),
   };

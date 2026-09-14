@@ -97,7 +97,15 @@ export class GraphEditorState {
     state.graph = graph;
     return graph;
   }
-  beginDrag(stateId, point) { if (!this.select(stateId)) return false; this.#drag = { stateId, start: graphNodePoint(this, this.layer.states.find((state) => state.id === stateId), { snap: false }), pointer: { x: finite(point?.x), y: finite(point?.y) } }; return true; }
+  beginDrag(stateId, point, { additive = false } = {}) {
+    if (!this.select(stateId, additive)) return false;
+    this.#drag = {
+      stateId,
+      start: graphNodePoint(this, this.layer.states.find((state) => state.id === stateId), { snap: false }),
+      pointer: { x: finite(point?.x), y: finite(point?.y) },
+    };
+    return true;
+  }
   dragTo(point) { if (!this.#drag) return false; const delta = { x: finite(point?.x) - this.#drag.pointer.x, y: finite(point?.y) - this.#drag.pointer.y }; return this.moveState(this.#drag.stateId, { x: this.#drag.start.x + delta.x, y: this.#drag.start.y + delta.y }); }
   endDrag() { const result = this.#drag ? this.layer?.states?.find((state) => state.id === this.#drag.stateId)?.graph || null : null; this.#drag = null; return cloneValue(result); }
   hitTest(point) {

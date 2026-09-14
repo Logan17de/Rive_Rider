@@ -1,4 +1,9 @@
-import { cloneValue, machineById, timelineById } from './model.js';
+import {
+  cloneValue,
+  machineById,
+  timelineById,
+  VEYRA_MACHINE_BUILTIN_RUNTIME_VALUES,
+} from './model.js';
 import { createReference, referenceId } from './references.js';
 import { evaluateTimelines, applyEasing, interpolateValue } from './animation.js';
 import { readProperty } from './properties.js';
@@ -13,6 +18,7 @@ export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
 export const VEYRA_MACHINE_CAPABILITIES = Object.freeze({
   inputTypes: Object.freeze(['number', 'bool', 'trigger']),
   stateTypes: Object.freeze(['entry', 'exit', 'any', 'animation', 'blend1d', 'directBlend', 'additiveBlend']),
+  conditionSources: Object.freeze(['machineInput', 'data', 'artboard', 'runtime']),
   actionTypes: Object.freeze(['data-set', 'data-fire', 'input-set', 'input-fire', 'emit', 'timeline']),
   actionPhases: Object.freeze(['state-start', 'state-end', 'transition-start', 'transition-end']),
   randomizeExit: Object.freeze({ weighted: true, seeded: true, source: 'runtime-option', globalRandom: false }),
@@ -85,6 +91,19 @@ function orderedLayers(machine) {
   return [...(machine?.layers || [])].sort((a, b) => Number(a.order || 0) - Number(b.order || 0) || a.id.localeCompare(b.id));
 }
 
+function normalizeRuntimeValue(name, value) {
+  const key = String(name || '');
+  if (!VEYRA_MACHINE_BUILTIN_RUNTIME_VALUES.includes(key)) {
+    throw new TypeError(`Unknown machine runtime value "${key}".`);
+  }
+  if (key === 'playing') {
+    if (typeof value !== 'boolean') throw new TypeError('Machine runtime value "playing" must be a boolean.');
+  } else if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError(`Machine runtime value "${key}" must be a finite number.`);
+  }
+  return { key, value: cloneValue(value) };
+}
+
 function layerWeight(layer) {
   const value = Number(layer?.weight ?? 1);
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
@@ -100,15 +119,51 @@ function blendLayerValue(document, current, next, weight, address) {
   return interpolateValue(base, next, weight);
 }
 
-function machineSignature(machine) {
+function machineSignature(machine, document = null) {
   if (!machine) return NO_MACHINE;
+  const timelineIds = new Set();
+  for (const layer of machine.layers || []) for (const state of layer.states || []) {
+    const timelineId = referenceId(state.timeline, 'timeline');
+    if (timelineId) timelineIds.add(timelineId);
+    for (const child of state.children || []) {
+      const childTimelineId = referenceId(child.timeline, 'timeline');
+      if (childTimelineId) timelineIds.add(childTimelineId);
+    }
+  }
+  const timelineSignature = [...timelineIds].sort().map((id) => {
+    const timeline = (document?.timelines || []).find((candidate) => candidate.id === id);
+    return [id, timeline ? [timeline.duration, timeline.fps, timeline.loop, timeline.workStart, timeline.workEnd, (timeline.tracks || []).map((track) => [track.id, track.address, (track.keyframes || []).map((keyframe) => [keyframe.id, keyframe.frame, keyframe.value, keyframe.easing, keyframe.easingParams || null])])] : null];
+  });
   return JSON.stringify([
     referenceId(machine.compatibilityLayer, 'machineLayer'),
     (machine.inputs || []).map(input => [input.id, input.type]),
     orderedLayers(machine).map(layer => [
       layer.id,
       layer.initial ? referenceId(layer.initial, 'machineState') : null,
-      (layer.states || []).map(state => [state.id, state.type, Boolean(state.randomizeExit), state.actions || []]),
+      (layer.states || []).map(state => [state.id, state.type, referenceId(state.timeline, 'timeline'), state.speed, state.input || null, state.children || [], Boolean(state.randomizeExit), state.actions || []]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.randomWeight ?? null, transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, condition.input ? referenceId(condition.input, 'machineInput') : null, condition.source || null, condition.op, condition.value, condition.compare || null]), transition.actions || []]),
+    ]),
+    timelineSignature,
+  ]);
+}
+
+// Runtime invalidation is intentionally narrower than evaluation-cache
+// invalidation. Timeline retargets/keyframe edits should refresh rendered
+// values without pretending that the state-machine graph moved or resetting a
+// host's graph debugger. This signature captures graph/runtime structure while
+// excluding timeline contents and the direct timeline pointer on animation
+// states; `machineSignature` above still catches those for cache refresh.
+function machineStructureSignature(machine) {
+  if (!machine) return NO_MACHINE;
+  return JSON.stringify([
+    referenceId(machine.compatibilityLayer, 'machineLayer'),
+    (machine.inputs || []).map(input => [input.id, input.type]),
+    orderedLayers(machine).map(layer => [
+      layer.id,
+      layer.enabled !== false,
+      layer.weight,
+      layer.initial ? referenceId(layer.initial, 'machineState') : null,
+      (layer.states || []).map(state => [state.id, state.type, state.speed, state.input || null, state.children || [], Boolean(state.randomizeExit), state.actions || []]),
       (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.randomWeight ?? null, transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, condition.input ? referenceId(condition.input, 'machineInput') : null, condition.source || null, condition.op, condition.value, condition.compare || null]), transition.actions || []]),
     ]),
   ]);
@@ -225,6 +280,8 @@ function runtimeLayerSnapshot(layer, runtime) {
     stateName: state?.name || null,
     stateType: state?.type || null,
     stateTime: runtime.stateTime,
+    settled: Boolean(runtime.settled),
+    error: runtime.error || null,
     transition,
   };
 }
@@ -260,23 +317,38 @@ function transitionView(runtime) {
 
 function createLayerRuntime(layer) {
   const state = initialState(layer);
-  return { stateId: state?.id || null, stateTime: 0, transition: null, stateStartPending: false };
+  return { stateId: state?.id || null, stateTime: 0, transition: null, stateStartPending: false, settled: false, cachedContributions: null, cachedOverrides: null, error: null };
 }
 
 function cloneLayerRuntime(value) {
-  return { stateId: value.stateId, stateTime: value.stateTime, transition: cloneValue(value.transition), stateStartPending: Boolean(value.stateStartPending) };
+  return {
+    stateId: value.stateId,
+    stateTime: value.stateTime,
+    transition: cloneValue(value.transition),
+    stateStartPending: Boolean(value.stateStartPending),
+    settled: Boolean(value.settled),
+    cachedContributions: cloneValue(value.cachedContributions),
+    cachedOverrides: cloneValue(value.cachedOverrides),
+    error: value.error || null,
+  };
 }
 
 export class MachineRuntime {
   #documentOrGetter = null;
   #machineId = null;
   #overrideValues = new Map();
+  // Keep the authored input type that an override was validated against. If
+  // an input is retyped in the document, the old value must not leak across
+  // reconciliation (for example, number 42 becoming bool true).
+  #overrideTypes = new Map();
   #layers = new Map();
   #dataRuntime = null;
   #runtimeScopePath = [];
+  #runtimeValues = new Map();
   #randomSeed = 0;
   #randomState = 0;
   #signature = NO_MACHINE;
+  #structureSignature = NO_MACHINE;
   #invalidateListeners = new Set();
   #stats = {
     evaluations: 0,
@@ -284,6 +356,7 @@ export class MachineRuntime {
     stateEvaluations: 0,
     transitionConditionEvaluations: 0,
     dataConditionReads: 0,
+    builtinConditionReads: 0,
     triggerPulsesConsumed: 0,
     actionsExecuted: 0,
     actionErrors: 0,
@@ -293,6 +366,8 @@ export class MachineRuntime {
     compositionApplications: 0,
     inactiveLayerSkips: 0,
     zeroMachineFastPaths: 0,
+    layerErrors: 0,
+    sleepHits: 0,
   };
 
   constructor(documentOrGetter, machineId, options = {}) {
@@ -300,6 +375,12 @@ export class MachineRuntime {
     this.#machineId = String(machineId || '');
     this.#dataRuntime = options.dataRuntime || createVeyraDataRuntime(documentOrGetter);
     this.#runtimeScopePath = createDataRuntimeScope(options.runtimeScopePath ?? options.scopePath ?? []).path;
+    if (options.runtimeValues && typeof options.runtimeValues === 'object' && !Array.isArray(options.runtimeValues)) {
+      for (const [key, value] of Object.entries(options.runtimeValues)) {
+        const normalized = normalizeRuntimeValue(key, value);
+        this.#runtimeValues.set(normalized.key, normalized.value);
+      }
+    }
     this.#randomSeed = normalizeRandomSeed(options.randomSeed, this.#machineId);
     this.#randomState = this.#randomSeed;
     const machine = machineById(resolveDocument(documentOrGetter), this.#machineId);
@@ -316,8 +397,11 @@ export class MachineRuntime {
     const snapshot = new MachineRuntime(this.#documentOrGetter, this.#machineId, { dataRuntime: this.#dataRuntime.fork(), runtimeScopePath: this.#runtimeScopePath, randomSeed: this.#randomSeed });
     snapshot.#randomState = this.#randomState;
     snapshot.#overrideValues = new Map([...this.#overrideValues].map(([key, value]) => [key, cloneValue(value)]));
+    snapshot.#overrideTypes = new Map(this.#overrideTypes);
+    snapshot.#runtimeValues = new Map([...this.#runtimeValues].map(([key, value]) => [key, cloneValue(value)]));
     snapshot.#layers = new Map([...this.#layers].map(([id, value]) => [id, cloneLayerRuntime(value)]));
     snapshot.#signature = this.#signature;
+    snapshot.#structureSignature = this.#structureSignature;
     snapshot.#stats = cloneValue(this.#stats);
     return snapshot;
   }
@@ -359,8 +443,47 @@ export class MachineRuntime {
   #inputsById() { return new Map(this.inputs.map(input => [input.id, input.value])); }
 
   #readDataCondition(endpoint) {
-    this.#stats.dataConditionReads += 1;
-    return this.#dataRuntime.getEndpointValue(endpoint, { scopePath: this.#runtimeScopePath });
+    if (endpoint?.kind === 'data') {
+      this.#stats.dataConditionReads += 1;
+      return this.#dataRuntime.getEndpointValue(endpoint, { scopePath: this.#runtimeScopePath });
+    }
+    this.#stats.builtinConditionReads += 1;
+    return this.#readBuiltinCondition(endpoint);
+  }
+
+  #readBuiltinCondition(source) {
+    const property = String(source?.property || '');
+    // Hosts can publish pointer/scroll/viewport values without mutating the
+    // authored document. Explicit runtime values take precedence over the
+    // deterministic defaults below.
+    if (this.#runtimeValues.has(property)) return cloneValue(this.#runtimeValues.get(property));
+    if (source?.kind === 'artboard') {
+      const id = source.artboard?.id || this.#document.artboards?.[0]?.id;
+      const artboard = (this.#document.artboards || []).find((candidate) => candidate.id === id);
+      if (!artboard) return undefined;
+      if (property === 'x' || property === 'y' || property === 'width' || property === 'height') return Number(artboard[property] || 0);
+      if (property === 'aspect') return Number(artboard.height) ? Number(artboard.width) / Number(artboard.height) : 0;
+      if (property === 'area') return Number(artboard.width || 0) * Number(artboard.height || 0);
+      return undefined;
+    }
+    const runtime = this.#compatibilityRuntime();
+    const state = runtime?.stateId ? stateById(this.machine && compatibilityLayer(this.machine), runtime.stateId) : null;
+    const stateTime = Number(runtime?.stateTime || 0);
+    if (property === 'stateTime' || property === 'time') return stateTime;
+    if (property === 'speed') return Number(state?.speed ?? 1);
+    if (property === 'playing') return Boolean(runtime?.stateId && !runtime?.settled);
+    if (property === 'transitionProgress') return transitionView(runtime)?.progress ?? 0;
+    const duration = statePlaybackDurationSeconds(this.#document, state);
+    if (property === 'stateProgress' || property === 'progress') return duration && duration > 0 ? Math.max(0, Math.min(1, stateTime / duration)) : 0;
+    if (property === 'frame') {
+      const timeline = state?.timeline ? timelineById(this.#document, referenceId(state.timeline, 'timeline')) : null;
+      return stateTime * Number(timeline?.fps || 1);
+    }
+    // Pointer/scroll/viewport values default to zero until a host publishes a
+    // value through setRuntimeValue(). This keeps conditions deterministic and
+    // avoids reaching into DOM globals from the runtime.
+    if (['pointerX', 'pointerY', 'scrollX', 'scrollY', 'viewportWidth', 'viewportHeight'].includes(property)) return 0;
+    return undefined;
   }
 
   #transitionMatch(transition, stateTime, inputsById) {
@@ -368,10 +491,7 @@ export class MachineRuntime {
   }
 
   #numericSourceValue(source, inputsById) {
-    if (source?.kind === 'data') {
-      const value = this.#readDataCondition(source);
-      return Number(value);
-    }
+    if (source?.kind === 'data' || source?.kind === 'artboard' || source?.kind === 'runtime') return Number(this.#readDataCondition(source));
     const id = referenceId(source, 'machineInput');
     return Number(inputsById.get(id) ?? 0);
   }
@@ -424,11 +544,15 @@ export class MachineRuntime {
       } else if (action.type === 'input-set') {
         const inputId = referenceId(action.input, 'machineInput');
         this.#overrideValues.set(inputId, cloneValue(action.value));
+        const input = (this.machine?.inputs || []).find((candidate) => candidate.id === inputId);
+        if (input) this.#overrideTypes.set(inputId, input.type);
         inputsById.set(inputId, cloneValue(action.value));
         effect = { kind: 'input-set', input: cloneValue(action.input), value: cloneValue(action.value), mutation: 'runtime-only' };
       } else if (action.type === 'input-fire') {
         const inputId = referenceId(action.input, 'machineInput');
         this.#overrideValues.set(inputId, true);
+        const input = (this.machine?.inputs || []).find((candidate) => candidate.id === inputId);
+        if (input) this.#overrideTypes.set(inputId, input.type);
         inputsById.set(inputId, true);
         effect = { kind: 'input-fire', input: cloneValue(action.input), value: true, mutation: 'runtime-only' };
       } else if (action.type === 'emit') {
@@ -454,10 +578,12 @@ export class MachineRuntime {
 
   #resetRuntime(machine) {
     this.#overrideValues = new Map();
+    this.#overrideTypes = new Map();
     this.#layers = new Map();
     this.#randomState = this.#randomSeed;
     for (const layer of orderedLayers(machine)) this.#layers.set(layer.id, createLayerRuntime(layer));
-    this.#signature = machineSignature(machine);
+    this.#signature = machineSignature(machine, this.#document);
+    this.#structureSignature = machineStructureSignature(machine);
     const inputs = new Map((machine?.inputs || []).map(input => [input.id, input.value]));
     for (const layer of orderedLayers(machine)) {
       const runtime = this.#layers.get(layer.id);
@@ -469,11 +595,71 @@ export class MachineRuntime {
 
   #reconcile() {
     const machine = this.machine;
-    const signature = machineSignature(machine);
+    const signature = machineSignature(machine, this.#document);
     if (signature === this.#signature) return machine;
     const previous = this.#signature;
-    this.#resetRuntime(machine);
-    this.#notifyInvalidated(!machine ? 'machine-removed' : (previous === NO_MACHINE ? 'machine-restored' : 'structural'));
+    const previousStructure = this.#structureSignature;
+    if (!machine) {
+      this.#layers = new Map();
+      this.#overrideValues = new Map();
+      this.#overrideTypes = new Map();
+      this.#randomState = this.#randomSeed;
+      this.#signature = NO_MACHINE;
+      this.#structureSignature = NO_MACHINE;
+      this.#notifyInvalidated('machine-removed');
+      return machine;
+    }
+
+    // Reconcile by stable layer/state/transition identity. Cosmetic edits and
+    // unrelated layer changes must not rewind an active clock; only a deleted
+    // or structurally invalid runtime record is reinitialized in isolation.
+    const previousLayers = this.#layers;
+    const nextOverrides = new Map();
+    const nextOverrideTypes = new Map();
+    const inputs = new Map((machine.inputs || []).map((input) => {
+      const overrideType = this.#overrideTypes.get(input.id);
+      const override = this.#overrideValues.get(input.id);
+      // Unknown legacy overrides are treated as stale. Overrides created by
+      // this runtime always carry a validation type and survive cosmetic or
+      // authored-value edits only while that type remains compatible.
+      if (override !== undefined && overrideType === input.type) {
+        nextOverrides.set(input.id, override);
+        nextOverrideTypes.set(input.id, overrideType);
+      }
+      return [input.id, override !== undefined && overrideType === input.type ? override : input.value];
+    }));
+    const nextLayers = new Map();
+    for (const layer of orderedLayers(machine)) {
+      const prior = previousLayers.get(layer.id);
+      const currentState = prior ? stateById(layer, prior.stateId) : null;
+      let runtime = prior && currentState ? cloneLayerRuntime(prior) : createLayerRuntime(layer);
+      runtime.error = null;
+      runtime.settled = false;
+      runtime.cachedContributions = null;
+      runtime.cachedOverrides = null;
+      if (runtime.transition) {
+        const active = (layer.transitions || []).find((candidate) => candidate.id === runtime.transition.transitionId);
+        const fromExists = stateById(layer, runtime.transition.fromId);
+        const toExists = stateById(layer, runtime.transition.toId);
+        if (!active || !fromExists || !toExists) runtime.transition = null;
+      }
+      if (!runtime.stateId || !stateById(layer, runtime.stateId)) {
+        runtime = createLayerRuntime(layer);
+        this.#resolveImmediatePseudo(layer, runtime, inputs, [], { lifecycle: false });
+        const state = stateById(layer, runtime.stateId);
+        runtime.stateStartPending = Boolean(state && !['entry', 'any', 'exit'].includes(state.type));
+      }
+      nextLayers.set(layer.id, runtime);
+    }
+    this.#layers = nextLayers;
+    this.#overrideValues = nextOverrides;
+    this.#overrideTypes = nextOverrideTypes;
+    this.#signature = signature;
+    const nextStructure = machineStructureSignature(machine);
+    this.#structureSignature = nextStructure;
+    if (previous === NO_MACHINE || previousStructure !== nextStructure) {
+      this.#notifyInvalidated(previous === NO_MACHINE ? 'machine-restored' : 'structural');
+    }
     return machine;
   }
 
@@ -667,6 +853,15 @@ export class MachineRuntime {
   #stepLayer(layer, runtime, delta, inputsById, events) {
     if (layer.enabled === false) return;
     if (!runtime.stateId && !runtime.transition) return;
+    runtime.error = null;
+    if (runtime.settled) {
+      const selected = this.#eligibleTransitionForState(layer, runtime.stateId, runtime.stateTime, inputsById);
+      if (selected) {
+        runtime.settled = false;
+        this.#beginTransition(layer, runtime, selected.transition, runtime.stateId, runtime.stateTime, inputsById, events, { match: selected.match, randomDecision: selected.randomDecision });
+      } else this.#stats.sleepHits += 1;
+      return;
+    }
     if (runtime.stateStartPending) {
       const state = stateById(layer, runtime.stateId);
       runtime.stateStartPending = false;
@@ -684,6 +879,14 @@ export class MachineRuntime {
     runtime.stateTime += delta;
     const selected = this.#eligibleTransitionForState(layer, runtime.stateId, runtime.stateTime, inputsById);
     if (selected) this.#beginTransition(layer, runtime, selected.transition, runtime.stateId, runtime.stateTime, inputsById, events, { match: selected.match, randomDecision: selected.randomDecision });
+    if (!selected) {
+      const state = stateById(layer, runtime.stateId);
+      const timeline = state?.timeline ? timelineById(this.#document, referenceId(state.timeline, 'timeline')) : null;
+      if (state?.type === 'animation' && timeline?.loop === 'none') {
+        const duration = statePlaybackDurationSeconds(this.#document, state);
+        if (duration != null && runtime.stateTime >= duration - 1e-9) runtime.settled = true;
+      }
+    }
   }
 
   step(deltaSeconds) {
@@ -694,7 +897,17 @@ export class MachineRuntime {
     if (!machine) { this.#stats.zeroMachineFastPaths += 1; return events; }
     const inputsById = this.#inputsById();
     if (delta > 0) {
-      for (const layer of orderedLayers(machine)) this.#stepLayer(layer, this.#layers.get(layer.id), delta, inputsById, events);
+      for (const layer of orderedLayers(machine)) {
+        const runtime = this.#layers.get(layer.id) || createLayerRuntime(layer);
+        try {
+          this.#stepLayer(layer, runtime, delta, inputsById, events);
+        } catch (error) {
+          runtime.error = String(error?.message || error);
+          runtime.settled = true;
+          this.#stats.layerErrors += 1;
+          events.push({ type: 'error', machineId: this.#machineId, layerId: layer.id, error: runtime.error });
+        }
+      }
     }
     this.#clearTriggers();
     return events;
@@ -713,8 +926,20 @@ export class MachineRuntime {
     const normalized = input.type === 'number' ? Number(value) : Boolean(value);
     if (input.type === 'number' && !Number.isFinite(normalized)) throw new TypeError(`Input "${input.name || input.id}" requires a finite number.`);
     this.#overrideValues.set(input.id, normalized);
+    this.#overrideTypes.set(input.id, input.type);
+    for (const runtime of this.#layers.values()) { runtime.settled = false; runtime.cachedContributions = null; runtime.cachedOverrides = null; }
     return normalized;
   }
+
+  /** Publish an ephemeral host/runtime value for built-in transition sources. */
+  setRuntimeValue(name, value) {
+    const normalized = normalizeRuntimeValue(name, value);
+    this.#runtimeValues.set(normalized.key, normalized.value);
+    for (const runtime of this.#layers.values()) { runtime.settled = false; runtime.cachedContributions = null; runtime.cachedOverrides = null; }
+    return cloneValue(normalized.value);
+  }
+
+  getRuntimeValue(name) { return cloneValue(this.#runtimeValues.get(String(name || ''))); }
 
   fire(nameOrId) {
     const machine = this.#reconcile();
@@ -723,6 +948,8 @@ export class MachineRuntime {
     if (!input) throw new TypeError(`Machine input "${nameOrId}" was not found on ${machine.name || this.#machineId}.`);
     if (input.type !== 'trigger') throw new TypeError(`Input "${input.name || input.id}" is not a trigger; use setInput() for ${input.type} inputs.`);
     this.#overrideValues.set(input.id, true);
+    this.#overrideTypes.set(input.id, input.type);
+    for (const runtime of this.#layers.values()) { runtime.settled = false; runtime.cachedContributions = null; runtime.cachedOverrides = null; }
     return true;
   }
 
@@ -775,13 +1002,19 @@ export class MachineRuntime {
     const desired = items
       .map(item => ({ ...item, effectiveWeight: Math.max(0, Math.min(1, Number(item.effectiveWeight ?? item.weight ?? 0))) }))
       .filter(item => item.effectiveWeight > 1e-12);
-    const total = desired.reduce((sum,item)=>sum+item.effectiveWeight,0);
+    const regular = desired.filter(item => !item.additive);
+    const additive = desired.filter(item => item.additive).map(item => ({ ...item, weight: item.effectiveWeight }));
+    const total = regular.reduce((sum,item)=>sum+item.effectiveWeight,0);
     const base = Math.max(0, 1-total);
     let cumulative = base;
-    return desired.map(item => {
+    const composed = regular.map(item => {
       cumulative += item.effectiveWeight;
       return { ...item, weight: cumulative > 0 ? item.effectiveWeight / cumulative : 0 };
     });
+    // Additive branches are applied after the absolute blend and retain their
+    // delta weights; normalizing them with absolute contributors would erase
+    // the very semantics that distinguishes Additive Blend.
+    return [...composed, ...additive];
   }
 
   #stateTimelineContributions(layer, runtime, inputsById) {
@@ -840,11 +1073,33 @@ export class MachineRuntime {
         continue;
       }
       activeLayers += 1; this.#stats.layerEvaluations += 1;
-      const contributions = this.#stateTimelineContributions(layer, runtime, inputsById);
-      if (runtime.stateId) this.#stats.stateEvaluations += 1;
-      this.#stats.timelineEvaluations += contributions.length;
-      const layerOverrides = evaluateTimelines(this.#document, contributions);
-      const layerEvidence = contributions.map(item => ({ timeline: createReference('timeline', item.timelineId), state: createReference('machineState', item.stateId), time: item.time, weight: item.weight, effectiveWeight: item.effectiveWeight ?? item.weight, blendChild: item.blendChildId ? createReference('machineBlendChild', item.blendChildId) : null }));
+      let contributions;
+      let layerOverrides;
+      try {
+        contributions = runtime.settled && runtime.cachedContributions
+          ? cloneValue(runtime.cachedContributions)
+          : this.#stateTimelineContributions(layer, runtime, inputsById);
+        if (runtime.stateId) this.#stats.stateEvaluations += 1;
+        if (runtime.settled && runtime.cachedOverrides) {
+          this.#stats.sleepHits += 1;
+          layerOverrides = cloneValue(runtime.cachedOverrides);
+        } else {
+          this.#stats.timelineEvaluations += contributions.length;
+          layerOverrides = evaluateTimelines(this.#document, contributions);
+          runtime.cachedContributions = cloneValue(contributions);
+          runtime.cachedOverrides = cloneValue(layerOverrides);
+        }
+        runtime.error = null;
+      } catch (error) {
+        runtime.error = String(error?.message || error);
+        runtime.settled = true;
+        this.#stats.layerErrors += 1;
+        result.layers.push({ ...runtimeLayerSnapshot(layer, runtime), transition: transitionView(runtime), evaluatedTimelines: [], error: runtime.error });
+        result.diagnostics = result.diagnostics || [];
+        result.diagnostics.push({ code: 'machine-layer-error', layerId: layer.id, error: runtime.error });
+        continue;
+      }
+      const layerEvidence = contributions.map(item => ({ timeline: createReference('timeline', item.timelineId), state: createReference('machineState', item.stateId), time: item.time, weight: item.weight, effectiveWeight: item.effectiveWeight ?? item.weight, ...(item.additive ? { additive: true, rawWeight: item.rawWeight ?? item.effectiveWeight ?? item.weight } : {}), blendChild: item.blendChildId ? createReference('machineBlendChild', item.blendChildId) : null }));
       const weight = layerWeight(layer);
       for (const [address, value] of Object.entries(layerOverrides)) {
         const previous = result.ownership[address] || [];
@@ -883,6 +1138,7 @@ export class MachineRuntime {
       stateEvaluations: 0,
       transitionConditionEvaluations: 0,
       dataConditionReads: 0,
+      builtinConditionReads: 0,
       triggerPulsesConsumed: 0,
       actionsExecuted: 0,
       actionErrors: 0,
@@ -892,6 +1148,8 @@ export class MachineRuntime {
       compositionApplications: 0,
       inactiveLayerSkips: 0,
       zeroMachineFastPaths: 0,
+      layerErrors: 0,
+      sleepHits: 0,
     };
     this.#resetRuntime(machine);
   }

@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/run-check.mjs",
-    "test": "node scripts/run-suites.mjs"
+    "test": "node scripts/run-suites.mjs",
+    "start": "node scripts/static-server.mjs",
+    "dev": "node scripts/static-server.mjs"
   }
 }

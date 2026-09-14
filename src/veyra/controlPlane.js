@@ -342,6 +342,27 @@ function constraintControllers(document, ref) {
   return controllers.sort((left, right) => left.ref.id.localeCompare(right.ref.id));
 }
 
+function layoutControllers(document, address) {
+  let parsed;
+  try { parsed = parsePropertyAddress(address); } catch { return []; }
+  if (parsed.reference.kind !== 'node' || !['transform.x', 'transform.y'].includes(parsed.path)) return [];
+  const controllers = [];
+  for (const layout of document.layouts || []) {
+    if (layout.enabled === false) continue;
+    for (const item of layout.items || []) {
+      if (referenceId(item.target, 'node') !== parsed.reference.id) continue;
+      controllers.push({
+        kind: 'layout-item',
+        ref: { kind: 'layoutItem', id: item.id },
+        layout: { kind: 'layout', id: layout.id },
+        mode: layout.mode,
+        evidence: [{ kind: 'layout-target', address, layout: { kind: 'layout', id: layout.id }, item: { kind: 'layoutItem', id: item.id } }],
+      });
+    }
+  }
+  return controllers.sort((left, right) => left.ref.id.localeCompare(right.ref.id));
+}
+
 export function getOwnership(documentInput, refOrAddress, options = {}) {
   const document = normalizeDocument(documentInput);
   const address = targetAddress(refOrAddress);
@@ -386,10 +407,12 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
 
   const source = propertySource(evaluation.scene, address);
   const tracks = trackControllers(document, address);
+  const layouts = layoutControllers(document, address);
   const constraints = constraintControllers(document, parsed.reference);
   const bindings = bindingControllersForAddress(document, address);
   const potentialControllers = [
     ...tracks,
+    ...layouts,
     ...bindings,
     ...constraints,
   ];
@@ -419,6 +442,11 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
       refs: constraints.map((controller) => cloneValue(controller.ref)),
       evidence: constraints.flatMap((controller) => cloneValue(controller.evidence)),
     };
+  } else if (source === 'layout') {
+    const activeLayout = layouts[layouts.length - 1] || null;
+    activeOwner = activeLayout
+      ? { ...cloneValue(activeLayout), source, evidence: cloneValue(activeLayout.evidence) }
+      : { kind: 'layout-runtime', source, evidence: [{ kind: 'layout-controller-missing' }] };
   } else if (source === 'interactive') {
     activeOwner = { kind: 'runtime-override', source, evidence: [{ kind: 'evaluation-layer', layer: 'interactive' }] };
   } else {
@@ -495,6 +523,17 @@ export function getOwnership(documentInput, refOrAddress, options = {}) {
   } else if (activeOwner.kind === 'constraint-system') {
     writableSource = { kind: 'constraint-inputs', refs: activeOwner.refs, edit: 'controller-or-constraint-authored-properties' };
     warnings.push('The evaluated value is constraint-derived. Edit the authored constraint/controller inputs rather than the derived evaluated output.');
+  } else if (activeOwner.kind === 'layout-item' || activeOwner.kind === 'layout-runtime') {
+    writableSource = {
+      kind: 'layout-item',
+      ref: cloneValue(activeOwner.ref || null),
+      layout: cloneValue(activeOwner.layout || null),
+      address,
+      authored: false,
+      writable: false,
+      edit: 'layout-item-or-container-command',
+    };
+    warnings.push('The evaluated value is layout-derived. Edit the layout item/container constraints rather than the transient transform output.');
   } else if (activeOwner.kind === 'runtime-override') {
     writableSource = { kind: 'runtime-context', writable: false };
     warnings.push('The evaluated value is runtime-derived and is not a persistent authored write target.');

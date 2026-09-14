@@ -9,7 +9,7 @@ import {
 import { createTextRef } from '../src/veyra/references.js';
 import { VeyraStore } from '../src/veyra/store.js';
 import { dispatchVeyraCommand } from '../src/veyra/commands.js';
-import { createGraphEditorController, renderMachineGraphSvg } from '../src/veyra/graphEditor.js';
+import { createGraphEditorController, createGraphEditorState, renderMachineGraphSvg } from '../src/veyra/graphEditor.js';
 import { createVeyraPlayer } from '../src/veyra/player.js';
 import { importDotLottie, importLottie, exportDotLottie, exportLottie } from '../src/veyra/lottie.js';
 import { evaluateDocument } from '../src/veyra/evaluation.js';
@@ -62,6 +62,11 @@ const secondState = dispatchVeyraCommand(store, {
   command: { source: 'ai', label: 'Add outro state' },
 });
 assert.equal(secondState.ok, true);
+const gestureGraph = createGraphEditorState({ machine: store.document.stateMachines[0], layerId: 'm10_layer' });
+gestureGraph.select('m10_state');
+gestureGraph.beginDrag('m10_state_b', { x: 0, y: 0 }, { additive: true });
+assert.deepEqual(gestureGraph.selection.map((ref) => ref.id), ['m10_state', 'm10_state_b'], 'additive graph drags preserve Shift-style multi-selection');
+gestureGraph.endDrag();
 const addedTransition = dispatchVeyraCommand(store, {
   action: 'addMachineTransition',
   args: { machineId: 'm10_machine', layerId: 'm10_layer', overrides: { id: 'm10_transition', from: 'm10_state', to: 'm10_state_b', duration: 0.25 } },

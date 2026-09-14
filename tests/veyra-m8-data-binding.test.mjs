@@ -186,7 +186,7 @@ check('12 Property Groups are keyable sources in the normal timeline system', ()
 });
 
 check('13 evaluation precedence is explicit and binding sits between playback and constraints', () => {
-  assert.deepEqual(VEYRA_EVALUATION_ORDER, ['authored','animation','playback','data-binding','constraints','interactive']);
+  assert.deepEqual(VEYRA_EVALUATION_ORDER, ['authored','animation','playback','data-binding','layout','constraints','interactive']);
 });
 
 check('14 zero bindings have an O(1) fast path with no graph construction', () => {

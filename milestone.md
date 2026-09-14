@@ -4,18 +4,18 @@
 
 Complete only the tasks below. Follow-up ideas belong in `suggestions`. Implementers stop at `AWAITING VERIFICATION` with reproducible commit/test evidence; they do not mark their own work VERIFIED.
 
-## Progress snapshot — refreshed for the M9/M10 implementation slice
+## Progress snapshot — refreshed for the M10 production-hardening slice
 
 These are approximate engineering planning estimates, not vendor-certified parity scores, line-count metrics or test-pass percentages. The percentages remain anchored to the independently accepted M0–M8 baseline. M9 has advanced materially on `main` through transition interruption, M8-driven conditions/events, exactly-once lifecycle actions and deterministic Randomize Exit, but M9 is still `IN PROGRESS` and has not had independent milestone acceptance, so no new verified percentage increment is claimed.
 
 | Area | Verified estimate | Current interpretation |
 | --- | ---: | --- |
-| AI-native identity / semantics / control architecture | **~98%** | Stable typed identity now covers scene, data, machine and feature-graph records; canonical commands, resolver, manifest, ownership and dependency evidence are shared by the UI and AI adapters. Remaining work is production hardening and browser-level acceptance. |
-| Core editor / engine foundation | **~97%** | Workspace, vector/rig authoring, Components, interaction loop, data runtime, layered machine runtime, player and authored/evaluated boundaries are implemented and regression-tested. |
-| Modern Rive editor/runtime parity | **~70–75%** | Layered machines, blend composition, lifecycle records, graph authoring, text/accessibility contracts and image nodes are present; production WASM parity, full layout execution, GPU effects, audio/video, and complete Rive interchange remain open. |
-| Lottie / dotLottie / Creator ecosystem parity | **~45–50%** | Dependency-free Lottie JSON import/export covers common shape, path, text, marker and image layers; dotLottie is represented as a JSON package contract. Binary `.lottie` ZIP packaging and full Creator feature parity remain open. |
+| AI-native identity / semantics / control architecture | **~98%** | Stable typed identity now covers scene, data, machine and feature-graph records; canonical commands, resolver, manifest, ownership and dependency evidence are shared by the UI and AI adapters. Production hardening now includes bounded inputs and safe inspector rendering. |
+| Core editor / engine foundation | **~97%** | Workspace, vector/rig authoring, Components, interaction loop, data runtime, layered machine runtime, deterministic layout, player and authored/evaluated boundaries are implemented and regression-tested. |
+| Modern Rive editor/runtime parity | **~70–75%** | Layered machines, blend composition, lifecycle records, graph authoring, text/accessibility/image rendering, deterministic layout and a real browser smoke path are present; production WASM parity, GPU effects, audio/video, and complete Rive interchange remain open. |
+| Lottie / dotLottie / Creator ecosystem parity | **~45–50%** | Dependency-free Lottie JSON import/export covers common shape, path, gradient, text, marker and image layers with bounded payloads; dotLottie is represented as a validated JSON package contract. Binary `.lottie` ZIP packaging and full Creator feature parity remain open. |
 | Full Veyra superset target | **~62–68%** | Target = Rive-class capability + Lottie/dotLottie interoperability/ecosystem coverage + Veyra AI-native semantics while remaining modular/lightweight. |
-| Remaining full-target work | **~32–38%** | Dominated by vendor-runtime parity, production export/render backends, broader authoring families and real-browser/accessibility acceptance rather than another identity/control-plane retrofit. |
+| Remaining full-target work | **~32–38%** | Dominated by vendor-runtime parity, production export/render backends, broader authoring families and exhaustive accessibility/visual acceptance rather than another identity/control-plane retrofit. |
 
 ### Roadmap position
 
@@ -23,7 +23,7 @@ These are approximate engineering planning estimates, not vendor-certified parit
 - `plan.md` M3 / implementation M8 — View Models & Data Binding: **VERIFIED**.
 - M8-C1 through M8-C5 corrections: **VERIFIED as part of M8**; preserve their regression suites and contracts.
 - M9 layered machine/runtime work: **implemented slice; acceptance remains open**, below.
-- Current implementation work: **M10 — AI-readable feature graph, player and interchange**, below.
+- Current implementation work: **M10 — AI-readable feature graph, player, interchange and production hardening**, below.
 - `plan.md` M5+ remains queued until M9 is independently accepted.
 
 Every verification/correction/advance must refresh this snapshot. Selected probe counts are not completion percentages.
@@ -464,13 +464,24 @@ exporters all operate on the same normalized document.
 
 ## Verification evidence
 
-- `npm run check`: **55/55** source files pass syntax checks.
-- `npm test`: **59/59** repository suites pass, including the M10 feature,
-  player, graph and Lottie suite plus all M0–M9 regression suites.
+- `npm run check`: **56/56** source files pass syntax checks, including the
+  production static server and responsive layout evaluator.
+- `npm test`: **61/61** repository suites pass, including the M10 feature,
+  player, graph, layout, hardening and static-server suites plus all M0–M9
+  regression suites.
 - Direct M10 acceptance: feature nested identity/undo, graph camera
-  non-mutation, state movement/reconnect, deterministic player stepping,
-  Lottie text/marker/image mapping, SVG text output and dotLottie round-trip.
-- `git diff --check`: clean before the implementation commit.
+  non-mutation, state movement/reconnect, additive Shift-selection,
+  deterministic player stepping, Lottie gradient/text/marker/image mapping,
+  SVG text/image output, bounded import/export payloads and dotLottie
+  round-trip.
+- Production checks: the dependency-free server passes GET/HEAD, redirect,
+  traversal/symlink, ETag/304, cache-policy and security-header tests;
+  mutable source assets revalidate with `Cache-Control: no-cache`.
+- Live browser smoke (Codex in-app browser): the editor loads from the static
+  server, the custom modal creates a machine, two states can be Shift-selected,
+  and a transition is created and inspected without console errors from the
+  current bundle.
+- `git diff --check`: clean (line-ending normalization warnings only).
 
 ## Acceptance boundary and known limitations
 
@@ -478,27 +489,27 @@ This milestone is an implementation slice, not a claim of literal vendor
 parity with every Rive runtime/editor feature. Scripts and shaders are
 machine-readable authored contracts; they are not executed in the browser
 runtime. Layout, event and accessibility records are addressable and rendered
-where applicable, but do not yet constitute a full production layout/event
-engine. The dotLottie bridge is intentionally JSON-safe and dependency-free;
-it is not a binary ZIP writer. There is no `.riv` binary importer/exporter,
-production GPU/raster/video encoder, or complete Rive WASM feature surface in
-this change. Real-browser visual/usability acceptance remains a separate gate;
-the available CUA browser session could not be started because its request
-header policy rejected the local tab inventory.
+where applicable, but do not yet constitute a full CSS/layout or event
+authoring engine. The dotLottie bridge is intentionally JSON-safe and
+dependency-free; it is not a binary ZIP writer. There is no `.riv` binary
+importer/exporter, production GPU/raster/video encoder, or complete Rive WASM
+feature surface in this change. The live browser smoke gate is green, while
+exhaustive visual, accessibility and cross-browser acceptance remains a
+separate release gate.
 
 ## M10 handoff
 
 ```text
 Handoff
 - Status: AWAITING VERIFICATION
-- Implementation commit: `1c371fa5ea498bb1a3d4a4ed1c4a9dee67fc0bde`
-- Final clean main SHA / exact standard Tests run: local final SHA is the implementation commit above; repository CI will be the standard promotion gate after the push
+- Implementation commit: pending production-hardening commit
+- Final clean main SHA / exact standard Tests run: repository CI remains the promotion gate after the push
 - Feature graph / nested stable identity proof: tests/veyra-m10-features.test.mjs
 - Canonical command + UI parity proof: src/veyra/commands.js, src/veyra/serviceRegistry.js, veyra.js
 - Player/custom-element proof: src/veyra/player.js + M10 suite
 - Graph editor proof: src/veyra/graphEditor.js + graph panel in veyra.html/veyra.js
 - Lottie/dotLottie proof: src/veyra/lottie.js + M10 suite
 - Regression proof: npm run check and npm test (counts above)
-- Browser/headless acceptance boundary: fake-DOM suite is green; real-browser visual acceptance remains open
+- Browser/headless acceptance: fake-DOM suite and live Codex in-app browser smoke are green; exhaustive visual/accessibility acceptance remains open
 - Compatibility/size limitations: JSON dotLottie package only; no .riv binary or production encoder/runtime parity
 ```

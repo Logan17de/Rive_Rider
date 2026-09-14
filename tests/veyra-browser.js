@@ -1,4 +1,5 @@
-import { createStarterDocument } from '../src/veyra/model.js';
+import { createAsset, createDocument, createNode, createStarterDocument, normalizeDocument } from '../src/veyra/model.js';
+import { createText } from '../src/veyra/featureGraph.js';
 import { evaluateDocument } from '../src/veyra/evaluation.js';
 import { VeyraRenderer } from '../src/veyra/renderer.js';
 
@@ -38,8 +39,34 @@ try {
   assert(document.getElementById('surface').getAttribute('viewBox') === '260 170 480 320', 'Canvas pan viewBox mismatch.');
   renderer.resetView();
   assert(document.getElementById('surface').getAttribute('viewBox') === '0 0 960 640', 'Canvas fit viewBox mismatch.');
+
+  // Media/text smoke: these records must be visible in the live editor SVG,
+  // not only in string exports. This catches regressions where an importer
+  // succeeds but the canvas silently drops the asset or rich-text overlay.
+  const imageAsset = createAsset('image', {
+    id: 'browser_asset', mimeType: 'image/png',
+    source: { kind: 'embedded', data: 'aGVsbG8=' },
+    metadata: { width: 24, height: 24 },
+  });
+  const imageNode = createNode('image', {
+    id: 'browser_image', asset: { kind: 'asset', id: imageAsset.id },
+    transform: { x: 40, y: 40 }, geometry: { width: 24, height: 24, fit: 'contain' },
+  });
+  const textNode = createNode('group', { id: 'browser_text_group', transform: { x: 80, y: 40 } });
+  const mediaDocument = normalizeDocument({
+    ...createDocument({ id: 'browser_media_document', assets: [imageAsset], nodes: [imageNode, textNode] }),
+    texts: [createText({ id: 'browser_text', node: textNode.id, content: 'Live text', runs: [{ id: 'browser_run', text: 'Live text', fontSize: 14, fill: '#ffffff' }] })],
+  });
+  const mediaSurface = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  mediaSurface.setAttribute('id', 'media-surface');
+  document.body.appendChild(mediaSurface);
+  const mediaRenderer = new VeyraRenderer(mediaSurface);
+  mediaRenderer.render(evaluateDocument(mediaDocument));
+  const renderedImage = mediaSurface.querySelector('image');
+  assert(renderedImage?.getAttribute('href') === 'data:image/png;base64,aGVsbG8=', 'Embedded image asset missing from live SVG.');
+  assert(mediaSurface.querySelector('text')?.getAttribute('aria-label') === 'Live text', 'Rich text missing from live SVG.');
   document.body.dataset.status = 'passed';
-  result.textContent = 'PASS\nVeyra scene, selection, Bezier, rig overlay, skinning, zoom, and pan rendering passed.';
+  result.textContent = 'PASS\nVeyra scene, selection, Bezier, rig overlay, skinning, zoom, pan, image, and rich-text rendering passed.';
 } catch (error) {
   console.error(error);
   document.body.dataset.status = 'failed';

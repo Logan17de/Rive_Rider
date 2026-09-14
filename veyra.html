@@ -256,6 +256,9 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./veyra.js"></script>
+  <!-- Bump the lightweight app revision when the static bundle changes. The
+       server also sends no-cache for source assets, while this token protects
+       embedded browser shells that retain module graphs across reloads. -->
+  <script type="module" src="./veyra.js?v=20260915-production4"></script>
 </body>
 </html>

@@ -189,6 +189,8 @@ export function createLayout(overrides = {}) {
   const align = string(overrides.align, 'layout.align', 'start');
   const justify = string(overrides.justify, 'layout.justify', 'start');
   if (!VEYRA_LAYOUT_ALIGN.includes(align) || !VEYRA_LAYOUT_ALIGN.includes(justify)) throw new TypeError('layout align/justify value is unsupported.');
+  const direction = string(overrides.direction, 'layout.direction', 'row');
+  if (!['row', 'column'].includes(direction)) throw new TypeError('layout.direction must be row or column.');
   const target = overrides.target == null && overrides.node == null && overrides.nodeId == null
     ? null : typed(overrides.target ?? overrides.node ?? overrides.nodeId, 'node', 'layout.target');
   return {
@@ -201,6 +203,7 @@ export function createLayout(overrides = {}) {
     height: json(overrides.height, 'layout.height', 'auto'),
     gap: bounded(overrides.gap, 'layout.gap', 0, 100000, 0),
     padding: json(overrides.padding, 'layout.padding', { top: 0, right: 0, bottom: 0, left: 0 }),
+    direction,
     align,
     justify,
     columns: Number.isFinite(Number(overrides.columns)) ? Math.max(1, Math.trunc(Number(overrides.columns))) : 1,
