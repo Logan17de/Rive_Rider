@@ -88,11 +88,20 @@ function fixture({easing='linear'}={}){
 
 {
   const {doc}=fixture();
-  const transition=doc.stateMachines[0].layers[0].transitions[0];
+  const machine=doc.stateMachines[0];
+  const transition=machine.layers[0].transitions[0];
   assert.equal(transition.enabled,true);
   assert.equal(transition.easing,'linear');
-  assert.throws(()=>normalizeDocument({...doc,stateMachines:[{...doc.stateMachines[0],layers:[{...doc.stateMachines[0].layers[0],transitions:[{...transition,easing:'bogus'}]}]}]}),/easing/i);
-  assert.throws(()=>normalizeDocument({...doc,stateMachines:[{...doc.stateMachines[0],layers:[{...doc.stateMachines[0].layers[0],transitions:[{...transition,easing:'cubic-bezier',easingParams:[0,1,2]}]}]}]}),/easingParams/i);
+  const withTransition=(next)=>({
+    ...doc,
+    stateMachines:[{
+      ...machine,
+      transitions:[next,...machine.transitions.slice(1)],
+      layers:[{...machine.layers[0],transitions:[next,...machine.layers[0].transitions.slice(1)]}],
+    }],
+  });
+  assert.throws(()=>normalizeDocument(withTransition({...transition,easing:'bogus'})),/easing/i);
+  assert.throws(()=>normalizeDocument(withTransition({...transition,easing:'cubic-bezier',easingParams:[0,1,2]})),/easingParams/i);
 }
 
 console.log('Veyra M9 transition compositor tests passed');
