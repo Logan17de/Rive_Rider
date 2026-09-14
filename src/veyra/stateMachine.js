@@ -52,7 +52,7 @@ function machineSignature(machine) {
       layer.id,
       layer.initial ? referenceId(layer.initial, 'machineState') : null,
       (layer.states || []).map(state => [state.id, state.type]),
-      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, referenceId(condition.input, 'machineInput'), condition.op, condition.value])]),
+      (layer.transitions || []).map(transition => [transition.id, referenceId(transition.from, 'machineState'), referenceId(transition.to, 'machineState'), transition.enabled !== false, transition.duration, transition.after, transition.exitTime || null, Boolean(transition.pauseSource), Boolean(transition.allowExitDuringTransition), transition.easing || 'linear', transition.easingParams || null, (transition.conditions || []).map(condition => [condition.id, referenceId(condition.input, 'machineInput'), condition.op, condition.value])]),
     ]),
   ]);
 }
@@ -169,7 +169,7 @@ function transitionProgress(transition, stateTime) {
 
 function transitionView(runtime) {
   if (!runtime?.transition) return null;
-  const { transitionId, fromId, toId, duration, easing, easingParams, exitTime, pauseSource } = runtime.transition;
+  const { transitionId, fromId, toId, duration, easing, easingParams, exitTime, pauseSource, allowExitDuringTransition } = runtime.transition;
   const progress = transitionProgress(runtime.transition, runtime.stateTime);
   return {
     id: transitionId,
@@ -178,6 +178,9 @@ function transitionView(runtime) {
     duration,
     exitTime: cloneValue(exitTime || null),
     pauseSource: Boolean(pauseSource),
+    allowExitDuringTransition: Boolean(allowExitDuringTransition),
+    sourceKind: Array.isArray(runtime.transition.sourceSnapshot) ? 'snapshot' : 'state',
+    interruptedFromTransitionId: runtime.transition.interruptedFromTransitionId || null,
     easing: easing || 'linear',
     ...(easingParams ? { easingParams: cloneValue(easingParams) } : {}),
     rawProgress: progress.raw,
@@ -289,12 +292,79 @@ export class MachineRuntime {
     return machine;
   }
 
-  #transitionCandidates(layer, runtime) {
+  #transitionCandidates(layer, stateId) {
     const anyIds = new Set((layer.states || []).filter(state => state.type === 'any').map(state => state.id));
     return (layer.transitions || []).filter(transition => {
       const fromId = referenceId(transition.from, 'machineState');
-      return fromId === runtime.stateId || anyIds.has(fromId);
+      return fromId === stateId || anyIds.has(fromId);
     });
+  }
+
+  #eligibleTransitionForState(layer, stateId, stateTime, inputsById) {
+    const sourceState = stateById(layer, stateId);
+    for (const transition of this.#transitionCandidates(layer, stateId)) {
+      this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
+      if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, stateTime)) continue;
+      if (!transitionSatisfied(transition, stateTime, inputsById)) continue;
+      return transition;
+    }
+    return null;
+  }
+
+  #beginTransition(layer, runtime, transition, sourceStateId, sourceStateTime, inputsById, events, options = {}) {
+    const toId = referenceId(transition.to, 'machineState');
+    const target = stateById(layer, toId);
+    if (transition.duration > 0 && target?.type !== 'entry' && target?.type !== 'any') {
+      runtime.stateId = sourceStateId;
+      runtime.stateTime = sourceStateTime;
+      runtime.transition = {
+        transitionId: transition.id,
+        fromId: sourceStateId,
+        toId,
+        duration: transition.duration,
+        startedAt: sourceStateTime,
+        sourceTimeAtStart: sourceStateTime,
+        exitTime: cloneValue(transition.exitTime || null),
+        pauseSource: Boolean(transition.pauseSource),
+        allowExitDuringTransition: Boolean(transition.allowExitDuringTransition),
+        easing: transition.easing || 'linear',
+        ...(transition.easingParams ? { easingParams: cloneValue(transition.easingParams) } : {}),
+        ...(Array.isArray(options.sourceSnapshot) ? { sourceSnapshot: cloneValue(options.sourceSnapshot) } : {}),
+        ...(options.interruptedFromTransitionId ? { interruptedFromTransitionId: options.interruptedFromTransitionId } : {}),
+      };
+      events.push({ type: 'transition-start', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
+      return;
+    }
+    events.push({ type: 'transition-start', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
+    runtime.stateId = target?.type === 'exit' ? null : toId;
+    runtime.stateTime = 0;
+    runtime.transition = null;
+    events.push({ type: 'transition-end', transitionId: transition.id, fromId: sourceStateId, toId, layerId: layer.id });
+    this.#resolveImmediatePseudo(layer, runtime, inputsById, events);
+  }
+
+  #interruptTransition(layer, runtime, inputsById, events) {
+    const active = runtime.transition;
+    if (!active?.allowExitDuringTransition) return false;
+    const sourceStateId = active.toId;
+    const sourceStateTime = runtime.stateTime - active.startedAt;
+    const next = this.#eligibleTransitionForState(layer, sourceStateId, sourceStateTime, inputsById);
+    if (!next) return false;
+    const sourceSnapshot = this.#stateTimelineContributions(layer, runtime, inputsById);
+    events.push({
+      type: 'transition-end',
+      transitionId: active.transitionId,
+      fromId: active.fromId,
+      toId: active.toId,
+      layerId: layer.id,
+      interrupted: true,
+      interruptedBy: next.id,
+    });
+    this.#beginTransition(layer, runtime, next, sourceStateId, sourceStateTime, inputsById, events, {
+      sourceSnapshot,
+      interruptedFromTransitionId: active.transitionId,
+    });
+    return true;
   }
 
   #resolveImmediatePseudo(layer, runtime, inputsById, events) {
@@ -333,31 +403,16 @@ export class MachineRuntime {
     if (!runtime.stateId && !runtime.transition) return;
     if (runtime.transition) {
       runtime.stateTime += delta;
-      if (runtime.stateTime - runtime.transition.startedAt >= runtime.transition.duration - 1e-9) this.#completeTransition(layer, runtime, events);
+      if (runtime.stateTime - runtime.transition.startedAt >= runtime.transition.duration - 1e-9) {
+        this.#completeTransition(layer, runtime, events);
+        return;
+      }
+      this.#interruptTransition(layer, runtime, inputsById, events);
       return;
     }
     runtime.stateTime += delta;
-    const candidates = this.#transitionCandidates(layer, runtime);
-    for (const transition of candidates) {
-      this.#stats.transitionConditionEvaluations += (transition.conditions || []).length;
-      const sourceState = stateById(layer, runtime.stateId);
-      if (!transitionExitTimeSatisfied(this.#document, transition, sourceState, runtime.stateTime)) continue;
-      if (!transitionSatisfied(transition, runtime.stateTime, inputsById)) continue;
-      const fromId = runtime.stateId;
-      const toId = referenceId(transition.to, 'machineState');
-      const target = stateById(layer, toId);
-      if (transition.duration > 0 && target?.type !== 'entry' && target?.type !== 'any') {
-        runtime.transition = { transitionId: transition.id, fromId, toId, duration: transition.duration, startedAt: runtime.stateTime, sourceTimeAtStart: runtime.stateTime, exitTime: cloneValue(transition.exitTime || null), pauseSource: Boolean(transition.pauseSource), easing: transition.easing || 'linear', ...(transition.easingParams ? { easingParams: cloneValue(transition.easingParams) } : {}) };
-        events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
-      } else {
-        events.push({ type: 'transition-start', transitionId: transition.id, fromId, toId, layerId: layer.id });
-        runtime.stateId = target?.type === 'exit' ? null : toId;
-        runtime.stateTime = 0;
-        events.push({ type: 'transition-end', transitionId: transition.id, fromId, toId, layerId: layer.id });
-        this.#resolveImmediatePseudo(layer, runtime, inputsById, events);
-      }
-      break;
-    }
+    const transition = this.#eligibleTransitionForState(layer, runtime.stateId, runtime.stateTime, inputsById);
+    if (transition) this.#beginTransition(layer, runtime, transition, runtime.stateId, runtime.stateTime, inputsById, events);
   }
 
   step(deltaSeconds) {
@@ -459,8 +514,15 @@ export class MachineRuntime {
       const elapsed = runtime.stateTime - startedAt;
       const progress = transitionProgress(runtime.transition, runtime.stateTime).eased;
       const outgoingTime = runtime.transition.pauseSource ? runtime.transition.sourceTimeAtStart : runtime.stateTime;
-      const outgoing = this.#steadyStateContributions(stateById(layer, fromId), outgoingTime, inputsById)
-        .map(item => ({ ...item, effectiveWeight: Number(item.effectiveWeight ?? item.weight ?? 1) * (1-progress), transitionRole: 'outgoing' }));
+      const outgoingBase = Array.isArray(runtime.transition.sourceSnapshot)
+        ? cloneValue(runtime.transition.sourceSnapshot)
+        : this.#steadyStateContributions(stateById(layer, fromId), outgoingTime, inputsById);
+      const outgoing = outgoingBase
+        .map(item => ({
+          ...item,
+          effectiveWeight: Number(item.effectiveWeight ?? item.weight ?? 1) * (1-progress),
+          transitionRole: Array.isArray(runtime.transition.sourceSnapshot) ? 'interrupted-snapshot' : 'outgoing',
+        }));
       const incoming = this.#steadyStateContributions(stateById(layer, toId), elapsed, inputsById)
         .map(item => ({ ...item, effectiveWeight: Number(item.effectiveWeight ?? item.weight ?? 1) * progress, transitionRole: 'incoming' }));
       return this.#composeWeightedContributions([...outgoing, ...incoming]);
