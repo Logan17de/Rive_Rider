@@ -16,8 +16,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply blend state patch
-        run: python3 scripts/apply-m9-blend-states.py
+      - name: Apply blend state patches
+        run: |
+          python3 scripts/apply-m9-blend-reference.py
+          python3 scripts/apply-m9-blend-states.py
       - name: Syntax checks
         run: npm run check
       - name: Full repository suites with retained failure evidence
@@ -37,7 +39,7 @@ jobs:
             exit "$status"
           fi
       - name: Remove worker-only transport
-        run: rm -f scripts/apply-m9-blend-states.py .github/workflows/m9-blend-states-worker.yml verification/m9-blend-states-failure.log
+        run: rm -f scripts/apply-m9-blend-reference.py scripts/apply-m9-blend-states.py .github/workflows/m9-blend-states-worker.yml verification/m9-blend-states-failure.log
       - name: Diff hygiene
         run: git diff --check
       - name: Commit clean blend slice
