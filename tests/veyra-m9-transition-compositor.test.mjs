@@ -72,14 +72,15 @@ function fixture({easing='linear'}={}){
 {
   const {runtime,opacity}=fixture();
   runtime.setInput('go',true);
-  runtime.step(1.01);
+  runtime.step(.01);
+  runtime.step(1);
   assert.equal(runtime.stateId,'blend_state');
   runtime.setInput('go',false);
   runtime.step(.01);
   assert.equal(runtime.transition?.toId,'direct_state');
   runtime.step(.49);
   const out=runtime.evaluate();
-  assert.equal(Number(out.overrides[opacity].toFixed(3)),.575,'blend -> directBlend transition composes both multi-child states deterministically');
+  assert.equal(Number(out.overrides[opacity].toFixed(4)),.5735,'blend -> directBlend transition composes both multi-child states deterministically');
   const ids=out.layers[0].evaluatedTimelines.map(item=>item.timelineId);
   assert.deepEqual(ids,['low','high','mid','high']);
   assert.equal(Number(out.layers[0].evaluatedTimelines.reduce((sum,item)=>sum+item.effectiveWeight,0).toFixed(6)),1);
