@@ -38,6 +38,8 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           p=Path('src/veyra/stateMachine.js')
           text=p.read_text()
           old="""      transitionConditionEvaluations: 0,
@@ -51,44 +53,32 @@ jobs:
           """
           if text.count(old)!=1: raise SystemExit(f'reset stats target count {text.count(old)}')
           text=text.replace(old,new,1)
-          old="""      if (source.kind === 'machineInput') {
-                if (inputsById.get(source.id) !== true) continue;
-                inputsById.set(source.id, false);
-                this.#overrideValues.set(source.id, false);
-                this.#stats.triggerPulsesConsumed += 1;
-              } else if (this.#dataRuntime.consumeEndpointTrigger(source.endpoint, { scopePath: this.#runtimeScopePath })) {
-          """
-          new="""      if (source.kind === 'machineInput') {
-                // Legacy machine triggers intentionally remain one-step broadcast pulses.
-                // Exact consume-on-selected-transition semantics apply to M8 event queues.
-                continue;
-              } else if (this.#dataRuntime.consumeEndpointTrigger(source.endpoint, { scopePath: this.#runtimeScopePath })) {
-          """
-          if text.count(old)!=1: raise SystemExit('legacy trigger consumption block missing')
-          text=text.replace(old,new,1)
-          old="""    if (delta > 0) {
-                for (const layer of orderedLayers(machine)) this.#stepLayer(layer, this.#layers.get(layer.id), delta, inputsById, events);
-              }
-              return events;
-            }
 
-            setInput(nameOrId, value) {
-          """
-          new="""    if (delta > 0) {
-                for (const layer of orderedLayers(machine)) this.#stepLayer(layer, this.#layers.get(layer.id), delta, inputsById, events);
-              }
-              this.#clearTriggers();
-              return events;
-            }
+          pattern=re.compile(r"      if \(source\.kind === 'machineInput'\) \{\n        if \(inputsById\.get\(source\.id\) !== true\) continue;\n        inputsById\.set\(source\.id, false\);\n        this\.#overrideValues\.set\(source\.id, false\);\n        this\.#stats\.triggerPulsesConsumed \+= 1;\n      \} else if \(this\.#dataRuntime\.consumeEndpointTrigger")
+          replacement="""      if (source.kind === 'machineInput') {
+        // Legacy machine triggers intentionally remain one-step broadcast pulses.
+        // Exact consume-on-selected-transition semantics apply to M8 event queues.
+        continue;
+      } else if (this.#dataRuntime.consumeEndpointTrigger"""
+          text,count=pattern.subn(replacement,text,count=1)
+          if count!=1: raise SystemExit('legacy trigger consumption block missing')
 
-            #clearTriggers() {
-              for (const input of this.machine?.inputs || []) if (input.type === 'trigger' && (this.#overrideValues.get(input.id) ?? input.value)) this.#overrideValues.set(input.id, false);
-            }
+          pattern=re.compile(r"    if \(delta > 0\) \{\n      for \(const layer of orderedLayers\(machine\)\) this\.#stepLayer\(layer, this\.#layers\.get\(layer\.id\), delta, inputsById, events\);\n    \}\n    return events;\n  \}\n\n  setInput\(nameOrId, value\) \{")
+          replacement="""    if (delta > 0) {
+      for (const layer of orderedLayers(machine)) this.#stepLayer(layer, this.#layers.get(layer.id), delta, inputsById, events);
+    }
+    this.#clearTriggers();
+    return events;
+  }
 
-            setInput(nameOrId, value) {
-          """
-          if text.count(old)!=1: raise SystemExit('step return block missing')
-          p.write_text(text.replace(old,new,1))
+  #clearTriggers() {
+    for (const input of this.machine?.inputs || []) if (input.type === 'trigger' && (this.#overrideValues.get(input.id) ?? input.value)) this.#overrideValues.set(input.id, false);
+  }
+
+  setInput(nameOrId, value) {"""
+          text,count=pattern.subn(replacement,text,count=1)
+          if count!=1: raise SystemExit('step return block missing')
+          p.write_text(text)
 
           p=Path('tests/veyra-m9-data-condition-sources.test.mjs')
           text=p.read_text()
@@ -100,13 +90,7 @@ jobs:
 
           p=Path('tests/veyra-m9-trigger-consumption.test.mjs')
           text=p.read_text().replace("background: '#fff'", "background: '#ffffff'")
-          old="""// Legacy machine triggers now follow the same exact policy: unmatched pulses persist,
-          // and a selected transition consumes them rather than step() globally clearing them.
-          """
-          new="""// Legacy machine triggers preserve the verified compatibility policy: they are
-          // one-step broadcast pulses and clear after the step even if no transition wins.
-          """
-          text=text.replace(old,new)
+          text=text.replace("// Legacy machine triggers now follow the same exact policy: unmatched pulses persist,\n// and a selected transition consumes them rather than step() globally clearing them.", "// Legacy machine triggers preserve the verified compatibility policy: they are\n// one-step broadcast pulses and clear after the step even if no transition wins.")
           old="""  assert.equal(runtime.inputs.find(input => input.id === 'go_input').value, true, 'failed legacy candidate must conserve pulse');
             runtime.setInput('ready_input', true);
             runtime.step(.01);
@@ -120,10 +104,8 @@ jobs:
           text=text.replace(old,new,1)
           text=text.replace('// One legacy pulse cannot be reused by a later layer in the same deterministic step.', '// A legacy one-step pulse remains a broadcast across simultaneously evaluated layers.')
           old="assert.equal(layers.layer_b, 'b0');"
-          new="assert.equal(layers.layer_b, 'b1');"
           if text.count(old)!=2: raise SystemExit(f'expected two layer_b b0 assertions, found {text.count(old)}')
-          # Only the first occurrence belongs to legacy; data-trigger single-pulse test must stay b0.
-          text=text.replace(old,new,1)
+          text=text.replace(old,"assert.equal(layers.layer_b, 'b1');",1)
           p.write_text(text)
           PY
       - run: npm run check
