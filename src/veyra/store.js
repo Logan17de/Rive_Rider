@@ -1332,8 +1332,8 @@ export class VeyraStore {
   updateMachineLayer(machineId, layerId, changes = {}, commandDescriptor = {}) {
     const machine=machineById(this.document,machineId), layer=machine?.layers?.find((candidate)=>candidate.id===layerId); if(!layer) return false;
     const descriptor=typeof commandDescriptor==='string'?{label:commandDescriptor}:{label:`Update machine layer ${layer.name||layer.id}`,source:'user',...commandDescriptor};
-    this.execute(descriptor,(document)=>{const target=machineById(document,machineId).layers.find((candidate)=>candidate.id===layerId); if(changes.name!==undefined) target.name=String(changes.name); if(changes.enabled!==undefined) target.enabled=Boolean(changes.enabled); if(changes.graph!==undefined) target.graph=cloneValue(changes.graph);});
-    return layerId;
+    this.execute(descriptor,(document)=>{const target=machineById(document,machineId).layers.find((candidate)=>candidate.id===layerId); if(changes.name!==undefined) target.name=String(changes.name); if(changes.enabled!==undefined) target.enabled=Boolean(changes.enabled); if(changes.weight!==undefined) target.weight=Number(changes.weight); if(changes.graph!==undefined) target.graph=cloneValue(changes.graph);});
+    return true;
   }
 
   reorderMachineLayer(machineId, layerId, index, commandDescriptor = {}) {
@@ -1342,7 +1342,7 @@ export class VeyraStore {
     const at=Math.max(0,Math.min(machine.layers.length-1,Math.trunc(Number(index))));
     const descriptor=typeof commandDescriptor==='string'?{label:commandDescriptor}:{label:`Reorder machine layer ${layerId}`,source:'user',...commandDescriptor};
     this.execute(descriptor,(document)=>{const target=machineById(document,machineId);const current=target.layers.findIndex((candidate)=>candidate.id===layerId);const [item]=target.layers.splice(current,1);target.layers.splice(at,0,item);target.layers.forEach((entry,i)=>{entry.order=i;});});
-    return layerId;
+    return true;
   }
 
   removeMachineLayer(machineId, layerId, commandDescriptor = {}) {

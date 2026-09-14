@@ -1490,6 +1490,7 @@ export class VeyraDataRuntime {
         if (!bucket.dirty.has(binding.id) && entry) { cacheHits += 1; this.#stats.cacheHits += 1; }
         else {
           const dependencies = new Set(), pulses = new Set(); let output, error = null;
+          let phase = 'source';
           try {
             output = this.#endpointValue(document, binding.source, scope, virtual, pulses, dependencies);
             output = this.#validateRuntimeEndpoint(document, resolved.source, output, `binding ${binding.id} source`);
@@ -1499,11 +1500,12 @@ export class VeyraDataRuntime {
                 dependencies.add(runtimeListKey(scope, listId)); return this.#list(document, listId, scope);
               });
             }
+            phase = 'target';
             output = this.#validateRuntimeEndpoint(document, resolved.target, output, `binding ${binding.id} target`);
           } catch (cause) {
             error = { code: 'binding-runtime-value', binding: createReference('binding', binding.id), source: clone(binding.source), target: clone(binding.target),
               effectiveSource: clone(resolved.source.endpoint), effectiveTarget: clone(resolved.target.endpoint),
-              sourceType: dataTypeDescriptor(resolved.source.property), targetType: dataTypeDescriptor(resolved.target.property), message: String(cause.message), policy: 'suppress-invalid-output-and-dependent-consumers' };
+              sourceType: dataTypeDescriptor(resolved.source.property), targetType: dataTypeDescriptor(resolved.target.property), phase, message: String(cause.message), policy: 'suppress-invalid-output-and-dependent-consumers' };
           }
           entry = { value: clone(output), error, dependencies: [...dependencies], pulses: [...pulses], signature: compiled.signatures.get(binding.id), derived,
             sourceToken: this.#sourceToken(document, binding, scope, derived, referenceValues) };
@@ -1609,7 +1611,7 @@ export class VeyraDataRuntime {
       const resolved = bucket?.resolutions.get(binding.id)?.source;
       if (!resolved || resolved.error || !resolved.endpoint) {
         const detail = resolved?.error?.message ? `: ${resolved.error.message}` : '';
-        throw new TypeError(`[binding-two-way-source-unresolved] ${binding.id} has no current effective reverse-write terminal${detail}`);
+        throw new TypeError(`[binding-two-way-resolution] [binding-two-way-source-unresolved] ${binding.id} has no current effective reverse-write terminal${detail}`);
       }
       const terminal = normalizeBindingEndpoint(resolved.endpoint);
       const effectiveCapabilities = bindingEndpointCapabilities(document, terminal);

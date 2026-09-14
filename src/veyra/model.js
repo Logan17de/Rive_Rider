@@ -584,19 +584,26 @@ export function createMachineCondition(overrides = {}) {
 export function createMachineLayer(overrides = {}) {
   const states = (overrides.states || []).map((state) => createMachineState(state));
   const transitions = (overrides.transitions || []).map((transition) => createMachineTransition(transition));
-  return {
+  const layer = {
     id: overrides.id || createId('machineLayer'),
     name: String(overrides.name || 'Layer'),
-    displayNameAdvisory: true,
     enabled: overrides.enabled !== false,
-    order: Number.isFinite(Number(overrides.order)) ? Math.trunc(Number(overrides.order)) : 0,
+    weight: bounded(overrides.weight ?? 1, 'machineLayer.weight', 0, 1),
     initial: overrides.initial == null ? null : normalizeReference(overrides.initial, 'machineState', 'machineLayer.initial'),
     states,
     transitions,
-    graph: overrides.graph && typeof overrides.graph === 'object' && !Array.isArray(overrides.graph)
-      ? { x: finite(overrides.graph.x ?? 0, 'machineLayer.graph.x'), y: finite(overrides.graph.y ?? 0, 'machineLayer.graph.y') }
-      : { x: 0, y: 0 },
   };
+  // Optional editor metadata is materialized by normalization. Keeping the
+  // lightweight constructor shape stable avoids surprising callers that use
+  // it as an authored record builder while still preserving explicit values.
+  if (Object.prototype.hasOwnProperty.call(overrides, 'displayNameAdvisory')) layer.displayNameAdvisory = Boolean(overrides.displayNameAdvisory);
+  if (Object.prototype.hasOwnProperty.call(overrides, 'order')) layer.order = Number.isFinite(Number(overrides.order)) ? Math.trunc(Number(overrides.order)) : 0;
+  if (Object.prototype.hasOwnProperty.call(overrides, 'graph')) {
+    layer.graph = overrides.graph && typeof overrides.graph === 'object' && !Array.isArray(overrides.graph)
+      ? { x: finite(overrides.graph.x ?? 0, 'machineLayer.graph.x'), y: finite(overrides.graph.y ?? 0, 'machineLayer.graph.y') }
+      : { x: 0, y: 0 };
+  }
+  return layer;
 }
 
 export function createMachineBlendChild(overrides = {}) {
@@ -1662,7 +1669,7 @@ function normalizeMachineLayer(layer, index, machinePath, timelineIds, inputsByI
   if(initial && !stateIds.has(referenceId(initial,'machineState'))) throw new TypeError(`${path}.initial references missing machine state ${referenceId(initial,'machineState')}.`);
   const graph=layer?.graph && typeof layer.graph==='object' && !Array.isArray(layer.graph)
     ? {x:finite(layer.graph.x ?? 0,`${path}.graph.x`),y:finite(layer.graph.y ?? 0,`${path}.graph.y`)} : {x:0,y:0};
-  return {id,name:String(layer?.name || ''),displayNameAdvisory:true,enabled:layer?.enabled!==false,order:Number.isFinite(Number(layer?.order))?Math.trunc(Number(layer.order)):index,initial,states,transitions,graph};
+  return {id,name:String(layer?.name || ''),displayNameAdvisory:true,enabled:layer?.enabled!==false,weight:bounded(layer?.weight ?? 1,`${path}.weight`,0,1),order:Number.isFinite(Number(layer?.order))?Math.trunc(Number(layer.order)):index,initial,states,transitions,graph};
 }
 
 function normalizeStateMachine(machine, index, timelineIds) {
@@ -1687,13 +1694,18 @@ function normalizeStateMachine(machine, index, timelineIds) {
   const compatibilityLayerId = referenceId(compatibilityRef, 'machineLayer');
   const compatibilityIndex = rawLayers.findIndex((layer)=>String(layer.id||'')===compatibilityLayerId);
   if(compatibilityIndex<0) throw new TypeError(`${machinePath}.compatibilityLayer references missing machine layer ${compatibilityLayerId}.`);
-  // Existing flat-store commands target compatibility aliases. Fold those edits
-  // back into the stable compatibility layer, never whichever layer is first.
-  rawLayers[compatibilityIndex]={...rawLayers[compatibilityIndex],
-    ...(Array.isArray(machine.states)?{states:machine.states}:{}),
-    ...(Array.isArray(machine.transitions)?{transitions:machine.transitions}:{}),
-    ...(Object.prototype.hasOwnProperty.call(machine,'initial')?{initial:machine.initial}:{}),
-  };
+  // Existing flat-store commands target compatibility aliases. Fold those
+  // edits back only when the source is genuinely a legacy flat machine. For
+  // an explicitly layered document the layer records are authoritative; the
+  // root fields are compatibility views and may otherwise be stale after a
+  // layer-scoped edit (for example deleting the active state).
+  if (!(Array.isArray(machine?.layers) && machine.layers.length)) {
+    rawLayers[compatibilityIndex]={...rawLayers[compatibilityIndex],
+      ...(Array.isArray(machine.states)?{states:machine.states}:{}),
+      ...(Array.isArray(machine.transitions)?{transitions:machine.transitions}:{}),
+      ...(Object.prototype.hasOwnProperty.call(machine,'initial')?{initial:machine.initial}:{}),
+    };
+  }
   const layerIds=new Set(), globalStateIds=new Set(), globalTransitionIds=new Set();
   const layers=rawLayers.map((layer,i)=>normalizeMachineLayer(layer,i,machinePath,timelineIds,inputsById,globalStateIds,globalTransitionIds));
   for(const layer of layers){ if(layerIds.has(layer.id)) throw new TypeError(`Duplicate machine layer id ${layer.id} in ${machinePath}.`); layerIds.add(layer.id); }

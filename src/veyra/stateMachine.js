@@ -1,6 +1,7 @@
 import { cloneValue, machineById, timelineById } from './model.js';
 import { createReference, referenceId } from './references.js';
-import { evaluateTimelines, applyEasing } from './animation.js';
+import { evaluateTimelines, applyEasing, interpolateValue } from './animation.js';
+import { readProperty } from './properties.js';
 import { createVeyraDataRuntime, createDataRuntimeScope } from './dataGraph.js';
 
 export const VEYRA_MACHINE_EVENT_TYPES = Object.freeze([
@@ -69,6 +70,21 @@ function compatibilityLayer(machine) {
 
 function orderedLayers(machine) {
   return [...(machine?.layers || [])].sort((a, b) => Number(a.order || 0) - Number(b.order || 0) || a.id.localeCompare(b.id));
+}
+
+function layerWeight(layer) {
+  const value = Number(layer?.weight ?? 1);
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+}
+
+function blendLayerValue(document, current, next, weight, address) {
+  if (weight >= 1) return cloneValue(next);
+  if (weight <= 0) return current;
+  let base = current;
+  if (base === undefined) {
+    try { base = readProperty(document, address); } catch { base = next; }
+  }
+  return interpolateValue(base, next, weight);
 }
 
 function machineSignature(machine) {
@@ -190,6 +206,7 @@ function runtimeLayerSnapshot(layer, runtime) {
     layer: createReference('machineLayer', layer.id),
     layerName: layer.name,
     enabled: layer.enabled !== false,
+    weight: layerWeight(layer),
     order: layer.order,
     stateId: runtime.stateId,
     stateName: state?.name || null,
@@ -801,6 +818,7 @@ export class MachineRuntime {
       this.#stats.timelineEvaluations += contributions.length;
       const layerOverrides = evaluateTimelines(this.#document, contributions);
       const layerEvidence = contributions.map(item => ({ timeline: createReference('timeline', item.timelineId), state: createReference('machineState', item.stateId), time: item.time, weight: item.weight, effectiveWeight: item.effectiveWeight ?? item.weight, blendChild: item.blendChildId ? createReference('machineBlendChild', item.blendChildId) : null }));
+      const weight = layerWeight(layer);
       for (const [address, value] of Object.entries(layerOverrides)) {
         const previous = result.ownership[address] || [];
         for (const item of previous) item.effective = false;
@@ -812,10 +830,11 @@ export class MachineRuntime {
           state: state ? createReference('machineState', state.id) : null,
           order: layer.order,
           contributions: cloneValue(layerEvidence),
-          effective: true,
+          effective: weight > 0,
+          layerWeight: weight,
         });
         result.ownership[address] = previous;
-        result.overrides[address] = cloneValue(value);
+        result.overrides[address] = blendLayerValue(this.#document, result.overrides[address], value, weight, address);
         this.#stats.compositionApplications += 1;
       }
       result.evaluatedTimelines.push(...contributions.map(({ stateId, ...item }) => item));
